@@ -3172,6 +3172,13 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         // Absent means on: a settings file written before this flag existed
         // belongs to a user who could already see the Specs surfaces.
         enableSpecDesk: settings.enable_spec_desk !== false,
+        // Loaded, not just saved. `toSettings` writes this unconditionally,
+        // so without reading it back the state stayed at its empty default
+        // and the next unrelated settings change wrote that empty value over
+        // the person's stored choice -- worse than a reset, because the
+        // picker always showed "Let GitWyrm choose" and the real value could
+        // never be seen.
+        defaultAgentTool: settings.default_agent_tool ?? '',
         // Both default to asking: an absent flag in an older settings file must
         // mean "confirm", never "delete silently".
         openspecArchiveWithoutAsking:
@@ -3300,6 +3307,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         ? (settings.default_editor as EditorKind)
         : DEFAULT_EDITOR,
       enableSpecDesk: settings.enable_spec_desk !== false,
+      defaultAgentTool: settings.default_agent_tool ?? '',
       openspecArchiveWithoutAsking:
         settings.openspec_archive_without_asking === true,
       openspecDeleteWithoutAsking:

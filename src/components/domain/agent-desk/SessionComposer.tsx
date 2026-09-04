@@ -3,7 +3,7 @@ import { toast } from 'sonner'
 import { ArrowUp, Paperclip, Sparkles, Square } from 'lucide-react'
 import { commands, type AgentSessionHeader } from '@/lib/bindings'
 import { unwrap, keys } from '@/lib/queryKeys'
-import { explainStopOutcome, runIsActive } from '@/lib/agentDeskResult'
+import { describeOutcomeKind, explainStopOutcome, runIsActive } from '@/lib/agentDeskResult'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { describeError, log } from '@/lib/log'
 import { Textarea } from '@/components/ui/textarea'
@@ -354,7 +354,7 @@ export function SessionComposer({
           description: outcome.reason,
         })
       } else {
-        toast.error('The message could not be saved.', { description: outcome.kind })
+        toast.error('The message could not be saved.', { description: describeOutcomeKind(outcome.kind) })
       }
     } catch (e) {
       const message = describeError(e)

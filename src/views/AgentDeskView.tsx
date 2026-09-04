@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { commands, type CreateSessionRequest, type RepoInfo, type SelectDeskTarget } from '@/lib/bindings'
 import { unwrap, keys } from '@/lib/queryKeys'
 import { describeError, log } from '@/lib/log'
+import { describeOutcomeKind } from '@/lib/agentDeskResult'
 import { readWindowMode, type WindowMode } from '@/lib/windowMode'
 import { AgentDeskTitleBar } from '@/components/domain/agent-desk/AgentDeskTitleBar'
 import { AgentWorkspaceToolbar } from '@/components/domain/agent-desk/AgentWorkspaceToolbar'
@@ -520,7 +521,7 @@ export function AgentDeskView() {
         toast.success('New chat started.')
         focusComposer(outcome.session.header.sessionId)
       } else {
-        toast.error('Could not start a new chat.', { description: outcome.kind })
+        toast.error('Could not start a new chat.', { description: describeOutcomeKind(outcome.kind) })
       }
     } catch (e) {
       const message = describeError(e)

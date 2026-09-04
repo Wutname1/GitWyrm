@@ -6,7 +6,7 @@ import { commands, type AgentSession, type ExecutionRecord, type ResultRecord } 
 import { keys, unwrap } from '@/lib/queryKeys'
 import { describeError, log } from '@/lib/log'
 import { nodeUsageLine } from '@/lib/agentDeskUsage'
-import { explainStopOutcome, runIsActive } from '@/lib/agentDeskResult'
+import { describeOutcomeKind, explainStopOutcome, runIsActive } from '@/lib/agentDeskResult'
 import { cn } from '@/lib/utils'
 import { buildGraphTree, graphSummary, nodeDotTone, nodeStatusLabel, type GraphTreeNode } from '@/lib/agentGraphProjection'
 import { canViewNodeChanges, latestActivityLine, resultForNode } from '@/lib/agentDeskGraph'
@@ -208,7 +208,7 @@ function InspectorCard({
       } else if (outcome.kind === 'damaged') {
         toast.error('This chat file is damaged.', { description: outcome.reason })
       } else {
-        toast.error('Could not resolve that conflict.', { description: outcome.kind })
+        toast.error('Could not resolve that conflict.', { description: describeOutcomeKind(outcome.kind) })
       }
     } catch (e) {
       const message = describeError(e)
@@ -249,7 +249,7 @@ function InspectorCard({
       } else if (outcome.kind === 'damaged') {
         toast.error('This chat file is damaged and could not be stopped.', { description: outcome.reason })
       } else {
-        toast.error('Could not stop that agent.', { description: outcome.kind })
+        toast.error(explainStopOutcome(outcome).message)
       }
     } catch (e) {
       const message = describeError(e)
@@ -444,7 +444,7 @@ export function AgentGraphPanel({ session }: { session: AgentSession }) {
       } else if (outcome.kind === 'damaged') {
         toast.error('This chat file is damaged and could not be stopped.', { description: outcome.reason })
       } else {
-        toast.error('Could not stop the agents.', { description: outcome.kind })
+        toast.error(explainStopOutcome(outcome).message)
       }
     } catch (e) {
       const message = describeError(e)

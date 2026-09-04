@@ -642,3 +642,22 @@ export function explainStopOutcome(outcome: StopExecutionOutcome): { message: st
       return { message: `Could not save the change: ${outcome.detail}`, ok: false }
   }
 }
+
+/**
+ * A last-resort description for an outcome with no explainer of its own.
+ *
+ * Ten toast call sites passed `outcome.kind` straight through as the
+ * description, so a person read "providerReconnect" or "writeFailed" -- an
+ * identifier meant for code, in the sentence meant to tell them what to do.
+ *
+ * This is the floor, not the goal: an outcome that matters enough to act on
+ * deserves a real sentence in an `explain*` function, and where one already
+ * exists the call site should use it. What this guarantees is that no path
+ * shows the raw token. `writeFailed` becomes "write failed"; a variant
+ * carrying its own `detail` should pass that instead, since the backend wrote
+ * it for the person.
+ */
+export function describeOutcomeKind(kind: string): string {
+  const spaced = kind.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase()
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1)
+}

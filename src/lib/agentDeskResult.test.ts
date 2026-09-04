@@ -14,6 +14,7 @@ import {
   changedPathStatusLabel,
   changedPathsSummaryLine,
   describeCommitDestination,
+  describeOutcomeKind,
   explainCleanupOutcome,
   explainStopOutcome,
   failingCheckLines,
@@ -616,5 +617,27 @@ describe('explainStopOutcome', () => {
     expect(damaged.ok).toBe(false)
     expect(damaged.message).toMatch(/bad json/)
     expect(damaged.message).not.toMatch(/damaged"/)
+  })
+})
+
+describe('describeOutcomeKind', () => {
+  // Ten toast sites passed `outcome.kind` straight through, so a person read
+  // "providerReconnect" -- an identifier meant for code, in the sentence
+  // meant to tell them what to do. This is the floor: no path shows the raw
+  // token. A variant worth acting on still deserves a real sentence.
+  it('turns an identifier into something readable', () => {
+    expect(describeOutcomeKind('providerReconnect')).toBe('Provider reconnect')
+    expect(describeOutcomeKind('writeFailed')).toBe('Write failed')
+    expect(describeOutcomeKind('notFound')).toBe('Not found')
+  })
+
+  it('leaves an already-plain word alone apart from its capital', () => {
+    expect(describeOutcomeKind('damaged')).toBe('Damaged')
+  })
+
+  it('never returns the raw camelCase token', () => {
+    for (const kind of ['providerReconnect', 'sessionNotFound', 'cleanupNeeded']) {
+      expect(describeOutcomeKind(kind)).not.toBe(kind)
+    }
   })
 })

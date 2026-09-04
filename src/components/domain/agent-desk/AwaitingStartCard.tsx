@@ -5,6 +5,7 @@ import { ListTodo, TriangleAlert } from 'lucide-react'
 import { commands, type AgentSession, type ExecutionRecord } from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
 import { describeError, log } from '@/lib/log'
+import { describeOutcomeKind } from '@/lib/agentDeskResult'
 import { useOpenRepo } from '@/hooks/useRepoActions'
 import {
   startFailureCardForError,
@@ -153,7 +154,7 @@ export function AwaitingStartCard({
     try {
       const outcome = unwrap(await commands.agentSessionAcceptStaleOpenspecContext(session.header.sessionId))
       if (outcome.kind !== 'accepted') {
-        toast.error('Could not accept the source change.', { description: outcome.kind })
+        toast.error('Could not accept the source change.', { description: describeOutcomeKind(outcome.kind) })
         setBusy(null)
         return
       }
@@ -183,7 +184,7 @@ export function AwaitingStartCard({
       } else if (outcome.kind === 'damaged') {
         toast.error('This chat file is damaged.', { description: outcome.reason })
       } else {
-        toast.error('Could not switch to a single agent.', { description: outcome.kind })
+        toast.error('Could not switch to a single agent.', { description: describeOutcomeKind(outcome.kind) })
       }
     } catch (e) {
       const message = describeError(e)
