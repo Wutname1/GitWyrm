@@ -12,9 +12,9 @@ import { computeRailTicks, currentMessageForScroll, userMessagesForRail } from '
 import { groupEventStacks, type EventStackGroup } from '@/lib/agentDeskEvents'
 import { parsePlanChecklist } from '@/lib/agentDeskPlan'
 import { displayText, foldThoughtSummaries } from '@/lib/agentDeskTranscript'
-import { shouldShowResultPanel } from '@/lib/agentDeskResult'
+
 import { gateAnswerNoteFor, gateBody, gateOptions, gateRequestOf, gateSummary, type GateOption } from '@/lib/agentDeskGate'
-import { runActivityLabel, runIsActive } from '@/lib/agentDeskResult'
+import { runActivityLabel, runIsActive, runStoppedBadly, runStoppedBadlyLabel, shouldShowResultPanel } from '@/lib/agentDeskResult'
 import { adapterDisplayName } from '@/lib/agentImportDisplay'
 import { log, describeError } from '@/lib/log'
 import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
@@ -777,11 +777,20 @@ export function ConversationPane({
           )}
           {/* Startup recovery writes `failed`, while this line was gated only on
               `interrupted` -- so a chat recovered by the crash sweep showed no
-              explanation at all. Two names for one situation. */}
-          {(state === 'interrupted' || state === 'failed') && (
+              explanation at all. Two names for one situation.
+
+              The gate was then hand-written a third time here while the
+              sidebar and the graph used a wider one, and this copy dropped
+              `missingSource`: a chat whose issue or spec could not be read
+              showed a state dot in both of those panels and nothing at all in
+              the conversation, which is the one place a person is reading.
+              Both the test and the words now come from one place, because
+              "stopped when the app closed" is simply wrong for that case and
+              points at the wrong fix. */}
+          {runStoppedBadly(state) && (
             <div role="status" aria-live="polite" className="flex items-center gap-2 px-1 py-1 text-2xs text-muted-foreground">
               <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground" aria-hidden />
-              <span>This chat stopped when the app closed. Send a message to start it again.</span>
+              <span>{runStoppedBadlyLabel(state)}</span>
             </div>
           )}
         </div>

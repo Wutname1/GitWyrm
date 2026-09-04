@@ -18,6 +18,7 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { Input } from '@/components/ui/input'
+import { runStoppedBadly } from '@/lib/agentDeskResult'
 import { ProviderGlyph, providerLogo } from '@/lib/brandLogos'
 
 /** One session row's height, per tasks.md 3.1's stated 28-32px range. */
@@ -74,8 +75,7 @@ export function SessionRow({
   // timestamp, so a chat killed by a crash -- still holding changed files --
   // looked exactly like one that finished cleanly. Returning after a crash is
   // precisely when a person scans this list for what needs them.
-  const stoppedBadly =
-    header.state === 'failed' || header.state === 'interrupted' || header.state === 'missingSource'
+  const stoppedBadly = runStoppedBadly(header.state)
 
   const commitRename = () => {
     setRenaming(false)

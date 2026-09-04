@@ -6,7 +6,7 @@ import { commands, type AgentSession, type ExecutionRecord, type ResultRecord } 
 import { keys, unwrap } from '@/lib/queryKeys'
 import { describeError, log } from '@/lib/log'
 import { nodeUsageLine } from '@/lib/agentDeskUsage'
-import { describeOutcome, explainStopOutcome, runIsActive } from '@/lib/agentDeskResult'
+import { describeOutcome, explainStopOutcome, runIsActive, runStoppedBadly } from '@/lib/agentDeskResult'
 import { cn } from '@/lib/utils'
 import { buildGraphTree, graphSummary, nodeDotTone, nodeStatusLabel, type GraphTreeNode } from '@/lib/agentGraphProjection'
 import { canViewNodeChanges, helperRoleLabel, latestActivityLine, resultForNode, revisionSeed } from '@/lib/agentDeskGraph'
@@ -184,8 +184,7 @@ function InspectorCard({
     .filter((name, i, all) => all.indexOf(name) === i)
   // Ended without finishing its work, so its `outputSummary` is a reason
   // rather than a result.
-  const stoppedBadly =
-    execution.state === 'failed' || execution.state === 'missingSource' || execution.state === 'interrupted'
+  const stoppedBadly = runStoppedBadly(execution.state)
   // What this agent spent. Absent when the provider reported nothing, which
   // is a different fact from "it was free" -- so no line at all rather than a
   // row of zeros.

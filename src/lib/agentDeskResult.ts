@@ -814,3 +814,36 @@ export function explainResultListUnavailable(
       return `GitWyrm could not read this chat right now, so its results are unknown: ${outcome.detail}`
   }
 }
+
+/**
+ * Whether a run ended in a way the person needs told about.
+ *
+ * This existed three times, hand-written, in three components -- and the copy
+ * in the transcript (the one place someone is actually reading) omitted
+ * `missingSource`, so a chat whose source could not be loaded showed a state
+ * dot in the sidebar and the graph and no explanation at all in the
+ * conversation itself.
+ */
+export function runStoppedBadly(state: SessionState | null | undefined): boolean {
+  return state === 'failed' || state === 'interrupted' || state === 'missingSource'
+}
+
+/**
+ * What to say about a run that stopped badly, or `null` when it did not.
+ *
+ * `missingSource` gets its own sentence: "stopped when the app closed" is
+ * true for an interrupted run and simply wrong for a chat whose issue, pull
+ * request or spec could not be read -- and the fix for the two is different,
+ * so one sentence for both would send people to the wrong place.
+ */
+export function runStoppedBadlyLabel(state: SessionState | null | undefined): string | null {
+  switch (state) {
+    case 'missingSource':
+      return 'GitWyrm could not open what this chat is about. It may have been moved, renamed or deleted.'
+    case 'interrupted':
+    case 'failed':
+      return 'This chat stopped when the app closed. Send a message to start it again.'
+    default:
+      return null
+  }
+}

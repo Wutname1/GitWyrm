@@ -27,6 +27,8 @@ import {
   explainStopOutcome,
   failingCheckLines,
   runActivityLabel,
+  runStoppedBadly,
+  runStoppedBadlyLabel,
   runIsActive,
   formatDiskSize,
   summarizeDiskUsage,
@@ -760,5 +762,50 @@ describe('canEscalateToFix agrees with the backend that enforces it', () => {
 
     expect(backend.length, 'parsed nothing from the Rust source').toBeGreaterThan(0)
     expect(frontend).toEqual(backend)
+  })
+})
+
+describe('runStoppedBadly', () => {
+  // This predicate was hand-written in three components and the copy in the
+  // transcript omitted `missingSource`, so a chat whose source could not be
+  // read explained itself in the sidebar and the graph but not in the
+  // conversation. These pin the whole set, not one caller's idea of it.
+  it('covers every way a run ends badly', () => {
+    expect(runStoppedBadly('failed')).toBe(true)
+    expect(runStoppedBadly('interrupted')).toBe(true)
+    expect(runStoppedBadly('missingSource')).toBe(true)
+  })
+
+  it('is false for running, waiting and cleanly-ended states', () => {
+    for (const s of ['working', 'preparing', 'needsInput', 'finished', 'stopped', 'draft', 'ready'] as const) {
+      expect(runStoppedBadly(s)).toBe(false)
+    }
+    expect(runStoppedBadly(null)).toBe(false)
+  })
+
+  it('never says a stopped run is also active', () => {
+    for (const s of ['failed', 'interrupted', 'missingSource'] as const) {
+      expect(runIsActive(s)).toBe(false)
+    }
+  })
+})
+
+describe('runStoppedBadlyLabel', () => {
+  it('does not blame the app closing for a source it could not read', () => {
+    // Different cause, different fix: sending a message restarts an
+    // interrupted chat, but will not bring back a deleted issue.
+    expect(runStoppedBadlyLabel('missingSource')).not.toBe(runStoppedBadlyLabel('interrupted'))
+    expect(runStoppedBadlyLabel('missingSource')).toMatch(/could not open/i)
+  })
+
+  it('gives words for every state the predicate accepts', () => {
+    for (const s of ['failed', 'interrupted', 'missingSource'] as const) {
+      expect(runStoppedBadlyLabel(s)).toBeTruthy()
+    }
+  })
+
+  it('says nothing for a run that did not stop badly', () => {
+    expect(runStoppedBadlyLabel('working')).toBeNull()
+    expect(runStoppedBadlyLabel(null)).toBeNull()
   })
 })
