@@ -2937,6 +2937,129 @@ pub async fn agent_session_use_solo_instead(
 }
 
 // ---------------------------------------------------------------------------
+// Remove one helper from a proposal
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum RemoveHelperOutcome {
+    /// The helper is gone from the proposal, which is otherwise unchanged.
+    /// `pruned_edges` counts `depends_on` entries removed from OTHER helpers
+    /// because they pointed at this one -- the UI says so rather than leaving
+    /// the person to notice a plan quietly reshaped.
+    Removed {
+        session: AgentSession,
+        pruned_edges: u32,
+    },
+    /// Removing this would leave no helpers at all. Not an error: it is the
+    /// same request as "use solo instead", which has its own command and its
+    /// own confirmation, so it is refused here rather than silently becoming
+    /// a different action.
+    WouldEmptyPlan,
+    NoProposal,
+    HelperNotFound,
+    NotFound,
+    Damaged { reason: String },
+    Unavailable { detail: String },
+    WriteFailed { detail: String },
+}
+
+/// Drop `node_id` from a proposal and prune every `depends_on` edge that
+/// pointed at it, returning how many edges went.
+///
+/// Separate from the command so the reshaping is testable without an
+/// `AppHandle`: the edge pruning is the part with behaviour worth pinning, and
+/// leaving a dangling edge would turn a deliberate removal into an
+/// `UnknownDependency` refusal at Start.
+fn remove_helper_from_graph(graph: &mut crate::agentdesk::graph::ProposedGraph, node_id: &str) -> u32 {
+    graph.helpers.retain(|h| h.node_id != node_id);
+    let mut pruned = 0u32;
+    for helper in graph.helpers.iter_mut() {
+        let before = helper.depends_on.len();
+        helper.depends_on.retain(|d| d.as_str() != node_id);
+        pruned += (before - helper.depends_on.len()) as u32;
+    }
+    pruned
+}
+
+/// Drop one proposed helper before Start.
+///
+/// The Start card grants the write scope `check_path_allowance` then enforces,
+/// and its only options were approve-the-whole-plan or discard it. Removing one
+/// helper needs no change to Start: `agent_session_start_graph` reads the
+/// proposal off this record and re-validates whatever is there.
+///
+/// Dangling `depends_on` edges are pruned rather than left to fail. Leaving
+/// them would be caught -- `validate_graph` returns `UnknownDependency` -- but
+/// only when the person presses Start, which turns a deliberate removal into a
+/// confusing refusal.
+///
+/// Deliberately narrow: this removes a helper and nothing else. Editing paths,
+/// roles or completion conditions goes through conversational revision, where
+/// the model re-derives the whole plan. A hand-narrowed path is caught by
+/// nothing until the agent is refused mid-run.
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_session_remove_proposed_helper(
+    app: AppHandle,
+    locks: tauri::State<'_, std::sync::Arc<crate::agentdesk::SessionLocks>>,
+    session_id: SessionId,
+    node_id: String,
+) -> Result<RemoveHelperOutcome, AppError> {
+    let root = resolve_root(&app)?;
+    let locks_arc = locks.inner().clone();
+
+    let session = match store::read_session(&root, &session_id) {
+        Ok(s) => s,
+        Err(SessionLoadError::NotFound) => return Ok(RemoveHelperOutcome::NotFound),
+        Err(SessionLoadError::Io { detail }) => {
+            return Ok(RemoveHelperOutcome::Unavailable { detail })
+        }
+        Err(reason) => {
+            return Ok(RemoveHelperOutcome::Damaged {
+                reason: reason.to_string(),
+            })
+        }
+    };
+
+    let Some(proposal) = session
+        .executions
+        .iter()
+        .find(|e| e.parent_execution_id.is_none() && e.proposed_graph.is_some())
+        .and_then(|e| e.proposed_graph.as_ref())
+    else {
+        return Ok(RemoveHelperOutcome::NoProposal);
+    };
+    if !proposal.helpers.iter().any(|h| h.node_id == node_id) {
+        return Ok(RemoveHelperOutcome::HelperNotFound);
+    }
+    if proposal.helpers.len() <= 1 {
+        return Ok(RemoveHelperOutcome::WouldEmptyPlan);
+    }
+
+    let mut pruned_edges = 0u32;
+    let outcome = update_session_at(&locks_arc, &root, &session_id, |s| {
+        for execution in s.executions.iter_mut() {
+            let Some(graph) = execution.proposed_graph.as_mut() else {
+                continue;
+            };
+            pruned_edges += remove_helper_from_graph(graph, &node_id);
+        }
+    });
+
+    Ok(match outcome {
+        UpdateOutcome::Updated { session } => RemoveHelperOutcome::Removed {
+            session,
+            pruned_edges,
+        },
+        UpdateOutcome::NotFound => RemoveHelperOutcome::NotFound,
+        UpdateOutcome::Damaged { reason } => RemoveHelperOutcome::Damaged { reason },
+        UpdateOutcome::WriteFailed { detail } => RemoveHelperOutcome::WriteFailed { detail },
+        UpdateOutcome::Unavailable { detail } => RemoveHelperOutcome::Unavailable { detail },
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Graph projection for the UI
 // ---------------------------------------------------------------------------
 
@@ -3195,6 +3318,59 @@ pub async fn agent_session_record_conflict(
 
 #[cfg(test)]
 mod tests {
+
+    /// A removed helper must not leave an edge pointing at it: `validate_graph`
+    /// would refuse the whole plan with `UnknownDependency` when the person
+    /// pressed Start, turning a deliberate removal into a confusing refusal.
+    #[test]
+    fn removing_a_helper_prunes_the_edges_that_pointed_at_it() {
+        use crate::agentdesk::graph::{JobBudget, CompletionCondition, HelperRole, ProposedGraph, ProposedHelperJob};
+        let mk = |id: &str, deps: &[&str]| ProposedHelperJob {
+            node_id: id.into(),
+            title: format!("Job {id}"),
+            description: "test".into(),
+            role: HelperRole::Builder,
+            allowed_paths: vec!["src/**".into()],
+            depends_on: deps.iter().map(|s| s.to_string()).collect(),
+            budget: JobBudget::default(),
+            completion: CompletionCondition::ReportsResult,
+        };
+        let mut graph = ProposedGraph {
+            lead_summary: "lead".into(),
+            helpers: vec![mk("a", &[]), mk("b", &["a"]), mk("c", &["a", "b"])],
+            proposed_at: "2026-01-01T00:00:00Z".into(),
+        };
+
+        let pruned = super::remove_helper_from_graph(&mut graph, "a");
+
+        assert_eq!(pruned, 2, "both b and c depended on a");
+        assert_eq!(graph.helpers.len(), 2);
+        assert!(graph.helpers.iter().all(|h| !h.depends_on.iter().any(|d| d == "a")));
+        // The plan that is left must still be startable.
+        assert!(crate::agentdesk::graph::validate_graph(&graph).is_ok());
+    }
+
+    #[test]
+    fn removing_a_helper_nothing_depends_on_prunes_no_edges() {
+        use crate::agentdesk::graph::{JobBudget, CompletionCondition, HelperRole, ProposedGraph, ProposedHelperJob};
+        let mk = |id: &str| ProposedHelperJob {
+            node_id: id.into(),
+            title: "t".into(),
+            description: "d".into(),
+            role: HelperRole::Builder,
+            allowed_paths: vec!["src/**".into()],
+            depends_on: vec![],
+            budget: JobBudget::default(),
+            completion: CompletionCondition::ReportsResult,
+        };
+        let mut graph = ProposedGraph {
+            lead_summary: "lead".into(),
+            helpers: vec![mk("a"), mk("b")],
+            proposed_at: "2026-01-01T00:00:00Z".into(),
+        };
+        assert_eq!(super::remove_helper_from_graph(&mut graph, "b"), 0);
+        assert_eq!(graph.helpers.len(), 1);
+    }
     use super::*;
     use crate::agentdesk::graph::{CompletionCondition, JobBudget};
     use crate::agentdesk::model::{

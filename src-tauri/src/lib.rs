@@ -350,6 +350,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::agent_graph::agent_session_start_graph,
             commands::agent_graph::agent_session_accept_stale_openspec_context,
             commands::agent_graph::agent_session_use_solo_instead,
+            commands::agent_graph::agent_session_remove_proposed_helper,
             commands::agent_graph::agent_session_resolve_conflict,
             commands::agent_graph::agent_session_record_conflict,
             commands::agent_kickoff::agent_session_start,

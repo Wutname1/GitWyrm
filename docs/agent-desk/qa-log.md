@@ -120,4 +120,5 @@ competing sub-agents, the answer names the losing option too.
 | 112 | 2026-09-04 | Is "revise the whole plan in prose" an adequate answer to removing one helper? | No -- it was recorded as a deliberate design earlier this pass, and on the critique's evidence that stands for revising but not for trimming, so it is now the next sub-agent question. |
 | 113 | 2026-09-04 | Should the Start screen let you remove one helper from a plan? | Yes -- a bad removal fails loudly at Start, whereas approve-all-or-discard-all is the only coarse pair of options on the screen that grants file-write permission. |
 | 114 | 2026-09-04 | Should it also let you edit a helper's file paths or role? | No -- narrowing a path is caught by nothing until the agent is refused mid-run, so those changes go through revision where the whole plan is re-derived. |
+| 115 | 2026-09-04 | Was qa-log #42 right that the sequence map has no cleanup because nothing fills it? | No -- it was decided on a comment that was false in all three of its claims; production fills the map on every run event, and cleanup is now wired. |
 

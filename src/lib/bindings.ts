@@ -3476,6 +3476,32 @@ async agentSessionUseSoloInstead(sessionId: string) : Promise<Result<UseSoloOutc
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Drop one proposed helper before Start.
+ * 
+ * The Start card grants the write scope `check_path_allowance` then enforces,
+ * and its only options were approve-the-whole-plan or discard it. Removing one
+ * helper needs no change to Start: `agent_session_start_graph` reads the
+ * proposal off this record and re-validates whatever is there.
+ * 
+ * Dangling `depends_on` edges are pruned rather than left to fail. Leaving
+ * them would be caught -- `validate_graph` returns `UnknownDependency` -- but
+ * only when the person presses Start, which turns a deliberate removal into a
+ * confusing refusal.
+ * 
+ * Deliberately narrow: this removes a helper and nothing else. Editing paths,
+ * roles or completion conditions goes through conversational revision, where
+ * the model re-derives the whole plan. A hand-narrowed path is caught by
+ * nothing until the agent is refused mid-run.
+ */
+async agentSessionRemoveProposedHelper(sessionId: string, nodeId: string) : Promise<Result<RemoveHelperOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_session_remove_proposed_helper", { sessionId, nodeId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async agentSessionResolveConflict(sessionId: string, executionId: string, resolution: ConflictResolution) : Promise<Result<ResolveConflictOutcome, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("agent_session_resolve_conflict", { sessionId, executionId, resolution }) };
@@ -6547,6 +6573,21 @@ export type RemoteTagInfo = { name: string;
  * tag object, not the commit, so it need not match `TagInfo::target_sha`.
  */
 sha: string }
+export type RemoveHelperOutcome = 
+/**
+ * The helper is gone from the proposal, which is otherwise unchanged.
+ * `pruned_edges` counts `depends_on` entries removed from OTHER helpers
+ * because they pointed at this one -- the UI says so rather than leaving
+ * the person to notice a plan quietly reshaped.
+ */
+{ kind: "removed"; session: AgentSession; pruned_edges: number } | 
+/**
+ * Removing this would leave no helpers at all. Not an error: it is the
+ * same request as "use solo instead", which has its own command and its
+ * own confirmation, so it is refused here rather than silently becoming
+ * a different action.
+ */
+{ kind: "wouldEmptyPlan" } | { kind: "noProposal" } | { kind: "helperNotFound" } | { kind: "notFound" } | { kind: "damaged"; reason: string } | { kind: "unavailable"; detail: string } | { kind: "writeFailed"; detail: string }
 /**
  * What happened when a removal was attempted.
  * 
