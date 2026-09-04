@@ -59,3 +59,37 @@ describe('READ_ONLY_REASON', () => {
     expect(READ_ONLY_REASON).not.toMatch(/intent|policy|worktree|canWrite/i)
   })
 })
+
+describe('busy flags belong to the chat that set them', () => {
+  // The composer is NOT remounted when a pane switches chats -- the only key
+  // in the pane tree is `key={pane}`. So every in-flight flag it holds
+  // survives the swap, and sending in one chat then switching showed the
+  // second chat a disabled button reading "Sending…" for work happening
+  // somewhere else.
+  //
+  // `startFailure` already had this rule ("A failure card belongs to the chat
+  // it happened in"); the four busy flags were left out of the same effect.
+  // Checked at source level because the defect is about state lifetime across
+  // a prop change, which the pure helpers above cannot express.
+  const FLAGS = ['setSending(false)', 'setStopping(false)', 'setRetrying(false)', 'setChangingProject(false)']
+
+  it('clears every in-flight flag when the pane changes chat', async () => {
+    // @ts-expect-error -- no @types/node in this project; available at runtime
+    const { readFileSync } = await import('node:fs')
+    // @ts-expect-error -- no @types/node in this project; available at runtime
+    const { fileURLToPath } = await import('node:url')
+    const src = readFileSync(
+      fileURLToPath(new URL('../components/domain/agent-desk/SessionComposer.tsx', import.meta.url)),
+      'utf8'
+    )
+    // The single effect keyed on the session id, which is where this belongs.
+    const start = src.indexOf('setStartFailure(null)')
+    const end = src.indexOf('}, [sessionId])', start)
+    expect(start, 'the session-change effect moved or was renamed').toBeGreaterThan(-1)
+    expect(end, 'the session-change effect moved or was renamed').toBeGreaterThan(start)
+    const body = src.slice(start, end)
+
+    const missing = FLAGS.filter((f) => !body.includes(f))
+    expect(missing, 'these would describe the previous chat after a swap').toEqual([])
+  })
+})

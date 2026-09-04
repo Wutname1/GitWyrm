@@ -145,8 +145,25 @@ export function SessionComposer({
 
   // A failure card belongs to the chat it happened in. Swapping this pane
   // to another chat must not carry it across.
+  //
+  // The same is true of every in-flight flag below, and they were left out.
+  // This component is NOT remounted on a session switch -- the only `key` in
+  // the pane tree is `key={pane}` -- so `sending`/`stopping`/`retrying`/
+  // `changingProject` survived the swap. Sending in one chat and switching to
+  // another showed that second chat a disabled button reading "Sending…" for
+  // work happening somewhere else, which then un-stuck itself when the first
+  // chat's request finished.
+  //
+  // Clearing them is safe: each is only ever set immediately before an await
+  // and cleared in that call's own `finally`, so the request that owns the
+  // flag still finishes and still reports its own outcome. What it no longer
+  // does is describe a chat it was never about.
   useEffect(() => {
     setStartFailure(null)
+    setSending(false)
+    setStopping(false)
+    setRetrying(false)
+    setChangingProject(false)
   }, [sessionId])
 
   const savePreferences = (nextMode: ComposerMode, nextTeam: ComposerTeam, nextProvider: string | null) => {
@@ -179,17 +196,39 @@ export function SessionComposer({
       })
   }
 
+  /**
+   * Say that a change made mid-run lands on the NEXT turn, not this one.
+   *
+   * Mode, team and provider are handed to `agentSessionStartExecution` when a
+   * turn starts, so a change made while one is running genuinely cannot reach
+   * it -- there is no steering channel into a live run. The pill still moved,
+   * which looks like it took effect now.
+   *
+   * Neither applying nor refusing, and saying nothing, is the one outcome the
+   * house rule forbids. The wording matches the queued-message toast, which
+   * had already solved the same problem for the same reason.
+   */
+  const notePendingIfRunning = () => {
+    if (!running) return
+    toast.info('Saved. The agent will use this on its next turn.', {
+      description: 'The turn already running keeps the settings it started with.',
+    })
+  }
+
   const changeMode = (next: ComposerMode) => {
     setMode(next)
     savePreferences(next, team, provider)
+    notePendingIfRunning()
   }
   const changeTeam = (next: ComposerTeam) => {
     setTeam(next)
     savePreferences(mode, next, provider)
+    notePendingIfRunning()
   }
   const changeProvider = (next: string | null) => {
     setProvider(next)
     savePreferences(mode, team, next)
+    notePendingIfRunning()
   }
 
   // Opening a project can take seconds -- it arms a filesystem watcher over
@@ -434,7 +473,15 @@ export function SessionComposer({
           data-agent-desk-composer
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder="Say what to do next, or ask about the work…"
+          // While a run is going the Send button is replaced by Stop, so the
+          // only way to add a note for afterwards is Enter -- which nothing
+          // on screen said. Queuing was real, wired, and discoverable only by
+          // someone who already knew the trick.
+          placeholder={
+            running
+              ? 'Type a note and press Enter. The agent picks it up after this turn…'
+              : 'Say what to do next, or ask about the work…'
+          }
           // Matches the visible team line thirty lines below, which already
           // says "One agent" for a solo chat. Hardcoding "the lead agent" told
           // screen-reader users about a lead that solo chats do not have --
