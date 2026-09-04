@@ -125,9 +125,13 @@ describe('continueExternallyLabel', () => {
     expect(continueExternallyLabel(undefined)).toBeNull()
   })
 
-  it('says Open client for openOnly, never "Continue session" (spec: Continuation is honest)', () => {
+  it('never says "Continue session" for openOnly (spec: Continuation is honest)', () => {
     const outcome: ContinuationOutcome = { kind: 'openOnly' }
-    expect(continueExternallyLabel(outcome)).toBe('Open client')
+    const label = continueExternallyLabel(outcome)
+    expect(label).not.toMatch(/continue session/i)
+    // It also must not read as a button GitWyrm can press: no launch command
+    // exists, so an imperative label promised an action nothing performs.
+    expect(label).toBe('Can be continued in its own app')
   })
 
   it('returns null for unsupported', () => {

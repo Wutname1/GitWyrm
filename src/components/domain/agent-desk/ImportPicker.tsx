@@ -165,7 +165,7 @@ function SessionRow({
   const [confirmUnlinkOpen, setConfirmUnlinkOpen] = useState(false)
 
   // One source of truth for "is this row tied to a GitWyrm chat right now".
-  // Every action that needs a GitWyrm session (Continue here, Open client,
+  // Every action that needs a GitWyrm session (Continue here,
   // Unlink) hangs off this, so after Unlink they all disappear together.
   const linkedSessionId = linkedImportedSessionId(session, importMutation.data)
   const continuation = useAgentImportContinuation(
@@ -240,7 +240,8 @@ function SessionRow({
   }
 
   // "Continue session" is only ever offered when the adapter can genuinely
-  // resume this exact session; everything else is "Open client" so the copy
+  // resume this exact session; everything else says only that the chat can
+  // be continued in its own app, so the copy
   // never claims context transfer that did not happen (spec: "Continuation
   // is honest").
   const continueExternalLabel = linkedSessionId ? continueExternallyLabel(continuation.data) : null
@@ -281,6 +282,9 @@ function SessionRow({
           </button>
         )}
         {continueExternalLabel && (
+          // Deliberately not a button and deliberately not imperative: no
+          // launch command exists, so this states where the chat can be
+          // continued rather than offering to take you there.
           <span className="inline-flex items-center gap-1 text-2xs text-muted-foreground">
             <ExternalLink size={10} aria-hidden />
             {continueExternalLabel}

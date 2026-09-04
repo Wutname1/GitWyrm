@@ -79,4 +79,5 @@ competing sub-agents, the answer names the losing option too.
 | 71 | 2026-09-04 | Should the Start screen show which files each helper may change? | Yes -- it is the boundary the app actually enforces, and it was the one fact missing from the screen where you grant that permission. |
 | 72 | 2026-09-04 | What should an empty allowed-paths list say? | "Any file in this project", because no scope is wider rather than narrower and blank would read as "no files". |
 | 73 | 2026-09-04 | Should the plan checklist gain a mechanism to tick items as work lands? | No -- the honest fix was to stop promising it and teach the model the marks the app already understands, rather than invent a rewrite path late in a pass. |
+| 74 | 2026-09-04 | Should "Open client" become a working button or stop looking like one? | Stop looking like one -- no launch mechanism exists, and a label that describes where the chat lives is honest where an unimplemented action is not. |
 

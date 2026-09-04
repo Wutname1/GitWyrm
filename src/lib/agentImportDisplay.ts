@@ -64,15 +64,26 @@ export function projectLabel(session: ScannedExternalSession): ProjectLabel {
   }
 }
 
-/** The label for the "Continue externally" action, or `null` when no
- * supported launch exists at all. Never returns "Continue session" for
- * anything less than a genuine resume -- see design.md: "never claims the
- * external client accepted context when it merely opened." */
+/**
+ * What GitWyrm can say about continuing this chat in its original app, or
+ * `null` when there is nothing to say.
+ *
+ * Never returns "Continue session" for anything less than a genuine resume --
+ * see design.md: "never claims the external client accepted context when it
+ * merely opened."
+ *
+ * This used to return the imperative "Open client", which the picker rendered
+ * in a plain `<span>` beside an external-link icon: it read as a button, and
+ * clicking it did nothing, because no launch command exists anywhere in the
+ * app. The same principle that forbids overstating a resume forbids offering
+ * an action GitWyrm cannot perform, so it now describes where the chat can be
+ * continued rather than implying this app will take you there.
+ */
 export function continueExternallyLabel(outcome: ContinuationOutcome | undefined): string | null {
   if (!outcome) return null
   switch (outcome.kind) {
     case 'openOnly':
-      return 'Open client'
+      return 'Can be continued in its own app'
     case 'unsupported':
     case 'clientNotDetected':
     case 'adapterDisabled':
