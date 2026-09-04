@@ -106,4 +106,5 @@ competing sub-agents, the answer names the losing option too.
 | 98 | 2026-09-04 | Is "Open the source" ever shown as a dead disabled button? | No -- every caller guards the handler on the same value as the session the panel needs to render, so the disabled case cannot be reached. |
 | 99 | 2026-09-04 | Should every mutation without an onError handler get one? | No -- one of the three found was deliberately per-item, where a hook-level message would fire repeatedly for a single action. |
 | 100 | 2026-09-04 | Should "continue here" say why it failed? | Yes -- it is one of the three provenance paths the vision says must never look equivalent, and failing without a reason is a weaker version of the same problem. |
+| 101 | 2026-09-04 | Is title-casing an internal name enough to make it plain language? | No -- "Worktree failed" is still a code word with a space in it, so the common ones now have real sentences. |
 

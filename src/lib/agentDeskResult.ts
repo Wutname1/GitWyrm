@@ -676,7 +676,33 @@ export function explainStopOutcome(outcome: StopExecutionOutcome): { message: st
  * carrying its own `detail` should pass that instead, since the backend wrote
  * it for the person.
  */
+const OUTCOME_KIND_TEXT: Record<string, string> = {
+  // The kinds that actually reach this floor today. Title-casing alone still
+  // handed over jargon: "Worktree failed" and "Adapter unsupported" are code
+  // words, and the whole point of this function is that no code word reaches
+  // a person. Anything not listed still falls back to the spaced form, so a
+  // new variant degrades to readable rather than raw.
+  notFound: 'It is no longer there.',
+  damaged: 'Its saved file could not be read.',
+  unavailable: 'GitWyrm could not read it right now.',
+  sessionNotFound: 'That chat is no longer there.',
+  sessionDamaged: "That chat's saved file could not be read.",
+  sessionUnavailable: 'GitWyrm could not read that chat right now.',
+  writeFailed: 'The change could not be saved.',
+  executionNotFound: 'That agent is no longer part of this chat.',
+  sourceMissing: 'The thing this chat was started from is gone.',
+  adapterUnsupported: 'That chat app is not supported here.',
+  providerReconnect: 'The AI tool needs to be connected again.',
+  worktreeFailed: 'A working copy of your project could not be prepared.',
+  alreadyRunning: 'It is already running.',
+  concurrentChangeRefused: 'It changed after GitWyrm looked, so nothing was touched.',
+  noProposal: 'There is no plan to act on.',
+  noConflict: 'There is nothing to resolve.',
+}
+
 export function describeOutcomeKind(kind: string): string {
+  const known = OUTCOME_KIND_TEXT[kind]
+  if (known) return known
   const spaced = kind.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase()
   return spaced.charAt(0).toUpperCase() + spaced.slice(1)
 }

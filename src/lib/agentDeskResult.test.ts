@@ -636,14 +636,24 @@ describe('describeOutcomeKind', () => {
   // "providerReconnect" -- an identifier meant for code, in the sentence
   // meant to tell them what to do. This is the floor: no path shows the raw
   // token. A variant worth acting on still deserves a real sentence.
-  it('turns an identifier into something readable', () => {
-    expect(describeOutcomeKind('providerReconnect')).toBe('Provider reconnect')
-    expect(describeOutcomeKind('writeFailed')).toBe('Write failed')
-    expect(describeOutcomeKind('notFound')).toBe('Not found')
+  it('gives a real sentence for the kinds that actually reach it', () => {
+    // Title-casing alone still handed over code words: "Worktree failed" and
+    // "Adapter unsupported" are not things a person says.
+    expect(describeOutcomeKind('providerReconnect')).toBe('The AI tool needs to be connected again.')
+    expect(describeOutcomeKind('writeFailed')).toBe('The change could not be saved.')
+    expect(describeOutcomeKind('worktreeFailed')).toMatch(/working copy/i)
   })
 
-  it('leaves an already-plain word alone apart from its capital', () => {
-    expect(describeOutcomeKind('damaged')).toBe('Damaged')
+  it('never leaves an internal word in the sentence', () => {
+    for (const kind of ['worktreeFailed', 'adapterUnsupported', 'sessionUnavailable', 'executionNotFound']) {
+      expect(describeOutcomeKind(kind)).not.toMatch(/worktree|adapter|session|execution/i)
+    }
+  })
+
+  it('degrades a kind it has never seen to readable, not raw', () => {
+    // The fallback this test used to check on `damaged`, which now has a real
+    // sentence. A future variant must still never arrive as camelCase.
+    expect(describeOutcomeKind('someFutureKind')).toBe('Some future kind')
   })
 
   it('never returns the raw camelCase token', () => {
