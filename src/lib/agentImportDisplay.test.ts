@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  isUnresolvedProject,
   explainImportScanRefusal,
   explainImportOutcome, adapterDisplayName, canBrowseAdapter,
   continueExternallyLabel,
@@ -266,5 +267,28 @@ describe('explainImportScanRefusal', () => {
     ] as const) {
       expect(explainImportScanRefusal(o)).not.toMatch(/no sessions/i)
     }
+  })
+})
+
+describe('isUnresolvedProject', () => {
+  // The backend builds this id when it cannot match an imported session's
+  // project folder to a repo, and its comment says the UI is expected to show
+  // a "project not found" state. Nothing checked the prefix, so the phrase
+  // "Unresolved project" was rendered exactly like a real project name.
+  it('recognises the synthetic id import uses when it cannot place a chat', () => {
+    expect(isUnresolvedProject('unresolved:claude-code')).toBe(true)
+    expect(isUnresolvedProject('unresolved:codex')).toBe(true)
+  })
+
+  it('leaves a real repo id alone', () => {
+    expect(isUnresolvedProject('a1b2c3d4')).toBe(false)
+    // A repo whose own name merely starts with the word must not be caught:
+    // the prefix carries a colon precisely so it cannot collide.
+    expect(isUnresolvedProject('unresolvedThings')).toBe(false)
+  })
+
+  it('is false rather than throwing when there is no id at all', () => {
+    expect(isUnresolvedProject(null)).toBe(false)
+    expect(isUnresolvedProject(undefined)).toBe(false)
   })
 })

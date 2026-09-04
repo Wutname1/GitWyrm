@@ -240,3 +240,21 @@ function explainAdapterError(error: AdapterError): string {
       return `GitWyrm could not read that tool's files: ${error.detail}`
   }
 }
+
+/**
+ * Whether a chat's project is a stand-in rather than a real repository.
+ *
+ * Importing a session whose project folder GitWyrm cannot find still succeeds
+ * -- the spec wants unresolved projects visible, not blocking -- so the chat
+ * lands under a synthetic repo id `unresolved:<adapter>` with the literal
+ * name "Unresolved project" (`commands/agent_import.rs`). The backend's own
+ * comment says the UI is "expected to show the 'project not found' state
+ * rather than a normal project-scoped row", and nothing did: the phrase was
+ * printed in the same weight and colour as a real project name.
+ *
+ * Matching on the id, not the name, because the name is display text a future
+ * change could reword while the id is the structural fact.
+ */
+export function isUnresolvedProject(repoId: string | null | undefined): boolean {
+  return typeof repoId === 'string' && repoId.startsWith('unresolved:')
+}

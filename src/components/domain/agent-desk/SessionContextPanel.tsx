@@ -5,7 +5,8 @@ import { Blocks, FolderGit2, GitBranch, Layers3, Link2, Loader2, TriangleAlert }
 import { commands, type AgentSession } from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
 import { conversationHandoffs, sourceKindLabel } from '@/lib/agentSessionGrouping'
-import { adapterDisplayName } from '@/lib/agentImportDisplay'
+import { adapterDisplayName, isUnresolvedProject } from '@/lib/agentImportDisplay'
+import { cn } from '@/lib/utils'
 import { explainRefreshSourceOutcome } from '@/lib/agentDeskSources'
 import { describeError, log } from '@/lib/log'
 import { useOpenSpecContextDrift } from '@/hooks/useOpenspecSessionSource'
@@ -38,16 +39,22 @@ function ContextRow({
   icon: Icon,
   label,
   value,
+  /** Amber when the value is a stand-in for something GitWyrm could not work out. */
+  unknown = false,
 }: {
   icon: React.ComponentType<{ size?: number; className?: string; 'aria-hidden'?: boolean }>
   label: string
   value: string
+  unknown?: boolean
 }) {
   return (
     <div className="flex items-center gap-2 border-t border-border px-2 py-1.5 first:border-t-0">
-      <Icon size={13} className="flex-none text-muted-foreground" aria-hidden />
+      <Icon size={13} className={cn('flex-none', unknown ? 'text-[var(--gw-amber)]' : 'text-muted-foreground')} aria-hidden />
       <strong
-        className="min-w-0 flex-1 truncate text-2xs font-semibold text-foreground"
+        className={cn(
+          'min-w-0 flex-1 truncate text-2xs font-semibold',
+          unknown ? 'text-[var(--gw-amber)]' : 'text-foreground'
+        )}
         // The full value on hover: the row truncates from the right, which for
         // a filesystem path hides the folder name and keeps the drive letter --
         // the least useful half.
@@ -183,7 +190,24 @@ export function SessionContextPanel({ session }: { session: AgentSession }) {
       )}
 
       <section className="rounded-md border border-border bg-panel2">
-        <ContextRow icon={FolderGit2} label="project" value={session.header.repoName} />
+        {/*
+          A chat imported from a tool session whose project folder GitWyrm
+          could not find gets the synthetic repo id `unresolved:<adapter>` and
+          the literal name "Unresolved project" (`agent_import.rs:426`), whose
+          own comment says "the UI is expected to show the 'project not found'
+          state ... rather than a normal project-scoped row".
+
+          It did not. The row printed that phrase in the same weight and
+          colour as a real project name, so a chat GitWyrm cannot place read
+          as one it had placed successfully. The import picker already marks
+          the same case amber BEFORE import; this is the after.
+        */}
+        <ContextRow
+          icon={FolderGit2}
+          label="project"
+          value={session.header.repoName}
+          unknown={isUnresolvedProject(session.header.repoId)}
+        />
         {/*
           Shown as "…\parentolder" rather than the whole path. The bold slot
           is the most prominent text in the card, and a full `C:\...` path

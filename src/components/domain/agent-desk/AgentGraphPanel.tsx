@@ -386,7 +386,18 @@ function InspectorCard({
             executionId={execution.executionId}
             intent={session.header.intent}
             taskText={execution.jobDescription ?? execution.jobTitle ?? session.header.title}
-            provider={execution.provider ?? 'copilot'}
+            // The AI that actually ran THIS node, then the chat's own choice,
+            // and only then a constant.
+            //
+            // This was `execution.provider ?? 'copilot'`. `ConversationPane`
+            // had the identical bug and fixed it -- its comment says "a
+            // hardcoded 'copilot' put the wrong name in the drafted commit
+            // for every Codex, Claude, Gemini and opencode result" -- but the
+            // graph's own copy was left behind. It is not only a label: this
+            // value picks which model is asked to draft the commit message,
+            // so the wrong one is a billed call to a tool the person did not
+            // choose.
+            provider={execution.provider ?? session.header.preferredProvider ?? 'copilot'}
             isOpenSpecTask={session.header.source.kind === 'openSpecTask'}
           />
         </div>
