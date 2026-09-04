@@ -51,3 +51,28 @@ describe('pullRequestUrlWithDraft', () => {
     expect(url.searchParams.has('body')).toBe(false)
   })
 })
+
+describe('an existing pull request page is not a form to prefill', () => {
+  // Why the "update" path copies the description to the clipboard instead of
+  // putting it in the link: this builder works by adding query parameters to
+  // a host's COMPARE page, which is what opens a new-pull-request form. An
+  // already-open pull request's own page has no such form and ignores them.
+  //
+  // The tempting "fix" is to route the update path through this function too.
+  // That produces a URL the host quietly ignores, which is worse than the
+  // honest copy button because it looks like it worked.
+  it('would silently produce a URL the host ignores, if misused this way', () => {
+    // Pinned as a WARNING, not an endorsement: this function cannot tell a
+    // compare page from a pull request page, so it appends parameters to
+    // both. That is the trap. The assertion records that the output for a
+    // pull request page is a link carrying text the host will drop -- which
+    // is why the dialog copies the description instead of passing it here.
+    const existing = 'https://github.com/o/r/pull/42'
+    const withDraft = pullRequestUrlWithDraft(existing, 'A title', 'A body')
+    expect(withDraft).toContain('title=A+title')
+    expect(withDraft).toContain('/pull/42')
+    // The real compare-page case, which DOES work, for contrast.
+    const compare = pullRequestUrlWithDraft('https://github.com/o/r/compare/main...x', 'A title', 'A body')
+    expect(compare).toContain('expand=1')
+  })
+})
