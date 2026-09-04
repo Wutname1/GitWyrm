@@ -130,9 +130,10 @@ export function AgentSetupView({ repoId, onClose }: { repoId: string | null; onC
             <button
               type="button"
               onClick={() => void inventory.refetch()}
+                disabled={inventory.isFetching}
               className="mt-2 rounded border border-border px-2 py-1 text-2xs font-semibold hover:bg-panel3"
             >
-              Try again
+              {inventory.isFetching ? 'Checking…' : 'Try again'}
             </button>
           </div>
         ) : tab === 'skills' ? (

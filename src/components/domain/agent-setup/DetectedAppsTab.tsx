@@ -40,9 +40,10 @@ export function DetectedAppsTab({
           <button
             type="button"
             onClick={onRetry}
+            disabled={isLoading}
             className="mt-2 rounded border border-border px-2 py-1 text-2xs font-semibold hover:bg-panel3"
           >
-            Try again
+            {isLoading ? 'Checking…' : 'Try again'}
           </button>
         )}
       </div>

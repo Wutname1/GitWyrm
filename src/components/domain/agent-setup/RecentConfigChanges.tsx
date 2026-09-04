@@ -57,9 +57,10 @@ export function RecentConfigChanges({ repoId }: { repoId: string | null }) {
         <button
           type="button"
           onClick={() => void receipts.refetch()}
+                disabled={receipts.isFetching}
           className="mt-2 rounded border border-border px-2 py-1 text-2xs font-semibold hover:bg-panel3"
         >
-          Try again
+          {receipts.isFetching ? 'Checking…' : 'Try again'}
         </button>
       </div>
     )

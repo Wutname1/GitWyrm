@@ -89,9 +89,10 @@ export function ProviderControl({
             <button
               type="button"
               onClick={() => void query.refetch()}
+                disabled={query.isFetching}
               className="mt-1.5 rounded border border-border px-1.5 py-0.5 text-2xs font-semibold hover:bg-panel3"
             >
-              Try again
+              {query.isFetching ? 'Checking…' : 'Try again'}
             </button>
           </div>
         ) : rows.length === 0 ? (
