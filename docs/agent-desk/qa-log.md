@@ -75,4 +75,5 @@ competing sub-agents, the answer names the losing option too.
 | 67 | 2026-09-04 | Should an imported message show when it was brought in? | Yes -- otherwise a chat written last week reads as native history from last week, which is exactly the equivalence the vision forbids. |
 | 68 | 2026-09-04 | If a provider reports input tokens but not output, what should a helper's usage line say? | It names the half it knows ("1.2k tokens in") rather than adding zero for the other and showing a partial figure as the total. |
 | 69 | 2026-09-04 | Which of the two agent-graph projections is the real one? | The TypeScript one the panel actually uses; the registered backend command is dead and is missing a distinction the panel renders, so wiring it up would quietly downgrade the display. |
+| 70 | 2026-09-04 | Does an unread field in the generated bindings always mean something is missing from the screen? | No -- four of five checked this pass were fine as they stand, so each hit needs tracing to what the user actually sees before it counts as a finding. |
 
