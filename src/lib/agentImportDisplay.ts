@@ -109,3 +109,34 @@ export function unlinkConfirmCopy(adapterName: string): { title: string; descrip
       `If you import the same ${adapterName} chat again later, it becomes a new chat instead of adding to this one.`,
   }
 }
+
+/**
+ * The name a person would recognise for an adapter, from its stable id.
+ *
+ * The imported badge showed the raw id in its tooltip -- "Imported from
+ * vscode-copilot" -- which is attribution to a slug rather than to a product.
+ * The vision's rule is that imported output stays *visibly attributed* to the
+ * client that produced it, and every adapter already carries a
+ * `display_name` ("VS Code Copilot Chat", "Claude Code") that this side never
+ * asked for.
+ *
+ * Falls back to the id rather than inventing a name: an adapter this build
+ * does not know should say the unfamiliar thing it actually knows, not a
+ * guess.
+ */
+export function adapterDisplayName(adapterId: string): string {
+  switch (adapterId) {
+    case 'claude-code':
+      return 'Claude Code'
+    case 'codex':
+      return 'Codex'
+    case 'opencode':
+      return 'opencode'
+    case 'vscode-copilot':
+      return 'VS Code Copilot Chat'
+    case 'openchamber':
+      return 'OpenChamber'
+    default:
+      return adapterId
+  }
+}

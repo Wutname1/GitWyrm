@@ -1,3 +1,4 @@
+import { MIN_CHAT_SIZE_PX } from '@/lib/agentWorkspaceLayout'
 /**
  * Pure decision logic for the Agent Desk workspace shell: how the
  * conversation column responds to width, what a panel drop means, and which
@@ -114,8 +115,22 @@ export function dockContentSessionId(input: {
   return input.activePane === 'secondary' ? input.secondarySessionId : input.primarySessionId
 }
 
-/** design.md's minimum a conversation may be squeezed to before the dock has to give way. */
-export const MIN_CHAT_SIZE_PX = 360
+/**
+ * The minimum a conversation may be squeezed to before the dock has to give
+ * way, doubled when Split View puts two of them side by side.
+ *
+ * 360 matches the mockup's own detail panel (`clamp(360px, 36vw, 460px)` in
+ * `docs/agent-desk/agent-desk-mockup.html`) and the app's compact-desktop
+ * density (root `DESIGN.md`, "Resizable Workbench Rule": panes "retain useful
+ * minimum and maximum widths"). At 150% Windows scaling a 1080p panel reports
+ * 1280 CSS px, where 360 leaves Split View workable and a larger figure would
+ * not.
+ *
+ * A second constant elsewhere claimed to be this same minimum with a
+ * different value and was read by nothing; it is gone. Do not add another --
+ * two numbers for one property can never be reconciled when only one runs.
+ */
+export { MIN_CHAT_SIZE_PX }
 
 /**
  * How much room the dock may take without squeezing the chat below a usable

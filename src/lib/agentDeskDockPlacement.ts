@@ -52,14 +52,19 @@ export function isValidDockZone(_zone: DockZone): boolean {
   return true
 }
 
-/** design.md's minimum chat width the dock must never shrink below. */
-export const MIN_CHAT_WIDTH_PX = 420
 
 /**
  * 7.10: below this window width, a pinned *right* dock is not safe to keep
- * pinned (it would crush the chat column under `MIN_CHAT_WIDTH_PX`) and must
- * fall back to the per-pane popover instead. Other edges (bottom, left) do
- * not compete with chat width the same way, so only 'right' is gated here.
+ * pinned (it would crush the conversation column) and must fall back to the
+ * per-pane popover instead. Other edges (bottom, left) do not compete with
+ * chat width the same way, so only 'right' is gated here.
+ *
+ * 900 is the widest of the mockup's own three breakpoints (900/760/620, all
+ * real media queries in `docs/agent-desk/agent-desk-mockup.html`), not a
+ * figure derived from any chat minimum. The enforced minimum is
+ * `MIN_CHAT_SIZE_PX` in `agentDeskDock.ts`; a second constant here claimed to
+ * be that minimum, disagreed with it, and was read by nothing -- so the two
+ * numbers could never be reconciled because only one of them ever ran.
  */
 export const RIGHT_DOCK_UNSAFE_WIDTH_PX = 900
 

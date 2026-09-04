@@ -15,6 +15,7 @@ import { displayText, foldThoughtSummaries } from '@/lib/agentDeskTranscript'
 import { shouldShowResultPanel } from '@/lib/agentDeskResult'
 import { gateBody, gateOptions, gateRequestOf, gateSummary, type GateOption } from '@/lib/agentDeskGate'
 import { runActivityLabel, runIsActive } from '@/lib/agentDeskResult'
+import { adapterDisplayName } from '@/lib/agentImportDisplay'
 import { log, describeError } from '@/lib/log'
 import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
 import { SessionSourceBanner } from './SessionSourceBanner'
@@ -134,7 +135,7 @@ function ImportedBadge({ adapterId }: { adapterId: string }) {
   return (
     <span
       className="inline-flex items-center gap-1 rounded-full bg-panel3 px-1.5 py-px text-[9.5px] font-semibold uppercase tracking-wide text-muted-foreground"
-      title={`Imported from ${adapterId}`}
+      title={`Imported from ${adapterDisplayName(adapterId)}`}
     >
       <Download size={9} aria-hidden />
       Imported

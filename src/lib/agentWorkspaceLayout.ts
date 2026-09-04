@@ -99,6 +99,14 @@ export const DEFAULT_DOCK_SIZE_PX = 360
 export const MIN_DOCK_SIZE_PX = 240
 export const MAX_DOCK_SIZE_PX = 960
 
+/**
+ * The minimum a conversation may be squeezed to. Defined here rather than in
+ * `agentDeskDock.ts` because the clamp below is the thing that enforces it,
+ * and the two must not be able to disagree -- which is exactly what happened
+ * when this property had a second, unenforced constant of its own.
+ */
+export const MIN_CHAT_SIZE_PX = 360
+
 export const DEFAULT_AGENT_WORKSPACE_LAYOUT: AgentWorkspaceLayout = {
   split: false,
   activePane: 'primary',
@@ -115,8 +123,15 @@ export function clampDockSizePx(sizePx: number, windowBoundPx?: number): number 
   if (typeof windowBoundPx === 'number' && Number.isFinite(windowBoundPx)) {
     // Leave room for the chat pane itself; never let the dock claim the
     // entire window on a small or heavily scaled display.
+    //
+    // The 70% rule alone was not that promise: on a 1000px window it allows a
+    // 700px dock, leaving 300px of conversation -- below the minimum this
+    // app documents and the helper written to protect it. Whichever bound is
+    // tighter wins, so the chat minimum holds on narrow windows and the 70%
+    // rule still stops the dock swallowing a wide one.
     const windowMax = Math.floor(windowBoundPx * 0.7)
-    max = Math.min(max, Math.max(MIN_DOCK_SIZE_PX, windowMax))
+    const chatMax = windowBoundPx - MIN_CHAT_SIZE_PX
+    max = Math.min(max, Math.max(MIN_DOCK_SIZE_PX, Math.min(windowMax, chatMax)))
   }
   return Math.min(max, Math.max(MIN_DOCK_SIZE_PX, Math.round(sizePx)))
 }

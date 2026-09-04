@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  MIN_CHAT_SIZE_PX,
   CURRENT_LAYOUT_SCHEMA_VERSION,
   DEFAULT_AGENT_WORKSPACE_LAYOUT,
   MAX_DOCK_SIZE_PX,
@@ -129,6 +130,24 @@ describe('migrateLayout', () => {
 })
 
 describe('clampDockSizePx', () => {
+  it('never squeezes the conversation below its minimum', () => {
+    // The 70% rule alone was not that promise: on a 1000px window it allowed
+    // a 700px dock, leaving 300px of chat -- under the documented minimum,
+    // and under the helper written to protect it that nothing called.
+    expect(clampDockSizePx(900, 1000)).toBe(1000 - MIN_CHAT_SIZE_PX)
+    expect(1000 - clampDockSizePx(900, 1000)).toBeGreaterThanOrEqual(MIN_CHAT_SIZE_PX)
+  })
+
+  it('still lets the 70% rule bound a wide window', () => {
+    // On a wide window the chat minimum is not the binding constraint, so the
+    // dock is capped by its own maximum rather than by the chat.
+    expect(clampDockSizePx(5000, 3000)).toBe(MAX_DOCK_SIZE_PX)
+  })
+
+  it('never returns less than the dock own minimum, however narrow', () => {
+    expect(clampDockSizePx(500, 400)).toBe(MIN_DOCK_SIZE_PX)
+  })
+
   it('clamps below the minimum up to MIN_DOCK_SIZE_PX', () => {
     expect(clampDockSizePx(10)).toBe(MIN_DOCK_SIZE_PX)
   })

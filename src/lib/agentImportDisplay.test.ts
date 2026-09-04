@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  canBrowseAdapter,
+import {adapterDisplayName, canBrowseAdapter,
   continueExternallyLabel,
   detectionLabel,
   linkedImportedSessionId,
@@ -181,5 +180,24 @@ describe('unlinkConfirmCopy', () => {
     expect(copy.description).toContain('stays in GitWyrm')
     expect(copy.description).toContain('Codex')
     expect(copy.description).not.toMatch(/type .* to confirm/i)
+  })
+})
+
+describe('adapterDisplayName', () => {
+  // The badge's tooltip showed the raw id -- "Imported from vscode-copilot"
+  // -- which attributes to a slug rather than to a product. These ids come
+  // from each adapter's `fn id()` in src-tauri/src/agentdesk/adapters/, and
+  // the names from its `fn display_name()`; the two sides must not drift.
+  it('names every adapter the way its own Rust side does', () => {
+    expect(adapterDisplayName('claude-code')).toBe('Claude Code')
+    expect(adapterDisplayName('codex')).toBe('Codex')
+    expect(adapterDisplayName('opencode')).toBe('opencode')
+    expect(adapterDisplayName('vscode-copilot')).toBe('VS Code Copilot Chat')
+    expect(adapterDisplayName('openchamber')).toBe('OpenChamber')
+  })
+
+  it('says the unfamiliar thing it knows rather than inventing a name', () => {
+    // An adapter from a later build should not be given a made-up label.
+    expect(adapterDisplayName('some-future-client')).toBe('some-future-client')
   })
 })
