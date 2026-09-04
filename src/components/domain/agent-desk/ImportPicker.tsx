@@ -197,11 +197,30 @@ function SessionRow({
     if (!linkedSessionId) return
     continueHereMutation.mutate(linkedSessionId, {
       onSuccess: (result) => {
-        if (result.kind === 'continued') {
-          toast.success('Continuing this chat in GitWyrm')
-        } else {
-          toast.error('Could not continue this chat')
+        // Both refusals used to read "Could not continue this chat", discarding
+        // the `detail` the backend wrote for exactly this moment. `handleUnlink`
+        // just below already switches on its own variants; this one did not.
+        switch (result.kind) {
+          case 'continued':
+            toast.success('Continuing this chat in GitWyrm')
+            break
+          case 'notFound':
+            toast.error('That chat is no longer here.', {
+              description: 'It may have been deleted since this list was loaded.',
+            })
+            break
+          case 'writeFailed':
+            toast.error('That chat could not be saved.', {
+              description: `${result.detail} Nothing was changed.`,
+            })
+            break
         }
+      },
+      onError: (e) => {
+        log.error(`continue imported session here failed: ${describeError(e)}`)
+        toast.error('That chat could not be continued here.', {
+          description: 'Nothing was changed. You can try again.',
+        })
       },
     })
   }
