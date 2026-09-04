@@ -27,8 +27,12 @@ export function OperatingModeControl({
           onClick={() => onChange(m)}
           aria-pressed={mode === m}
           className={cn(
-            'rounded px-1.5 py-0.5 text-2xs font-semibold',
-            mode === m ? 'bg-soft text-accent-text' : 'text-sub hover:bg-panel3 hover:text-foreground'
+            // A tint alone is not a selected state (DESIGN.md), and this is
+            // the control that decides whether an agent may change files.
+            'rounded border px-1.5 py-0.5 text-2xs font-semibold',
+            mode === m
+              ? 'border-primary/60 bg-soft text-accent-text'
+              : 'border-transparent text-sub hover:bg-panel3 hover:text-foreground'
           )}
         >
           {m}

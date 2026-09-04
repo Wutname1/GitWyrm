@@ -118,7 +118,12 @@ export function SessionRow({
           className={cn(
             'grid w-full min-w-0 items-center gap-1.5 rounded px-1.5 text-left text-2xs',
             'grid-cols-[15px_minmax(0,1fr)_auto]',
-            selected ? 'bg-soft text-foreground' : 'text-sub hover:bg-panel2 hover:text-foreground'
+            // A soft fill PLUS a persistent edge, per the Navigation rule --
+            // the fill alone is close to invisible on a dim screen.
+            'border-l-2',
+            selected
+              ? 'border-primary bg-soft text-foreground'
+              : 'border-transparent text-sub hover:bg-panel2 hover:text-foreground'
           )}
         >
           <span
