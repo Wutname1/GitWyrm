@@ -77,7 +77,7 @@ export function SessionGroups({
             className={cn(
               // A one-step tonal shift is not a selected state on its own
               // (DESIGN.md); the mint edge is what makes it read.
-              'flex h-6 flex-1 items-center justify-center gap-1 rounded border-b-2 text-[9.5px]',
+              'flex h-6 flex-1 items-center justify-center gap-1 rounded border-b-2 text-2xs',
               mode === id
                 ? 'border-primary bg-panel2 text-foreground'
                 : 'border-transparent text-muted-foreground hover:bg-panel2 hover:text-foreground'

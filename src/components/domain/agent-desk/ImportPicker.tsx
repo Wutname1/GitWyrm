@@ -253,7 +253,7 @@ function SessionRow({
           {session.summary.title}
         </span>
         {linkedSessionId && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-panel3 px-1.5 py-px text-[9.5px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <span className="inline-flex items-center gap-1 rounded-full bg-panel3 px-1.5 py-px text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
             <Download size={9} aria-hidden />
             Imported
           </span>

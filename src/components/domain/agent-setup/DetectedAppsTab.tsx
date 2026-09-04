@@ -26,11 +26,11 @@ export function DetectedAppsTab({ detections }: { detections: ClientDetection[] 
           )}
           <div className="flex flex-1 flex-col gap-0.5">
             <span className="text-xs font-medium text-foreground">{clientLabel(d.client)}</span>
-            <span className="text-[10.5px] text-muted-foreground">
+            <span className="text-2xs text-muted-foreground">
               {d.present ? 'Configuration found' : 'Not found on this machine'}
             </span>
           </div>
-          <span className="text-[10.5px] text-muted-foreground">
+          <span className="text-2xs text-muted-foreground">
             {d.writeSupported ? 'Read + write' : 'Read only'}
           </span>
         </li>

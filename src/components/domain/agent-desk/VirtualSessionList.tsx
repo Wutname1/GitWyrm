@@ -87,7 +87,7 @@ export function VirtualSessionList({
               >
                 {row.collapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
                 <span className="min-w-0 flex-1 truncate">{row.label}</span>
-                <span className="flex-none font-mono text-[9px] normal-case text-muted-foreground">
+                <span className="flex-none font-mono text-2xs normal-case text-muted-foreground">
                   {row.count}
                 </span>
               </button>

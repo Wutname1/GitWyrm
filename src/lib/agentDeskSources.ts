@@ -134,6 +134,24 @@ export function openSpecTaskSourceInput(
  * Returns `null` when there is nothing honest to say -- a manual session has
  * no source, and an unparseable timestamp is not worth guessing at.
  */
+/**
+ * How long ago something was, in plain words.
+ *
+ * Lifted out of `describeSnapshotFreshness` so the import badge can say when a
+ * message arrived using exactly the same vocabulary -- two places describing
+ * age differently is the kind of small inconsistency that makes a surface feel
+ * assembled rather than designed.
+ */
+function describeAge(elapsedMs: number): string {
+  const mins = Math.max(0, Math.floor(elapsedMs / 60000))
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'} ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`
+  const days = Math.floor(hours / 24)
+  return days < 30 ? `${days} day${days === 1 ? '' : 's'} ago` : 'a long time ago'
+}
+
 export function describeSnapshotFreshness(
   capturedAt: string,
   liveUnavailable: boolean,
@@ -142,18 +160,7 @@ export function describeSnapshotFreshness(
   const then = Date.parse(capturedAt)
   if (Number.isNaN(then)) return null
 
-  const mins = Math.max(0, Math.floor((now - then) / 60000))
-  let age: string
-  if (mins < 1) age = 'just now'
-  else if (mins < 60) age = `${mins} minute${mins === 1 ? '' : 's'} ago`
-  else {
-    const hours = Math.floor(mins / 60)
-    if (hours < 24) age = `${hours} hour${hours === 1 ? '' : 's'} ago`
-    else {
-      const days = Math.floor(hours / 24)
-      age = days < 30 ? `${days} day${days === 1 ? '' : 's'} ago` : 'a long time ago'
-    }
-  }
+  const age = describeAge(now - then)
 
   // When the live source cannot be reached, the saved copy is all there is --
   // say so, rather than leaving "No longer available" to imply the panel is
@@ -251,4 +258,24 @@ export function workingChangesSourceInput(paths: string[]): Extract<SessionSourc
     title: count === 1 ? 'Your 1 changed file' : `Your ${count} changed files`,
     summary: count === 0 ? 'Nothing is changed right now' : paths.slice(0, 5).join(', ') + (count > 5 ? `, and ${count - 5} more` : ''),
   }
+}
+
+/**
+ * When an imported message actually arrived in GitWyrm.
+ *
+ * `ImportProvenance` carries `importedAt` specifically because it is "distinct
+ * from the message's own timestamp" -- a conversation written last Tuesday and
+ * pulled in today is two different facts. The badge showed only which client
+ * it came from, so an imported message sat in the transcript looking like
+ * native history dated whenever it was originally written. The vision is
+ * explicit that import is never presented as equivalent to work done here.
+ *
+ * Returns null for an unparseable timestamp rather than inventing a date --
+ * the badge still says "Imported", it just does not claim a time it does not
+ * know.
+ */
+export function describeImportedAt(importedAt: string, now: number = Date.now()): string | null {
+  const then = Date.parse(importedAt)
+  if (Number.isNaN(then)) return null
+  return `Brought into GitWyrm ${describeAge(now - then)}`
 }

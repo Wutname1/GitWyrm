@@ -101,7 +101,7 @@ export function DockedDetailPanel({
       >
         <Icon size={13} className="flex-none text-muted-foreground" aria-hidden />
         <strong className="text-2xs font-semibold text-foreground">{label}</strong>
-        <span className="ml-1 truncate text-[9.5px] text-muted-foreground">follows active chat</span>
+        <span className="ml-1 truncate text-2xs text-muted-foreground">follows active chat</span>
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

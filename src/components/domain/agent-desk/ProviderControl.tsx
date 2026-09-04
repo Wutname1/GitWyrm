@@ -213,7 +213,7 @@ function ProviderRow({
         </span>
       </span>
       {note && !disabled && (
-        <span className="flex-none font-mono text-[9px] text-muted-foreground">{note}</span>
+        <span className="flex-none font-mono text-2xs text-muted-foreground">{note}</span>
       )}
       {disabled && blocked?.startsWith('Not installed') && (
         <Download size={12} className="mt-0.5 flex-none text-muted-foreground" aria-hidden />

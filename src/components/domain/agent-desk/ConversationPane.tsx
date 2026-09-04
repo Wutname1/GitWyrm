@@ -21,6 +21,7 @@ import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
 import { SessionSourceBanner } from './SessionSourceBanner'
 import { SessionComposer } from './SessionComposer'
 import { ThoughtBlock } from './ThoughtBlock'
+import { describeImportedAt } from '@/lib/agentDeskSources'
 import { PlanChecklist } from './PlanChecklist'
 import { EventStack } from './EventStack'
 import { MessageHistoryRail } from './MessageHistoryRail'
@@ -131,11 +132,16 @@ function MessageTargetLink({
  * what stops an imported message from ever being presented as native
  * output, per the field's own doc comment in `bindings.ts`.
  */
-function ImportedBadge({ adapterId }: { adapterId: string }) {
+function ImportedBadge({ adapterId, importedAt }: { adapterId: string; importedAt: string }) {
+  // When it arrived here, which is not when it was written. Without this an
+  // imported message dated last Tuesday reads as native history from last
+  // Tuesday; `importedAt` exists precisely to keep those two facts apart.
+  const arrived = describeImportedAt(importedAt)
+  const from = `Imported from ${adapterDisplayName(adapterId)}`
   return (
     <span
-      className="inline-flex items-center gap-1 rounded-full bg-panel3 px-1.5 py-px text-[9.5px] font-semibold uppercase tracking-wide text-muted-foreground"
-      title={`Imported from ${adapterDisplayName(adapterId)}`}
+      className="inline-flex items-center gap-1 rounded-full bg-panel3 px-1.5 py-px text-2xs font-semibold uppercase tracking-wide text-muted-foreground"
+      title={arrived ? `${from} · ${arrived}` : from}
     >
       <Download size={9} aria-hidden />
       Imported
@@ -292,7 +298,7 @@ function MessageRow({
           <span className={cn(isApproval && 'text-[var(--gw-amber)]')}>{kindLabel(message.kind)}</span>
           {message.provider && <span className="font-normal text-muted-foreground">{message.provider}</span>}
           <span className="font-normal text-muted-foreground">{formatClock(message.timestamp)}</span>
-          {message.import && <ImportedBadge adapterId={message.import.adapterId} />}
+          {message.import && <ImportedBadge adapterId={message.import.adapterId} importedAt={message.import.importedAt} />}
         </div>
         {thought && (
           <ThoughtBlock text={thought.plainContent} variant={message.kind === 'result' ? 'reviewing' : 'thinking'} />

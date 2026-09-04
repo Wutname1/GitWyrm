@@ -80,7 +80,7 @@ export function SessionUsageCard({ sessionId }: { sessionId: string }) {
                     {row.value}
                     {row.isEstimate && (
                       <span
-                        className="ml-1 align-middle text-[9px] font-normal uppercase tracking-wide text-muted-foreground"
+                        className="ml-1 align-middle text-2xs font-normal uppercase tracking-wide text-muted-foreground"
                         aria-label={`${row.label} is an estimate, not a measured value`}
                       >
                         est.

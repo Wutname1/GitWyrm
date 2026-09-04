@@ -101,7 +101,7 @@ export function SyncSummaryLine({
   const summary = { total: rows.length, matching, differing, existsInOne }
 
   return (
-    <div className="mb-2.5 flex items-center gap-3 text-[10.5px] text-muted-foreground">
+    <div className="mb-2.5 flex items-center gap-3 text-2xs text-muted-foreground">
       <strong className="font-semibold text-foreground">{formatSummaryLine(summary, kind)}</strong>
       <span>{matching} match</span>
       <span>{differing} differ</span>

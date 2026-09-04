@@ -71,4 +71,6 @@ competing sub-agents, the answer names the losing option too.
 | 63 | 2026-09-04 | Is a change with no tasks written yet at 0%? | No -- it reads "No tasks written yet", the distinction the backend already drew as "a draft rather than 0% of nothing". |
 | 64 | 2026-09-04 | Should a compile-time mechanism replace fixing these dropped-field bugs one at a time? | No -- both proposed lints were measured against this crate and neither catches the very defect that motivated them, so the per-instance fixes plus one narrow new sweep stay. |
 | 65 | 2026-09-04 | Why did the ending sentence need a system message rather than a note? | Notes get folded into the previous note, so it would have been glued onto the end of the agent's own last message instead of the app speaking for itself. |
+| 66 | 2026-09-04 | Was the text-size floor actually clean after last pass? | No -- I had swept for one literal size instead of the rule, and 29 more sites were below the floor, some at 9px. |
+| 67 | 2026-09-04 | Should an imported message show when it was brought in? | Yes -- otherwise a chat written last week reads as native history from last week, which is exactly the equivalence the vision forbids. |
 

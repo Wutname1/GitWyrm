@@ -113,7 +113,7 @@ export function AgentCatalog() {
       <section className="flex flex-col gap-2">
         <header className="flex items-center gap-2">
           <h3 className="text-2xs font-semibold text-foreground">Installed</h3>
-          <span className="rounded-full bg-soft px-1.5 py-0.5 font-mono text-[9px] text-accent-text">
+          <span className="rounded-full bg-soft px-1.5 py-0.5 font-mono text-2xs text-accent-text">
             {installed.length} found
           </span>
           <button
@@ -146,7 +146,7 @@ export function AgentCatalog() {
         <section className="flex flex-col gap-2">
           <header className="flex items-center gap-2">
             <h3 className="text-2xs font-semibold text-muted-foreground">Available to install</h3>
-            <span className="rounded-full border border-border px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground">
+            <span className="rounded-full border border-border px-1.5 py-0.5 font-mono text-2xs text-muted-foreground">
               {missing.length}
             </span>
           </header>
@@ -177,12 +177,12 @@ function AgentRow({ row }: { row: AgentProvider }) {
         <span className="flex items-center gap-1.5">
           <span className="text-xs font-medium text-foreground">{row.displayName}</span>
           {row.isDefault && (
-            <span className="rounded bg-soft px-1 py-px font-mono text-[9px] text-accent-text">
+            <span className="rounded bg-soft px-1 py-px font-mono text-2xs text-accent-text">
               default
             </span>
           )}
           {row.tooOld && (
-            <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1 py-px font-mono text-[9px] text-amber-600 dark:text-amber-300">
+            <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1 py-px font-mono text-2xs text-amber-600 dark:text-amber-300">
               too old
             </span>
           )}
@@ -191,13 +191,13 @@ function AgentRow({ row }: { row: AgentProvider }) {
         {/* The binary being looked for, on every row including missing ones.
             A package name, a binary name and a product name are routinely three
             different strings; when detection is wrong this line explains why. */}
-        <span className="truncate font-mono text-[10.5px] text-muted-foreground">
+        <span className="truncate font-mono text-2xs text-muted-foreground">
           {row.installed && row.version ? row.version : row.binaryName}
         </span>
 
         {!row.installed && (
           <span className="mt-1 flex flex-wrap items-center gap-1.5">
-            <code className="rounded bg-panel3 px-1.5 py-0.5 font-mono text-[10.5px] text-foreground">
+            <code className="rounded bg-panel3 px-1.5 py-0.5 font-mono text-2xs text-foreground">
               {row.installHint}
             </code>
             <span className="text-2xs text-muted-foreground">then press Refresh</span>
@@ -205,7 +205,7 @@ function AgentRow({ row }: { row: AgentProvider }) {
         )}
 
         {row.tooOld && (
-          <span className="mt-0.5 text-[10.5px] leading-snug text-muted-foreground">
+          <span className="mt-0.5 text-2xs leading-snug text-muted-foreground">
             Updating it is enough — GitWyrm found it, but this version is older than it can drive.
           </span>
         )}

@@ -60,7 +60,7 @@ export function TeamShapeControl({
                 One agent owns the chat. No graph is created.
               </span>
             </span>
-            <span className="flex-none font-mono text-[9px] text-muted-foreground">1 agent</span>
+            <span className="flex-none font-mono text-2xs text-muted-foreground">1 agent</span>
           </button>
           <button
             type="button"
@@ -80,7 +80,7 @@ export function TeamShapeControl({
                 The lead splits safe work between helpers. Plan lets you approve the split first; Auto starts it when useful.
               </span>
             </span>
-            <span className="flex-none font-mono text-[9px] text-muted-foreground">up to 3</span>
+            <span className="flex-none font-mono text-2xs text-muted-foreground">up to 3</span>
           </button>
         </div>
       </PopoverContent>

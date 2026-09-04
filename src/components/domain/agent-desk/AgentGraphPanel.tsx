@@ -262,7 +262,7 @@ function InspectorCard({
 
   return (
     <div className="flex-none rounded-md border border-border bg-panel p-2.5">
-      <div className="text-[9px] font-bold uppercase tracking-wide text-muted-foreground">Selected agent</div>
+      <div className="text-2xs font-bold uppercase tracking-wide text-muted-foreground">Selected agent</div>
       <div className="mt-1 text-xs font-semibold text-foreground">{title}</div>
       <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">{description}</p>
       {filesLine ? <div className="mt-1.5 font-mono text-2xs text-muted-foreground">{filesLine}</div> : null}
@@ -281,7 +281,7 @@ function InspectorCard({
       ) : null}
       {activity ? (
         <div className="mt-1.5">
-          <div className="text-[9px] font-bold uppercase tracking-wide text-muted-foreground">
+          <div className="text-2xs font-bold uppercase tracking-wide text-muted-foreground">
             {canStop ? 'Right now' : 'Last activity'}
           </div>
           <p className="mt-0.5 text-2xs leading-relaxed text-foreground">{activity}</p>
@@ -307,7 +307,7 @@ function InspectorCard({
       ) : null}
       {execution.conflict ? (
         <div className="mt-2 rounded border border-[var(--gw-amber)]/50 bg-panel2 p-2">
-          <div className="text-[9px] font-bold uppercase tracking-wide text-[var(--gw-amber)]">
+          <div className="text-2xs font-bold uppercase tracking-wide text-[var(--gw-amber)]">
             Both versions changed {execution.conflict.path}
           </div>
           <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">

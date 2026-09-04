@@ -197,7 +197,7 @@ export function AwaitingStartCard({
 
   return (
     <div className="flex-none rounded-md border border-border bg-panel p-2.5">
-      <div className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wide text-muted-foreground">
+      <div className="flex items-center gap-1.5 text-2xs font-bold uppercase tracking-wide text-muted-foreground">
         <ListTodo size={11} aria-hidden />
         Plan ready to review
       </div>

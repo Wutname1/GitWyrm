@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   commitSourceInput,
+  describeImportedAt,
   describeSnapshotFreshness,
   diffSourceInput,
   explainRefreshSourceOutcome,
@@ -329,5 +330,20 @@ describe('commit, diff and working-changes sources', () => {
 
   it('working changes say plainly when there are none', () => {
     expect(workingChangesSourceInput([]).summary).toBe('Nothing is changed right now')
+  })
+})
+
+describe('describeImportedAt', () => {
+  const now = Date.parse('2026-09-04T12:00:00Z')
+
+  it('says when the message arrived here, not when it was written', () => {
+    expect(describeImportedAt('2026-09-04T11:00:00Z', now)).toBe('Brought into GitWyrm 1 hour ago')
+  })
+  it('uses the same words as the snapshot freshness line', () => {
+    expect(describeImportedAt('2026-09-04T11:59:30Z', now)).toBe('Brought into GitWyrm just now')
+    expect(describeImportedAt('2026-08-30T12:00:00Z', now)).toBe('Brought into GitWyrm 5 days ago')
+  })
+  it('claims no time it does not know', () => {
+    expect(describeImportedAt('not a date', now)).toBeNull()
   })
 })

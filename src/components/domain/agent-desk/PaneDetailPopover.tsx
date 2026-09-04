@@ -144,7 +144,7 @@ export function PaneDetailPopover({
               </div>
 
               <div className="flex flex-none items-center gap-1 border-t border-border bg-panel2 px-2 py-1.5">
-                <span className="mr-auto text-[9.5px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <span className="mr-auto text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
                   Pin panel
                 </span>
                 <button
@@ -154,7 +154,7 @@ export function PaneDetailPopover({
                     onPin(open, 'left')
                     closeAndReturnFocus()
                   }}
-                  className="flex h-6 items-center gap-1 rounded border border-border px-1.5 text-[9px] font-semibold text-sub hover:border-border-strong hover:text-foreground"
+                  className="flex h-6 items-center gap-1 rounded border border-border px-1.5 text-2xs font-semibold text-sub hover:border-border-strong hover:text-foreground"
                 >
                   <PanelLeft size={12} aria-hidden />
                   Left
@@ -166,7 +166,7 @@ export function PaneDetailPopover({
                     onPin(open, 'bottom')
                     closeAndReturnFocus()
                   }}
-                  className="flex h-6 items-center gap-1 rounded border border-border px-1.5 text-[9px] font-semibold text-sub hover:border-border-strong hover:text-foreground"
+                  className="flex h-6 items-center gap-1 rounded border border-border px-1.5 text-2xs font-semibold text-sub hover:border-border-strong hover:text-foreground"
                 >
                   <PanelBottom size={12} aria-hidden />
                   Bottom
@@ -178,7 +178,7 @@ export function PaneDetailPopover({
                     onPin(open, 'right')
                     closeAndReturnFocus()
                   }}
-                  className="flex h-6 items-center gap-1 rounded border border-border px-1.5 text-[9px] font-semibold text-sub hover:border-border-strong hover:text-foreground"
+                  className="flex h-6 items-center gap-1 rounded border border-border px-1.5 text-2xs font-semibold text-sub hover:border-border-strong hover:text-foreground"
                 >
                   <PanelRight size={12} aria-hidden />
                   Right

@@ -217,7 +217,7 @@ export function PlanReview({ plan }: { plan: RedactedCopyPlan }) {
               {dest.redactedDiffSummary
                 .filter((line) => line.change !== 'unchanged')
                 .map((line, i) => (
-                  <li key={i} className="flex items-center gap-1.5 text-[10.5px]">
+                  <li key={i} className="flex items-center gap-1.5 text-2xs">
                     <span
                       className={cn(
                         'inline-block w-12 flex-none rounded px-1 text-center font-medium',
@@ -233,7 +233,7 @@ export function PlanReview({ plan }: { plan: RedactedCopyPlan }) {
                 ))}
             </ul>
           ) : (
-            <p className="text-[10.5px] text-muted-foreground">No field-level changes to show.</p>
+            <p className="text-2xs text-muted-foreground">No field-level changes to show.</p>
           )}
         </div>
       ))}
