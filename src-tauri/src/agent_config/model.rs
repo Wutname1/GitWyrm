@@ -366,9 +366,18 @@ pub enum FieldChangeKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub enum WarningKind {
-    /// The item carries secret fields that will not be copied as literal
-    /// values into this destination's format.
-    SecretNotCopied,
+    /// The item carries secret values (tokens, keys, headers) and they ARE
+    /// written to the destination file -- copying a connector without its
+    /// credential would produce a connector that does not work.
+    ///
+    /// Named for what happens, not for what a reader might hope happens. It
+    /// was `SecretNotCopied`, whose doc said the values "will not be copied",
+    /// while `apply` writes them verbatim and a test asserts exactly that. The
+    /// preview redacts them for display only. The frontend had taken the name
+    /// at face value and styled the warning as protection -- a green shield
+    /// telling someone a credential stayed behind while it was being handed to
+    /// another application.
+    SecretWillBeCopied,
     /// The destination format cannot represent something the source has;
     /// the write will proceed but drop that piece (named in the warning
     /// alongside this variant by the caller-facing message, kept out of this

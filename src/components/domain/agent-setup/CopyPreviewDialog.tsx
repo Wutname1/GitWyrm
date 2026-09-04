@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { AlertTriangle, CheckCircle2, Loader2, RotateCcw, ShieldCheck } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Loader2, RotateCcw } from 'lucide-react'
 import type { ClientId, RedactedCopyPlan, DestinationApplyResult, InventoryEntry } from '@/lib/bindings'
 import { CLIENT_COLUMN_ORDER, clientLabel, eligibleDestinationsFor, explainPreviewRefusal } from '@/lib/agentConfig'
 import { useApplyAgentConfigCopy, usePreviewAgentConfigCopy, useUndoAgentConfigCopy } from '@/hooks/useAgentConfig'
@@ -206,23 +206,26 @@ export function PlanReview({ plan }: { plan: RedactedCopyPlan }) {
               {dest.warnings.map((w, i) => (
                 <li
                   key={i}
-                  // `secretNotCopied` is GitWyrm deliberately leaving a
-                  // credential behind -- the strongest thing this dialog does
-                  // for the person. Styled as a warning it read as "your token
-                  // broke", so it now reads as protection: green, a check
-                  // shield, at the type floor rather than below it.
+                  // The secret IS written to the destination file -- the
+                  // backend's own test asserts it, because a connector copied
+                  // without its credential does not work.
+                  //
+                  // This branch used to render green with a check shield,
+                  // under a comment saying GitWyrm was "deliberately leaving a
+                  // credential behind". It is not: the variant was called
+                  // `SecretNotCopied` and the frontend believed the name. A
+                  // person read a reassurance while their token was being
+                  // handed to another application. Amber, because handing a
+                  // credential somewhere is worth a second look, not a
+                  // celebration.
                   className={cn(
                     'flex items-start gap-1.5 rounded px-1.5 py-1 text-2xs',
-                    w.kind === 'secretNotCopied'
-                      ? 'bg-[color-mix(in_srgb,var(--gw-green)_14%,transparent)] text-[color-mix(in_srgb,var(--gw-green)_88%,var(--gw-text))]'
+                    w.kind === 'secretWillBeCopied'
+                      ? 'bg-[color-mix(in_srgb,var(--gw-amber)_14%,transparent)] text-[var(--gw-amber)]'
                       : 'text-muted-foreground'
                   )}
                 >
-                  {w.kind === 'secretNotCopied' ? (
-                    <ShieldCheck size={12} className="mt-px flex-none" aria-hidden />
-                  ) : (
-                    <AlertTriangle size={12} className="mt-px flex-none" aria-hidden />
-                  )}
+                  <AlertTriangle size={12} className="mt-px flex-none" aria-hidden />
                   <span>{w.message}</span>
                 </li>
               ))}

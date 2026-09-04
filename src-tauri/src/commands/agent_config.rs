@@ -398,10 +398,10 @@ fn build_destination_preview(client: ClientId, source_item: &RawItem, repo_root:
 
     if !source_item.secret_fields.is_empty() {
         warnings.push(PlanWarning {
-            kind: WarningKind::SecretNotCopied,
-            message: "This item includes secret values (tokens, keys, or headers). Their values \
-                       are not shown here and will be copied as-is only to the destination file; \
-                       verify you trust this destination before applying."
+            kind: WarningKind::SecretWillBeCopied,
+            message: "This item includes secret values (tokens, keys, or headers). They are hidden \
+                       in this preview but will be written in full to the destination file, so only \
+                       continue if you trust that destination."
                 .to_string(),
         });
     }
