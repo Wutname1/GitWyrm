@@ -9,7 +9,7 @@ import { nodeUsageLine } from '@/lib/agentDeskUsage'
 import { describeOutcome, explainStopOutcome, runIsActive } from '@/lib/agentDeskResult'
 import { cn } from '@/lib/utils'
 import { buildGraphTree, graphSummary, nodeDotTone, nodeStatusLabel, type GraphTreeNode } from '@/lib/agentGraphProjection'
-import { canViewNodeChanges, helperRoleLabel, latestActivityLine, resultForNode } from '@/lib/agentDeskGraph'
+import { canViewNodeChanges, helperRoleLabel, latestActivityLine, resultForNode, revisionSeed } from '@/lib/agentDeskGraph'
 import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
 import { AwaitingStartCard } from './AwaitingStartCard'
 import { ResultReviewPanel } from './ResultReviewPanel'
@@ -501,9 +501,25 @@ export function AgentGraphPanel({ session }: { session: AgentSession }) {
             // A button that only tells you to go do the thing elsewhere is
             // homework, not an action. Put the caret where the revision is
             // actually written; the toast then explains what to do there.
-            const box = document.getElementById(`agent-desk-composer-${session.header.sessionId}`)
-            if (box instanceof HTMLTextAreaElement) box.focus()
-            toast('Say what to change, then send it back to the agent.')
+            //
+            // It also seeds the box with the plan as it stands. "Say what to
+            // change" over an empty box asks someone to describe from memory a
+            // plan they can no longer see once they start typing -- the whole
+            // reason revising in prose feels harder than it is. The seed is a
+            // starting point to edit, not a message to send.
+            const { getDraft, setDraft } = useAgentDeskUiStore.getState()
+            const sessionId = session.header.sessionId
+            // Never clobber something already typed: a half-written revision is
+            // worth more than the seed.
+            if (getDraft(sessionId).trim() === '') {
+              setDraft(sessionId, revisionSeed(awaitingStartLead.proposedGraph!))
+            }
+            const box = document.getElementById(`agent-desk-composer-${sessionId}`)
+            if (box instanceof HTMLTextAreaElement) {
+              box.focus()
+              box.setSelectionRange(box.value.length, box.value.length)
+            }
+            toast('Change the plan below, then send it back to the agent.')
           }}
         />
       </div>

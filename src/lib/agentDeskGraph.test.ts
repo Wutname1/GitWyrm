@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { allowedPathLines, allowedPathsLabel, canViewNodeChanges, completionConditionLabel, helperRoleLabel, latestActivityLine, resultForNode, sessionHasGraph } from './agentDeskGraph'
+import { allowedPathLines, allowedPathsLabel, canViewNodeChanges, completionConditionLabel, revisionSeed, helperRoleLabel, latestActivityLine, resultForNode, sessionHasGraph } from './agentDeskGraph'
 
 type Session = Parameters<typeof sessionHasGraph>[0]
 
@@ -171,5 +171,20 @@ describe('completionConditionLabel', () => {
     for (const c of cases) {
       expect(completionConditionLabel(c)).not.toMatch(/condition|kind|node|execution/i)
     }
+  })
+})
+
+describe('revisionSeed', () => {
+  it('lists the helpers so they can be edited rather than recalled', () => {
+    const seed = revisionSeed({ helpers: [{ title: 'Trace the crash' }, { title: 'Write the fix' }] })
+    expect(seed).toMatch(/Trace the crash/)
+    expect(seed).toMatch(/Write the fix/)
+  })
+  it('ends where the person types, not with a finished sentence', () => {
+    // It must not read as a message someone would send unedited.
+    expect(revisionSeed({ helpers: [{ title: 'a' }] }).trimEnd()).toMatch(/What to change:$/)
+  })
+  it('does not enumerate a solo plan', () => {
+    expect(revisionSeed({ helpers: [] })).not.toMatch(/currently uses/)
   })
 })

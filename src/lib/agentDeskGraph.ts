@@ -154,3 +154,21 @@ export function completionConditionLabel(condition: CompletionCondition): string
     }
   }
 }
+
+/**
+ * A starting point for revising a plan, seeded into the composer.
+ *
+ * "Say what to change" over an empty box asks someone to describe from memory
+ * a plan that scrolls out of view the moment they start typing -- which is
+ * most of why revising in prose feels harder than trimming a list would.
+ * Listing the helpers gives them something to edit rather than compose.
+ *
+ * Deliberately not a message anyone would send as-is: it names the parts and
+ * stops, so the obvious next move is to delete a line or add a sentence. A
+ * solo plan gets no list, because there is nothing to enumerate.
+ */
+export function revisionSeed(proposal: { helpers: { title: string }[] }): string {
+  if (proposal.helpers.length === 0) return 'Change this plan by: '
+  const lines = proposal.helpers.map((h) => `- ${h.title}`).join('\n')
+  return `Change this plan. It currently uses:\n${lines}\n\nWhat to change: `
+}
