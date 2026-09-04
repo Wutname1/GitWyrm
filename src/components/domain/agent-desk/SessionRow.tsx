@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/context-menu'
 import { Input } from '@/components/ui/input'
 import { runStoppedBadly } from '@/lib/agentDeskResult'
+import { isUnresolvedProject } from '@/lib/agentImportDisplay'
 import { ProviderGlyph, providerLogo } from '@/lib/brandLogos'
 
 /** One session row's height, per tasks.md 3.1's stated 28-32px range. */
@@ -150,7 +151,19 @@ export function SessionRow({
           >
             {title}
             {showProject && header.repoName ? (
-              <span className="ml-1.5 font-normal text-muted-foreground">{header.repoName}</span>
+              // Amber when GitWyrm could not work out which project this chat
+              // belongs to. The context panel was fixed for this last pass and
+              // this row -- the densest list in the product, and the first
+              // place anyone looks -- still printed the stand-in phrase
+              // "Unresolved project" in the same muted grey as a real name.
+              <span
+                className={cn(
+                  'ml-1.5 font-normal',
+                  isUnresolvedProject(header.repoId) ? 'text-[var(--gw-amber)]' : 'text-muted-foreground'
+                )}
+              >
+                {header.repoName}
+              </span>
             ) : null}
           </span>
           <span className="flex-none">

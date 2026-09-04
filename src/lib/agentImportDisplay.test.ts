@@ -292,3 +292,32 @@ describe('isUnresolvedProject', () => {
     expect(isUnresolvedProject(undefined)).toBe(false)
   })
 })
+
+describe('every place that shows a project name checks whether it is real', () => {
+  // A guard, not a unit test. `isUnresolvedProject` was added in pass 35 for
+  // the context panel, and pass 36 found the sidebar row still printing the
+  // stand-in phrase in ordinary grey -- the same fix, not applied to its
+  // sibling, which is the shape four findings in a row have had.
+  //
+  // Verified in both directions: this fails if either renderer drops the
+  // check (confirmed by removing it from each in turn), and it does not fire
+  // on the workspace title bar, which shows the OPEN repo's name and has no
+  // unresolved case to mark.
+  const RENDERERS = [
+    'components/domain/agent-desk/SessionContextPanel.tsx',
+    'components/domain/agent-desk/SessionRow.tsx',
+  ]
+
+  it('marks an unplaced project everywhere a session header name is shown', async () => {
+    // @ts-expect-error -- no @types/node in this project; available at runtime
+    const { readFileSync } = await import('node:fs')
+    // @ts-expect-error -- no @types/node in this project; available at runtime
+    const { fileURLToPath } = await import('node:url')
+    const root = fileURLToPath(new URL('../', import.meta.url))
+    const missing = RENDERERS.filter((rel) => {
+      const src = readFileSync(`${root}${rel}`, 'utf8')
+      return src.includes('repoName') && !src.includes('isUnresolvedProject')
+    })
+    expect(missing, 'these show a project name without checking it is a real one').toEqual([])
+  })
+})
