@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import { commands, type CreateSessionRequest, type RepoInfo, type SelectDeskTarget } from '@/lib/bindings'
 import { unwrap, keys } from '@/lib/queryKeys'
 import { describeError, log } from '@/lib/log'
-import { describeOutcomeKind } from '@/lib/agentDeskResult'
+import { describeOutcome } from '@/lib/agentDeskResult'
 import { readWindowMode, type WindowMode } from '@/lib/windowMode'
 import { AgentDeskTitleBar } from '@/components/domain/agent-desk/AgentDeskTitleBar'
 import { AgentWorkspaceToolbar } from '@/components/domain/agent-desk/AgentWorkspaceToolbar'
@@ -499,6 +499,13 @@ export function AgentDeskView() {
       setPaneSession(target.pane, sessionId)
     }
     setActivePane(target.pane)
+    // Come back to the conversation if a full-screen section is covering it.
+    // The sidebar stays mounted beside Agent Setup and the OpenSpec section,
+    // so clicking a chat set the pane behind a screen the person could still
+    // not see -- and the comment below promising "a click always produces a
+    // visible response" was, in that case, describing something that did not
+    // happen. The import section already did this; the other two were missed.
+    setCenterView('conversation')
     // Rule #1: a click always produces a visible response. Selecting (or
     // refocusing) a session both highlights its pane (via `activePane`) and
     // moves focus into the composer so a keyboard user lands somewhere useful,
@@ -579,10 +586,15 @@ export function AgentDeskView() {
         // tasks.md 4.6: New chat replaces the *active* pane and focuses its composer.
         setPaneSession(layout.activePane, outcome.session.header.sessionId)
         void qc.invalidateQueries({ queryKey: keys.agentSessionsAll })
+        // New chat is in the title bar, so it is reachable from every section.
+        // Without this it reported "New chat started" while the chat it made
+        // sat behind Agent Setup or the OpenSpec section -- a success message
+        // for something the person could not see.
+        setCenterView('conversation')
         toast.success('New chat started.')
         focusComposer(outcome.session.header.sessionId)
       } else {
-        toast.error('Could not start a new chat.', { description: describeOutcomeKind(outcome.kind) })
+        toast.error('Could not start a new chat.', { description: describeOutcome(outcome) })
       }
     } catch (e) {
       const message = describeError(e)

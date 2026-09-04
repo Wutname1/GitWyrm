@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { DeskDetail } from '@/components/domain/spec-desk/DeskDetail'
+import { pathName } from '@/lib/paths'
 import { DeskActionRail } from '@/components/domain/spec-desk/DeskActionRail'
 import { DeskChangesList } from '@/components/domain/spec-desk/DeskChangesList'
 import { useOpenspecChanges, useOpenspecStatus, useSelectedChange } from '@/hooks/useOpenspec'
@@ -28,7 +29,12 @@ export function OpenSpecEmbeddedDetail({ repoId, repoPath }: { repoId: string; r
   // reaches this component, so the name comes from the folder, the same way
   // the backend names a fresh Agent Desk window.
   const repo = useMemo(
-    () => ({ path: repoPath, name: repoPath.split(/[\/]/).filter(Boolean).pop() ?? repoPath }),
+    // `pathName`, not a local split: this had `/[\/]/` -- a single backslash,
+    // which escapes the forward slash and matches ONLY that. A Windows path
+    // never split, so the project "name" was the whole `C:\...` string, and
+    // it reaches the sidebar row, the Context panel and the Project grouping
+    // header. Same escaping trap recorded in qa-log #84.
+    () => ({ path: repoPath, name: pathName(repoPath) }),
     [repoPath]
   )
   const status = useOpenspecStatus(repoId)
