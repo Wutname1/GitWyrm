@@ -113,7 +113,6 @@ export function summarizeChangedPaths(paths: ResultChangedPath[]): { added: numb
   return out
 }
 
-/** A short plain-language summary line, e.g. "3 files changed" / "no changes". */
 /**
  * Turns a raw status code into a word a person can read, plus the signal
  * colour that word should carry.
@@ -140,10 +139,29 @@ export function changedPathStatusLabel(status: string): { label: string; tone: '
   }
 }
 
+/**
+ * A short plain-language summary of what the agent did to the user's files.
+ *
+ * This is the headline on the review panel, and it used to say only how many
+ * files changed. Twelve deleted files and twelve added ones both read
+ * "12 files changed" -- the outcome a person most wants warned about was the
+ * one the summary hid. The per-file marks do carry it, but only for the first
+ * 50 rows, so on a large change the deletions sat behind "...and N more".
+ *
+ * Deletions and conflicts lead because they are what someone needs to know
+ * before deciding to keep the work. A plain edit stays plain: an all-modified
+ * change still reads "12 files changed" rather than growing a breakdown that
+ * says nothing.
+ */
 export function changedPathsSummaryLine(paths: ResultChangedPath[]): string {
   if (paths.length === 0) return 'No file changes'
-  if (paths.length === 1) return '1 file changed'
-  return `${paths.length} files changed`
+  const counts = summarizeChangedPaths(paths)
+  const head = paths.length === 1 ? '1 file changed' : `${paths.length} files changed`
+  const notable: string[] = []
+  if (counts.deleted > 0) notable.push(`${counts.deleted} deleted`)
+  if (counts.conflicted > 0) notable.push(`${counts.conflicted} with conflicts`)
+  if (notable.length === 0) return head
+  return `${head}, ${notable.join(' and ')}`
 }
 
 /** A short plain-language line for a check outcome list, e.g. "2 passed, 1 failed". */

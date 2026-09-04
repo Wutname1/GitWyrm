@@ -163,6 +163,16 @@ describe('changedPathsSummaryLine', () => {
   it('uses plural for more than one', () => {
     expect(changedPathsSummaryLine([path('M', 'a.ts'), path('M', 'b.ts')])).toBe('2 files changed')
   })
+  it('names deletions, which the count alone hid', () => {
+    // Twelve deleted files used to read exactly like twelve added ones.
+    expect(changedPathsSummaryLine([path('M', 'a.ts'), path('D', 'b.ts')])).toBe('2 files changed, 1 deleted')
+  })
+  it('names conflicts alongside deletions', () => {
+    expect(changedPathsSummaryLine([path('D', 'a.ts'), path('!', 'b.ts')])).toBe('2 files changed, 1 deleted and 1 with conflicts')
+  })
+  it('stays plain when nothing needs warning about', () => {
+    expect(changedPathsSummaryLine([path('A', 'a.ts'), path('R', 'b.ts')])).toBe('2 files changed')
+  })
 })
 
 describe('changedPathStatusLabel', () => {
