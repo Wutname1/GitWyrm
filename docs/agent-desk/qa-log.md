@@ -117,4 +117,5 @@ competing sub-agents, the answer names the losing option too.
 | 109 | 2026-09-04 | Does GitWyrm withhold secrets when copying settings between apps? | No -- it writes them in full, because a connector without its credential does not work; the warning now says so instead of implying the opposite. |
 | 110 | 2026-09-04 | Should a run that crashed look the same as one that finished? | No -- both said "Ready to review" over the same file list, and what is in that list means something different in each case. |
 | 111 | 2026-09-04 | Why did an imported chat get labelled the same as a normal one? | Its label and icon lookups were keyed by plain text rather than the real list of kinds, so the compiler could not point out the missing case. |
+| 112 | 2026-09-04 | Is "revise the whole plan in prose" an adequate answer to removing one helper? | No -- it was recorded as a deliberate design earlier this pass, and on the critique's evidence that stands for revising but not for trimming, so it is now the next sub-agent question. |
 
