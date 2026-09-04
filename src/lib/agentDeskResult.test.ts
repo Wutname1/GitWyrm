@@ -10,6 +10,7 @@ import type {
   ToggleOutcome,
 } from '@/lib/bindings'
 import {
+  describeOutcome,
   runOutcomeLabel,
   explainDraftPullRequestRefusal,
   canEscalateToFix,
@@ -703,5 +704,18 @@ describe('runOutcomeLabel', () => {
     // The point of the line: a crashed run was reviewed as if complete.
     expect(runOutcomeLabel('stopped')).toMatch(/part-way|incomplete/i)
     expect(runOutcomeLabel('failed')).toMatch(/incomplete/i)
+  })
+})
+
+describe('describeOutcome', () => {
+  it('keeps the reason the backend wrote', () => {
+    expect(describeOutcome({ kind: 'damaged', reason: 'bad json at line 3' })).toMatch(/bad json at line 3/)
+    expect(describeOutcome({ kind: 'writeFailed', detail: 'disk is full' })).toMatch(/disk is full/)
+  })
+  it('still says something plain when there is no detail', () => {
+    expect(describeOutcome({ kind: 'notFound' })).toBe(describeOutcomeKind('notFound'))
+  })
+  it('never leaves the raw kind as the whole message', () => {
+    expect(describeOutcome({ kind: 'writeFailed' })).not.toBe('writeFailed')
   })
 })

@@ -29,7 +29,7 @@ import {
   explainCleanupOutcome,
   failingCheckLines,
   checksSummaryLine,
-  describeOutcomeKind,
+  describeOutcome,
   explainAutoStartOutcome,
   explainCommitOutcome,
   explainCompleteOpenSpecTaskOutcome,
@@ -322,7 +322,7 @@ export function ResultReviewPanel({
     await withBusy(async () => {
       const requestOutcome = unwrap(await commands.agentResultRequestRevision(sessionId, executionId))
       if (requestOutcome.kind !== 'requested') {
-        toast.error('Could not mark this result for revision.', { description: describeOutcomeKind(requestOutcome.kind) })
+        toast.error('Could not mark this result for revision.', { description: describeOutcome(requestOutcome) })
         return
       }
       refresh()
@@ -330,7 +330,7 @@ export function ResultReviewPanel({
       try {
         const appended = unwrap(await commands.agentSessionAppendUserMessage(sessionId, guidance, []))
         if (appended.kind !== 'appended') {
-          toast.error('Marked for revision, but your guidance could not be saved.', { description: describeOutcomeKind(appended.kind) })
+          toast.error('Marked for revision, but your guidance could not be saved.', { description: describeOutcome(appended) })
           return
         }
         setRevisionText(null)
@@ -353,7 +353,7 @@ export function ResultReviewPanel({
           toast.info('Saved for the next turn. The agent is still finishing its current one.')
         } else {
           toast.error('Your guidance was saved, but the agent could not start.', {
-            description: explainAutoStartOutcome(startOutcome) ?? describeOutcomeKind(startOutcome.kind),
+            description: explainAutoStartOutcome(startOutcome) ?? describeOutcome(startOutcome),
           })
         }
       } catch (e) {

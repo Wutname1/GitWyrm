@@ -764,3 +764,21 @@ export function runOutcomeLabel(outcome: ResultOutcomeKind): string | null {
       return 'This run hit a clash with other work and stopped there.'
   }
 }
+
+/**
+ * The generic floor, plus whatever the backend actually said.
+ *
+ * `describeOutcomeKind` takes only the kind, so four inline call sites showed
+ * "Its saved file could not be read." and threw away the `reason` sitting
+ * beside it -- the one part written for this person about this failure. The
+ * dedicated `explain*` helpers all interpolate it; the sites that skipped them
+ * did not.
+ *
+ * Takes the whole outcome so the detail cannot be forgotten at the call site.
+ * A variant with no detail is unchanged.
+ */
+export function describeOutcome(outcome: { kind: string; reason?: string; detail?: string }): string {
+  const base = describeOutcomeKind(outcome.kind)
+  const extra = outcome.reason ?? outcome.detail
+  return extra ? `${base} ${extra}` : base
+}

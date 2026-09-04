@@ -6,7 +6,7 @@ import { commands, type AgentSession, type ExecutionRecord, type ResultRecord } 
 import { keys, unwrap } from '@/lib/queryKeys'
 import { describeError, log } from '@/lib/log'
 import { nodeUsageLine } from '@/lib/agentDeskUsage'
-import { describeOutcomeKind, explainStopOutcome, runIsActive } from '@/lib/agentDeskResult'
+import { describeOutcome, explainStopOutcome, runIsActive } from '@/lib/agentDeskResult'
 import { cn } from '@/lib/utils'
 import { buildGraphTree, graphSummary, nodeDotTone, nodeStatusLabel, type GraphTreeNode } from '@/lib/agentGraphProjection'
 import { canViewNodeChanges, helperRoleLabel, latestActivityLine, resultForNode } from '@/lib/agentDeskGraph'
@@ -220,7 +220,7 @@ function InspectorCard({
       } else if (outcome.kind === 'damaged') {
         toast.error('This chat file is damaged.', { description: outcome.reason })
       } else {
-        toast.error('Could not resolve that conflict.', { description: describeOutcomeKind(outcome.kind) })
+        toast.error('Could not resolve that conflict.', { description: describeOutcome(outcome) })
       }
     } catch (e) {
       const message = describeError(e)
