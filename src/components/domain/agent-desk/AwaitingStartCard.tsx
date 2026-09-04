@@ -218,8 +218,9 @@ export function AwaitingStartCard({
         <div className="mt-2 flex items-start gap-1.5 rounded border border-[var(--gw-amber)]/40 bg-[var(--gw-amber)]/10 px-2 py-1.5 text-2xs leading-relaxed text-[var(--gw-amber)]">
           <TriangleAlert size={12} className="mt-px flex-none" aria-hidden />
           <span>
-            The OpenSpec change changed since this plan was drafted. Revise the plan for a fresh
-            read, or start anyway using this plan as drafted.
+            The spec this plan came from was edited after the plan was written, so the plan may not match it any
+            more. GitWyrm can tell that it changed but not what changed -- open the spec in Spec Desk to compare.
+            Then either ask for a fresh plan, or start anyway with the plan as written.
           </span>
         </div>
       )}
