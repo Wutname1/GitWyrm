@@ -1,6 +1,7 @@
 import { AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { GateAnswer, GateRequest } from '@/lib/bindings'
+import { gateBody } from '@/lib/agentDeskGate'
 
 /**
  * The card shown when a run pauses for something with a consequence.
@@ -86,29 +87,3 @@ export function gateTitle(request: GateRequest): string {
   }
 }
 
-/** What actually happens if this is allowed. */
-export function gateBody(request: GateRequest): string {
-  switch (request.kind) {
-    case 'addDependency':
-      return `This downloads ${request.name} from the internet and adds it to your project's list of libraries. You'll see the change before anything is committed.`
-    case 'runInstall':
-      return `This runs ${request.command}, which downloads code from the internet onto this machine.`
-    case 'networkAccess':
-      return `This sends a request to ${request.target} and waits for a reply.`
-    case 'deleteFiles':
-      return `This removes ${request.paths.join(', ')} from your folder. You can undo the whole run afterwards.`
-    case 'outsideRepo':
-      // The one gate whose consequence outlives the run, so it says so.
-      return `${request.path} is outside the folder you opened, so it isn't covered by undo. Changes there stay even if you undo this run.`
-    case 'publish':
-      // The one gate whose consequence leaves this machine, so it says so
-      // plainly: undo can put your own files back, but it cannot recall
-      // something other people can already see.
-      return `This would ${request.effect}, so it leaves this computer and other people may see it. Undoing the run afterwards cannot take it back.`
-    case 'unclassified':
-      // Shown when GitWyrm cannot tell what the AI is asking for. Says exactly
-      // that rather than dressing it up as a known kind of request, which
-      // would tell the user the wrong thing about what they are approving.
-      return `The AI asked to do something GitWyrm doesn't recognise: ${request.summary}. Only allow it if you understand what it will do.`
-  }
-}

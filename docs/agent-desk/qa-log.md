@@ -66,4 +66,5 @@ competing sub-agents, the answer names the losing option too.
 | 58 | 2026-09-04 | Should the remaining 19 sub-floor text sites outside Agent Desk be fixed too? | Not in this task -- the rule is app-wide but those surfaces are outside the vision's scope, so they are recorded rather than swept up uninvited. |
 | 59 | 2026-09-04 | Where should the "some chats could not be opened" notice go? | Below the list rather than over it, because the other chats are fine and should stay the main thing on screen. |
 | 60 | 2026-09-04 | Does a Tailwind class passing typecheck mean it renders? | No -- `text-warning` typechecks but is not a token in this project and would have drawn plain grey, so colour classes must be checked against `index.css`. |
+| 61 | 2026-09-04 | Why move the gate's warning text rather than leave a working re-export? | Deleting the dead run surface would have silently taken the live gate's safety warnings with it. |
 
