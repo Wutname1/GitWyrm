@@ -323,3 +323,33 @@ describe('buildAgentUsageLines with a half-known token figure', () => {
     expect(lines[1].parts.join(' ')).not.toMatch(/ in| out/)
   })
 })
+
+describe('the graph and the cost card agree about a reported zero', () => {
+  // Both read the same `usage.turns` off the same execution record
+  // (`agent_desk.rs` builds the card's row as `turns: Some(usage.turns)`),
+  // so the same helper is described by both surfaces at once. If they
+  // disagree about what zero means, the person sees a helper credited with
+  // "0 turns" in one panel and no turn count at all in the other.
+  const zeroTurns = { inputTokens: 100, outputTokens: 50, cachedInputTokens: null, costMicroUsd: null, turns: 0 }
+
+  it('shows the same turn count in both places', () => {
+    const graph = nodeUsageLine(zeroTurns)
+    const card = buildAgentUsageLines({
+      sessionTokens: null,
+      sessionRequests: null,
+      sessionCostUsd: null,
+      planLimit: null,
+      planResetAt: null,
+      contextUsed: null,
+      contextSize: null,
+      activeHelperCount: null,
+      dataTimestamp: '2026-09-04T00:00:00Z',
+      agents: [
+        { executionId: 'lead', label: 'Lead agent', isLead: true, tokens: 900, inputTokens: null, outputTokens: null, turns: 3, costMicroUsd: null },
+        { executionId: 'h1', label: 'Helper', isLead: false, tokens: 150, inputTokens: null, outputTokens: null, turns: 0, costMicroUsd: null },
+      ],
+    })
+    const helperLine = card.find((l) => l.key === 'h1')!.parts.join(' · ')
+    expect(helperLine.includes('turn')).toBe(graph!.includes('turn'))
+  })
+})

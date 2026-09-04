@@ -225,7 +225,16 @@ export function nodeUsageLine(usage: ExecutionUsage | null | undefined): string 
   // which half it is by naming it up front rather than appending a suffix.
   else if (haveIn) parts.push(`${formatTokens(usage.inputTokens!)} in`)
   else if (haveOut) parts.push(`${formatTokens(usage.outputTokens!)} out`)
-  if (usage.turns != null && usage.turns > 0) parts.push(`${usage.turns} turn${usage.turns === 1 ? '' : 's'}`)
+  // `> 0` here suppressed a REPORTED zero, while `buildAgentUsageLines` --
+  // reading the very same `usage.turns` off the very same execution record --
+  // printed "0 turns". So one helper was described two ways at once, in two
+  // panels a person can have open together.
+  //
+  // The card is the correct half. A provider that reports zero has measured
+  // something; hiding it is the "unknown vs zero" rule inverted, dropping a
+  // real figure instead of inventing an absent one. Absence is still absence:
+  // `!= null` is what keeps that.
+  if (usage.turns != null) parts.push(`${usage.turns} turn${usage.turns === 1 ? '' : 's'}`)
   if (usage.costMicroUsd != null) parts.push(formatCost(usage.costMicroUsd / 1_000_000))
   return parts.length > 0 ? parts.join(' · ') : null
 }
