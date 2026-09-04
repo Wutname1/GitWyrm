@@ -357,12 +357,45 @@ pub fn clamp_diff(diff: &str) -> (String, bool) {
         end = i;
     }
     let cut = &diff[..end];
-    let on_line = cut.rfind('\n').map(|i| &cut[..i]).unwrap_or(cut);
+    // No line boundary in the whole budget means ONE line is longer than the
+    // budget -- a minified bundle, a generated file, a diff with no line
+    // breaks. The old fallback handed that mid-line fragment over anyway,
+    // breaking this function's own promise that the auditor "never sees half
+    // a line and reasons about a fragment".
+    //
+    // Nothing is the honest answer: the caller already gets `true` for
+    // truncated, and an auditor told the diff was too large to show reasons
+    // better than one handed an arbitrary slice of one token.
+    let on_line = match cut.rfind('\n') {
+        Some(i) => &cut[..i],
+        None => "",
+    };
     (on_line.to_string(), true)
 }
 
 #[cfg(test)]
 mod tests {
+
+    /// The doc says "never sees half a line". One line longer than the whole
+    /// budget breaks that: the truncated slice contains no newline, so the
+    /// reverse-find misses and the fallback hands back a mid-line fragment --
+    /// exactly what the comment promises cannot happen.
+    ///
+    /// Realistic input: a minified bundle, a long generated line, a diff of a
+    /// file with no line breaks. The auditor then reasons about a truncated
+    /// token as if it were the whole change.
+    #[test]
+    fn clamping_one_overlong_line_does_not_hand_over_half_of_it() {
+        let one_line = "x".repeat(super::MAX_DIFF_BYTES * 2);
+        let (out, truncated) = super::clamp_diff(&one_line);
+        assert!(truncated, "it is over budget, so it must report truncation");
+        assert!(
+            out.is_empty(),
+            "a cut with no line boundary must yield nothing rather than half a line, got {} chars",
+            out.len()
+        );
+    }
+
 
     #[test]
     fn a_hollow_verdict_says_what_is_unfinished() {

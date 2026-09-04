@@ -192,8 +192,16 @@ export function SessionComposer({
     savePreferences(mode, team, next)
   }
 
+  // Opening a project can take seconds -- it arms a filesystem watcher over
+  // the whole tree -- and this control had no busy state at all, so the click
+  // did nothing visible until it finished. Every other mutating control in
+  // this file already guards, disables and relabels; this is that pattern.
+  const [changingProject, setChangingProject] = useState(false)
+
   const changeProject = async (project: ChatProjectChoice) => {
-    if (!sessionId || !header || project.path.toLowerCase() === header.repoPath.toLowerCase()) return
+    if (!sessionId || !header || changingProject) return
+    if (project.path.toLowerCase() === header.repoPath.toLowerCase()) return
+    setChangingProject(true)
     try {
       const target = unwrap(await commands.openRepo(project.path))
       const outcome = unwrap(
@@ -216,6 +224,8 @@ export function SessionComposer({
       }
     } catch (e) {
       toast.error('Could not open that project.', { description: describeError(e) })
+    } finally {
+      setChangingProject(false)
     }
   }
 
@@ -399,6 +409,7 @@ export function SessionComposer({
           projectName={header?.repoName ?? 'Current project'}
           projects={projects}
           onProjectChange={(project) => void changeProject(project)}
+          projectChanging={changingProject}
           source={header?.source ?? null}
         />
       )}

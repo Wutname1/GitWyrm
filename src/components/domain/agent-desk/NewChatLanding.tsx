@@ -39,6 +39,7 @@ export function NewChatLanding({
   projectName,
   projects,
   onProjectChange,
+  projectChanging = false,
   source,
 }: {
   mode: ComposerMode
@@ -52,6 +53,8 @@ export function NewChatLanding({
   projectName: string
   projects: ChatProjectChoice[]
   onProjectChange: (project: ChatProjectChoice) => void
+  /** True while a project change is still opening, so the control can say so. */
+  projectChanging?: boolean
   /** What started this chat. `null` while the session is still loading. */
   source: SessionSource | null
 }) {
@@ -72,14 +75,18 @@ export function NewChatLanding({
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="flex w-full items-center gap-2.5 rounded-md border border-border bg-panel2 px-3 py-2.5 text-left hover:bg-panel3"
+                // Opening a project arms a watcher over the whole tree, which
+                // can take seconds. Without this the click did nothing
+                // visible until it finished.
+                disabled={projectChanging}
+                className="flex w-full items-center gap-2.5 rounded-md border border-border bg-panel2 px-3 py-2.5 text-left hover:bg-panel3 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <FolderGit2 size={17} className="flex-none text-accent-text" aria-hidden />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-semibold text-foreground">{projectName}</span>
                   <span className="block truncate text-2xs text-muted-foreground">{projectPath}</span>
                 </span>
-                <span className="text-2xs text-muted-foreground">Change</span>
+                <span className="text-2xs text-muted-foreground">{projectChanging ? 'Opening…' : 'Change'}</span>
                 <ChevronDown size={12} className="text-muted-foreground" aria-hidden />
               </button>
             </DropdownMenuTrigger>
