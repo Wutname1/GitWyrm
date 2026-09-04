@@ -369,9 +369,27 @@ pub fn undo_skill_copy(receipt: &SkillCopyReceipt) -> Result<(), SkillCopyError>
         if destination.is_dir() {
             match folder_digest(&destination) {
                 Ok(actual) if &actual != expected => {
+                    // Before calling this a change: an Undo interrupted after
+                    // restoring the folder but before its receipt was marked
+                    // done leaves the destination holding the BACKUP content.
+                    // Retrying then compared against `after_digest` -- the
+                    // post-copy fingerprint -- and refused, telling the person
+                    // their skill had been edited and GitWyrm was leaving it
+                    // alone. Nothing of theirs had changed; GitWyrm's own
+                    // restore had already finished.
+                    //
+                    // The single-file path recognises this by comparing with
+                    // `before_hash`. There is no `before_digest` here, but the
+                    // backup folder IS the before-state, so digesting it
+                    // answers the same question without a new field.
+                    if let Some(backup) = &receipt.backup_dir {
+                        if matches!(folder_digest(Path::new(backup)), Ok(b) if b == actual) {
+                            return Ok(());
+                        }
+                    }
                     return Err(SkillCopyError::DestinationChanged {
                         path: receipt.destination_dir.clone(),
-                    })
+                    });
                 }
                 // A digest that cannot be read is not evidence of a change;
                 // the copy_tree below will surface any real failure.
@@ -459,6 +477,39 @@ mod tests {
         assert!(matches!(err, SkillCopyError::DestinationChanged { .. }));
         // And the edit survives.
         assert_eq!(fs::read_to_string(dest.join("SKILL.md")).unwrap(), "my own edit");
+    }
+
+    /// The folder equivalent of the single-file interrupted-Undo case.
+    ///
+    /// Restoring the folder and marking its receipt done are two steps. A
+    /// crash between them leaves the destination holding the BACKUP content
+    /// while the receipt still says the copy stands, and the retry compared
+    /// against `after_digest` -- the post-copy fingerprint -- and refused,
+    /// telling the person their skill had been edited. It had not.
+    #[test]
+    fn undo_accepts_a_folder_a_previous_undo_already_restored() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("dest");
+        let backup = tmp.path().join("backup");
+        write(&backup, "SKILL.md", "what was there before");
+        write(&dest, "SKILL.md", "as copied");
+
+        let receipt = SkillCopyReceipt {
+            destination_dir: dest.to_string_lossy().into_owned(),
+            backup_dir: Some(backup.to_string_lossy().into_owned()),
+            files_written: 1,
+            after_digest: Some(folder_digest(&dest).unwrap()),
+        };
+
+        // The interrupted restore: the destination already holds the backup.
+        write(&dest, "SKILL.md", "what was there before");
+
+        undo_skill_copy(&receipt).expect("a finished restore is not an edit");
+        assert_eq!(
+            fs::read_to_string(dest.join("SKILL.md")).unwrap(),
+            "what was there before",
+            "the restored content is left exactly as it was"
+        );
     }
 
     #[test]

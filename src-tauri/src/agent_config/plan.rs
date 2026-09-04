@@ -319,6 +319,27 @@ pub fn undo_write(
     })?;
     let actual_hash = current.as_ref().map(|(_, h)| h.clone());
     if actual_hash.as_deref() != Some(receipt.after_hash.as_str()) {
+        // Before calling this a conflict: an Undo that was interrupted AFTER
+        // restoring the file but BEFORE marking the receipt done leaves the
+        // destination holding exactly the pre-copy content. The restore and
+        // the `undone = true` write are two steps, so a crash, a forced quit
+        // or an OS kill between them lands here.
+        //
+        // Without this check the retry compared against `after_hash` -- the
+        // POST-copy fingerprint -- found a mismatch, and told the person "the
+        // file changed after GitWyrm copied to it, and putting it back would
+        // undo that newer change". That is false and alarming: nothing of
+        // theirs changed, GitWyrm's own restore had already finished, and the
+        // file was already in the state they asked for.
+        //
+        // `apply_write` has no equivalent gap: it writes the backup and the
+        // receipt BEFORE the destination, so a crash there leaves either
+        // "not applied" or "applied", never a state that reads as a conflict.
+        if actual_hash.as_deref() == receipt.before_hash.as_deref() {
+            receipt.undone = true;
+            write_receipt_overwrite(roots, &receipt)?;
+            return Ok(receipt);
+        }
         return Err(UndoWriteError::ConcurrentChange {
             expected_hash: receipt.after_hash.clone(),
             actual_hash,
@@ -484,6 +505,36 @@ mod tests {
         let result = undo_write(&roots, "op-1");
         assert!(matches!(result, Err(UndoWriteError::ConcurrentChange { .. })));
         assert_eq!(fs::read_to_string(&dest).unwrap(), "{\"a\":999}");
+    }
+
+    /// An Undo interrupted between restoring the file and marking the receipt
+    /// must not come back as "your file changed".
+    ///
+    /// The restore and the `undone = true` write are two steps. A crash, a
+    /// forced quit or an OS kill between them leaves the destination holding
+    /// the pre-copy content while the receipt still says the copy stands. The
+    /// retry then compared against `after_hash` -- the POST-copy fingerprint
+    /// -- saw a mismatch, and told the person their file had been edited and
+    /// GitWyrm was leaving it alone. Both halves of that were false.
+    #[test]
+    fn undo_finishes_quietly_when_a_previous_undo_restored_but_never_recorded_it() {
+        let (dir, roots) = roots();
+        let dest = dir.path().join("dest.json");
+        fs::write(&dest, "{\"a\":1}").unwrap();
+        let before_hash = hash_bytes(b"{\"a\":1}");
+        apply_write(&roots, "plan-1", "claude-code", &dest, Some(&before_hash), b"{\"a\":2}", "op-1", "t")
+            .unwrap();
+
+        // Simulate the crash: the restore landed, the receipt update did not.
+        fs::write(&dest, "{\"a\":1}").unwrap();
+        assert!(!read_receipt(&roots, "op-1").unwrap().undone, "receipt must still read as not-undone");
+
+        let result = undo_write(&roots, "op-1").expect("a finished restore is not a conflict");
+        assert!(result.undone, "the retry records what the interrupted run could not");
+        // And the file is left exactly as the completed restore left it.
+        assert_eq!(fs::read_to_string(&dest).unwrap(), "{\"a\":1}");
+        // A second retry is now the ordinary already-undone case.
+        assert!(matches!(undo_write(&roots, "op-1"), Err(UndoWriteError::AlreadyUndone)));
     }
 
     #[test]
