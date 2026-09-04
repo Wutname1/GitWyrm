@@ -204,7 +204,7 @@ export function AwaitingStartCard({
       <p className="mt-1.5 text-2xs leading-relaxed text-foreground">{proposal.leadSummary}</p>
       <ul className="mt-1.5 flex flex-col gap-1">
         {proposal.helpers.map((h) => (
-          <li key={h.nodeId} className="rounded border border-border bg-panel2 px-1.5 py-1 text-[10px]">
+          <li key={h.nodeId} className="rounded border border-border bg-panel2 px-1.5 py-1 text-2xs">
             <span className="font-semibold text-foreground">{h.title}</span>
             <span className="text-muted-foreground"> · {h.role}</span>
           </li>
@@ -241,7 +241,7 @@ export function AwaitingStartCard({
             type="button"
             onClick={() => void startAnyway()}
             disabled={busy !== null}
-            className="rounded bg-primary px-2 py-1 text-[10px] font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded bg-primary px-2 py-1 text-2xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
           >
             {busy === 'accepting' || busy === 'start' ? 'Starting…' : 'Start anyway'}
           </button>
@@ -250,7 +250,7 @@ export function AwaitingStartCard({
             type="button"
             onClick={() => void start()}
             disabled={busy !== null}
-            className="rounded bg-primary px-2 py-1 text-[10px] font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded bg-primary px-2 py-1 text-2xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
           >
             {busy === 'start' ? 'Starting…' : 'Start'}
           </button>
@@ -259,7 +259,7 @@ export function AwaitingStartCard({
           type="button"
           onClick={onRevise}
           disabled={busy !== null}
-          className="rounded border border-border bg-panel2 px-2 py-1 text-[10px] font-semibold text-foreground hover:bg-panel3 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded border border-border bg-panel2 px-2 py-1 text-2xs font-semibold text-foreground hover:bg-panel3 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {stale ? 'Revise plan' : 'Revise'}
         </button>
@@ -267,7 +267,7 @@ export function AwaitingStartCard({
           type="button"
           onClick={() => void useSolo()}
           disabled={busy !== null}
-          className="rounded border border-border bg-panel2 px-2 py-1 text-[10px] font-semibold text-foreground hover:bg-panel3 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded border border-border bg-panel2 px-2 py-1 text-2xs font-semibold text-foreground hover:bg-panel3 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {busy === 'solo' ? 'Switching…' : 'Use solo instead'}
         </button>

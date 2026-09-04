@@ -181,7 +181,7 @@ export function PlanReview({ plan }: { plan: RedactedCopyPlan }) {
         <div key={dest.client} className="rounded-md border border-border p-2.5">
           <div className="mb-1.5 flex items-center justify-between">
             <span className="text-xs font-semibold text-foreground">{clientLabel(dest.client)}</span>
-            <span className="truncate text-[10px] text-muted-foreground">{dest.destinationPath}</span>
+            <span className="truncate text-2xs text-muted-foreground">{dest.destinationPath}</span>
           </div>
 
           {dest.warnings.length > 0 && (

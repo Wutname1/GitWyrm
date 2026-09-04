@@ -42,7 +42,7 @@ export function StartFailureCard({
         <div className="font-semibold text-foreground">{card.title}</div>
         <p className="mt-0.5 text-foreground/90">{card.body}</p>
         {card.detail && (
-          <p className="mt-1 break-words rounded bg-panel2 px-1.5 py-1 font-mono text-[10px] text-muted-foreground">
+          <p className="mt-1 break-words rounded bg-panel2 px-1.5 py-1 font-mono text-2xs text-muted-foreground">
             {card.detail}
           </p>
         )}

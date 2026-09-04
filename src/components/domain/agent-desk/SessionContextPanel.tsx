@@ -25,7 +25,7 @@ function ContextRow({
     <div className="flex items-center gap-2 border-t border-border px-2 py-1.5 first:border-t-0">
       <Icon size={13} className="flex-none text-muted-foreground" aria-hidden />
       <strong className="min-w-0 flex-1 truncate text-2xs font-semibold text-foreground">{value}</strong>
-      <span className="flex-none text-[10px] text-muted-foreground">{label}</span>
+      <span className="flex-none text-2xs text-muted-foreground">{label}</span>
     </div>
   )
 }

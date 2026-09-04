@@ -521,8 +521,13 @@ fn map_run_step(
     // `Ended` is a state transition first and a transcript entry second: the
     // session/execution state itself is what listeners actually branch on,
     // so it is mapped to `StateChanged` rather than `MessageAppended` -- a
-    // `RunStep::Ended` still fully determines `event.state` above, so no
-    // field is lost, it just is not restated as a message.
+    // `RunStep::Ended` still fully determines `event.state` above.
+    //
+    // Its `detail` IS dropped here, though -- this comment used to claim no
+    // field was lost, which was wrong and hid the fact that seven distinct
+    // ending sentences collapsed into three states. `cli_run` now emits that
+    // sentence as a `Note` just before the `Ended` step, so it reaches the
+    // transcript as a message and this mapping stays a pure state change.
     if let RunStep::Ended { state, .. } = &event.step {
         return AgentSessionEventKind::StateChanged {
             state: map_run_state(*state),

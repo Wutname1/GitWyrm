@@ -51,7 +51,7 @@ export function SessionUsageCard({ sessionId }: { sessionId: string }) {
         {/* Names what is actually here. Account-wide totals and plan quota
             have no source yet, so promising "overall" described numbers that
             were never going to appear. */}
-        <span className="flex-1 truncate text-[10px] text-muted-foreground">this chat and its agents</span>
+        <span className="flex-1 truncate text-2xs text-muted-foreground">this chat and its agents</span>
         <ChevronDown size={13} className={cn('flex-none text-muted-foreground transition-transform', collapsed && '-rotate-90')} />
       </button>
 
@@ -94,7 +94,7 @@ export function SessionUsageCard({ sessionId }: { sessionId: string }) {
           {agentLines.length > 0 && (
             <ul className="mt-1.5 flex flex-col gap-0.5 border-t border-border pt-1.5" aria-label="Usage by agent">
               {agentLines.map((line) => (
-                <li key={line.key} className="flex items-baseline justify-between gap-2 text-[10px]">
+                <li key={line.key} className="flex items-baseline justify-between gap-2 text-2xs">
                   <span className="min-w-0 truncate text-muted-foreground">{line.label}</span>
                   <span className="flex-none text-right text-foreground">
                     {line.parts.length > 0 ? line.parts.join(' · ') : 'not reported'}

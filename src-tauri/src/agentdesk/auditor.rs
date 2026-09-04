@@ -67,13 +67,25 @@ impl Verdict {
                 "Checked the work over: it does what was asked.".into()
             }
             Verdict::Passed { note } => format!("Checked the work over: {note}"),
+            // Say WHAT is unfinished, not just how many.
+            //
+            // Every other variant interpolates its detail; this one reduced
+            // the reasons to a count, so a run sent back twice told the reader
+            // "Found 3 things that are not really finished" and never which
+            // three. The reasons are already required to be specific enough to
+            // act on -- withholding them left the reader to re-read the diff
+            // themselves, which is the work the audit exists to save.
+            Verdict::Hollow { reasons } if reasons.is_empty() => {
+                "Found something that is not really finished; sending it back.".into()
+            }
             Verdict::Hollow { reasons } => {
                 let n = reasons.len();
-                if n == 1 {
-                    "Found one thing that is not really finished; sending it back.".into()
+                let head = if n == 1 {
+                    "Found one thing that is not really finished; sending it back:".to_string()
                 } else {
-                    format!("Found {n} things that are not really finished; sending it back.")
-                }
+                    format!("Found {n} things that are not really finished; sending it back:")
+                };
+                format!("{head} {}", reasons.join("; "))
             }
             Verdict::Blocked { reason } => format!("This cannot go further without you: {reason}"),
             Verdict::Unavailable { .. } => {
@@ -351,6 +363,34 @@ pub fn clamp_diff(diff: &str) -> (String, bool) {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_hollow_verdict_says_what_is_unfinished() {
+        // It used to say only how many, which is not something a reader can act on.
+        let v = Verdict::Hollow {
+            reasons: vec!["the new setting is never read".into(), "no test covers the retry".into()],
+        };
+        let s = v.summary();
+        assert!(s.contains("the new setting is never read"), "{s}");
+        assert!(s.contains("no test covers the retry"), "{s}");
+        assert!(s.contains("Found 2 things"), "{s}");
+    }
+
+    #[test]
+    fn one_unfinished_thing_reads_as_one() {
+        let v = Verdict::Hollow { reasons: vec!["the button does nothing".into()] };
+        let s = v.summary();
+        assert!(s.contains("Found one thing"), "{s}");
+        assert!(s.contains("the button does nothing"), "{s}");
+    }
+
+    #[test]
+    fn a_hollow_verdict_with_no_reasons_still_reads_as_a_sentence() {
+        // Guards the join: an empty list must not leave a dangling colon.
+        let s = Verdict::Hollow { reasons: vec![] }.summary();
+        assert!(!s.trim_end().ends_with(':'), "{s}");
+        assert!(s.contains("not really finished"), "{s}");
+    }
     use super::*;
 
     fn evidence() -> AuditEvidence {

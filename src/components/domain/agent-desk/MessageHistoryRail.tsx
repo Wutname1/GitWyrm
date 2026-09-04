@@ -149,7 +149,7 @@ export function MessageHistoryRail({
                     {text}
                     {truncated && '…'}
                   </span>
-                  <time className="mt-0.5 block font-mono text-[10px] text-muted-foreground">
+                  <time className="mt-0.5 block font-mono text-2xs text-muted-foreground">
                     {formatClock(m.timestamp)} · you
                   </time>
                 </button>

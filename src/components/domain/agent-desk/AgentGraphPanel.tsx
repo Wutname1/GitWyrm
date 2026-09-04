@@ -91,14 +91,14 @@ function GraphNodeRow({
         />
         <span className="min-w-0 flex-1">
           <strong className="block truncate text-2xs font-semibold text-foreground">{title}</strong>
-          <span className="block truncate text-[10px] text-muted-foreground">{meta || 'agent'}</span>
+          <span className="block truncate text-2xs text-muted-foreground">{meta || 'agent'}</span>
           {activity ? (
-            <span className="block truncate text-[10px] text-foreground/80" title={activity}>
+            <span className="block truncate text-2xs text-foreground/80" title={activity}>
               {activity}
             </span>
           ) : null}
         </span>
-        <span className={cn('flex-none text-[10px] font-semibold', STATUS_TONE[status] ?? 'text-muted-foreground')}>
+        <span className={cn('flex-none text-2xs font-semibold', STATUS_TONE[status] ?? 'text-muted-foreground')}>
           {status}
         </span>
       </button>
@@ -265,9 +265,9 @@ function InspectorCard({
       <div className="text-[9px] font-bold uppercase tracking-wide text-muted-foreground">Selected agent</div>
       <div className="mt-1 text-xs font-semibold text-foreground">{title}</div>
       <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">{description}</p>
-      {filesLine ? <div className="mt-1.5 font-mono text-[10px] text-muted-foreground">{filesLine}</div> : null}
+      {filesLine ? <div className="mt-1.5 font-mono text-2xs text-muted-foreground">{filesLine}</div> : null}
       {usageLine ? (
-        <div className="mt-1.5 font-mono text-[10px] text-muted-foreground" title="What this agent has spent so far">
+        <div className="mt-1.5 font-mono text-2xs text-muted-foreground" title="What this agent has spent so far">
           {usageLine}
         </div>
       ) : null}
@@ -319,7 +319,7 @@ function InspectorCard({
               type="button"
               onClick={() => void resolveConflict('keepHelper')}
               disabled={resolving !== null}
-              className="rounded border border-border bg-panel px-1.5 py-1 text-[10px] font-semibold text-foreground hover:bg-panel3 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded border border-border bg-panel px-1.5 py-1 text-2xs font-semibold text-foreground hover:bg-panel3 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {resolving === 'helper' ? 'Keeping…' : 'Keep this agent’s version'}
             </button>
@@ -327,7 +327,7 @@ function InspectorCard({
               type="button"
               onClick={() => void resolveConflict('keepIntegrated')}
               disabled={resolving !== null}
-              className="rounded border border-border bg-panel px-1.5 py-1 text-[10px] font-semibold text-foreground hover:bg-panel3 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded border border-border bg-panel px-1.5 py-1 text-2xs font-semibold text-foreground hover:bg-panel3 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {resolving === 'integrated' ? 'Keeping…' : 'Keep the other version'}
             </button>
@@ -339,7 +339,7 @@ function InspectorCard({
           <button
             type="button"
             onClick={() => void viewChanges()}
-            className="flex items-center gap-1 rounded border border-border bg-panel2 px-1.5 py-1 text-[10px] font-semibold text-foreground hover:bg-panel3"
+            className="flex items-center gap-1 rounded border border-border bg-panel2 px-1.5 py-1 text-2xs font-semibold text-foreground hover:bg-panel3"
           >
             <FileDiff size={11} aria-hidden />
             View changes
@@ -350,7 +350,7 @@ function InspectorCard({
             type="button"
             onClick={() => setShowOutput((v) => !v)}
             aria-expanded={showOutput}
-            className="rounded border border-border bg-panel2 px-1.5 py-1 text-[10px] font-semibold text-foreground hover:bg-panel3"
+            className="rounded border border-border bg-panel2 px-1.5 py-1 text-2xs font-semibold text-foreground hover:bg-panel3"
           >
             {showOutput ? 'Hide output' : 'Read output'}
           </button>
@@ -359,7 +359,7 @@ function InspectorCard({
           type="button"
           onClick={() => void stopThis()}
           disabled={!canStop || stopping}
-          className="rounded border border-border bg-panel2 px-1.5 py-1 text-[10px] font-semibold text-foreground hover:bg-panel3 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded border border-border bg-panel2 px-1.5 py-1 text-2xs font-semibold text-foreground hover:bg-panel3 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {stopping ? 'Stopping…' : 'Stop agent'}
         </button>
@@ -506,7 +506,7 @@ export function AgentGraphPanel({ session }: { session: AgentSession }) {
           type="button"
           onClick={() => void stopAll()}
           disabled={stopping || activeCount === 0}
-          className="flex-none rounded border border-border bg-panel px-1.5 py-1 text-[10px] font-semibold text-foreground hover:bg-panel3 disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex-none rounded border border-border bg-panel px-1.5 py-1 text-2xs font-semibold text-foreground hover:bg-panel3 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {stopping ? 'Stopping…' : 'Stop all'}
         </button>

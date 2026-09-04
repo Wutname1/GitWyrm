@@ -279,7 +279,7 @@ function MessageRow({
     >
       <span
         className={cn(
-          'flex h-[27px] w-[27px] flex-none items-center justify-center rounded-full text-[10px] font-bold uppercase',
+          'flex h-[27px] w-[27px] flex-none items-center justify-center rounded-full text-2xs font-bold uppercase',
           isUser ? 'bg-panel3 text-sub' : isTool ? 'bg-panel3 text-sub' : 'bg-soft text-accent-text'
         )}
         aria-hidden
@@ -339,7 +339,7 @@ function StandaloneThoughtRow({ message }: { message: SessionMessage }) {
       className="grid grid-cols-[27px_minmax(0,1fr)] gap-2.5 rounded-md px-2 py-1.5 outline-none"
     >
       <span
-        className="flex h-[27px] w-[27px] flex-none items-center justify-center rounded-full bg-soft text-[10px] font-bold uppercase text-accent-text"
+        className="flex h-[27px] w-[27px] flex-none items-center justify-center rounded-full bg-soft text-2xs font-bold uppercase text-accent-text"
         aria-hidden
       >
         {avatarInitials(message)}

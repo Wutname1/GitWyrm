@@ -174,7 +174,7 @@ export function SessionRow({
                 aria-label="Stopped before finishing"
               />
             ) : (
-              <span className="font-mono text-[10px] text-muted-foreground">
+              <span className="font-mono text-2xs text-muted-foreground">
                 {formatCompactAge(header.updatedAt)}
               </span>
             )}

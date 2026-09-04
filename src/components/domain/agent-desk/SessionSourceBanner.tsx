@@ -135,7 +135,7 @@ export function SessionSourceBanner({
       >
         <Icon size={16} className="flex-none text-muted-foreground" aria-label={sourceKindLabel(source.kind)} />
         <span className="flex min-w-0 flex-col leading-tight">
-          <span className="text-[10px] font-bold uppercase tracking-wide text-accent-text">{kicker}</span>
+          <span className="text-2xs font-bold uppercase tracking-wide text-accent-text">{kicker}</span>
           <span className="truncate text-xs font-semibold text-foreground">{title}</span>
           <span className="truncate font-mono text-2xs text-sub">{meta}</span>
         </span>

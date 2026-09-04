@@ -39,7 +39,7 @@ export function TeamShapeControl({
         <div className="mb-2 flex items-center gap-2">
           <GitFork size={13} className="text-accent-text" />
           <strong className="text-xs font-semibold">Who works on this chat?</strong>
-          <span className="ml-auto text-[10px] text-muted-foreground">Change at any time</span>
+          <span className="ml-auto text-2xs text-muted-foreground">Change at any time</span>
         </div>
         <div className="flex flex-col gap-1.5">
           <button

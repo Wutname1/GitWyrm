@@ -81,7 +81,7 @@ export function VirtualSessionList({
                 aria-expanded={!row.collapsed}
                 className={cn(
                   'flex w-full items-center gap-1 px-1.5 text-left',
-                  'text-[10px] font-bold uppercase tracking-wide text-muted-foreground',
+                  'text-2xs font-bold uppercase tracking-wide text-muted-foreground',
                   'hover:text-foreground'
                 )}
               >

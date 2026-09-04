@@ -200,7 +200,7 @@ function AgentRow({ row }: { row: AgentProvider }) {
             <code className="rounded bg-panel3 px-1.5 py-0.5 font-mono text-[10.5px] text-foreground">
               {row.installHint}
             </code>
-            <span className="text-[10px] text-muted-foreground">then press Refresh</span>
+            <span className="text-2xs text-muted-foreground">then press Refresh</span>
           </span>
         )}
 

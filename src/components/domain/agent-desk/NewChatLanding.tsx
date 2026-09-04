@@ -77,7 +77,7 @@ export function NewChatLanding({
                 <FolderGit2 size={17} className="flex-none text-accent-text" aria-hidden />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-semibold text-foreground">{projectName}</span>
-                  <span className="block truncate text-[10px] text-muted-foreground">{projectPath}</span>
+                  <span className="block truncate text-2xs text-muted-foreground">{projectPath}</span>
                 </span>
                 <span className="text-2xs text-muted-foreground">Change</span>
                 <ChevronDown size={12} className="text-muted-foreground" aria-hidden />
@@ -89,7 +89,7 @@ export function NewChatLanding({
                   <FolderGit2 />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate">{project.name}</span>
-                    <span className="block truncate text-[10px] text-muted-foreground">{project.path}</span>
+                    <span className="block truncate text-2xs text-muted-foreground">{project.path}</span>
                   </span>
                   {project.path.toLowerCase() === projectPath.toLowerCase() && <Check size={13} />}
                 </DropdownMenuItem>
@@ -108,7 +108,7 @@ export function NewChatLanding({
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-xs font-medium text-foreground">{startedFrom.title}</span>
                 {startedFrom.detail && (
-                  <span className="block truncate text-[10px] text-muted-foreground">{startedFrom.detail}</span>
+                  <span className="block truncate text-2xs text-muted-foreground">{startedFrom.detail}</span>
                 )}
               </span>
             </div>

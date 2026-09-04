@@ -59,7 +59,7 @@ export function SyncTable({
               <td className="px-1.5 py-2 align-middle">
                 <div className="flex flex-col gap-0.5">
                   <span className="truncate font-medium text-foreground">{entry.displayName}</span>
-                  <span className="truncate text-[10px] text-muted-foreground">
+                  <span className="truncate text-2xs text-muted-foreground">
                     {entry.source.kind === 'repository'
                       ? 'source: this repository'
                       : `source: ${clientLabel(entry.source.client)}`}

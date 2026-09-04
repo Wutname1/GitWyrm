@@ -585,7 +585,7 @@ export function ResultReviewPanel({
                 <DropdownMenuItem key={target.id} onSelect={() => void sendBackToSpec(target)}>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate">{target.label}</span>
-                    <span className="block truncate text-[10px] text-muted-foreground">
+                    <span className="block truncate text-2xs text-muted-foreground">
                       {target.detail}
                     </span>
                   </span>

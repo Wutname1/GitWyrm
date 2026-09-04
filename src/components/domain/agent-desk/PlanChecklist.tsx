@@ -48,7 +48,7 @@ export function PlanChecklist({ rows, label }: PlanChecklistProps) {
           <PlanStateIcon state={row.state} />
           <span className="min-w-0 truncate text-foreground">{row.text}</span>
           {row.owner && (
-            <span className="flex-none whitespace-nowrap font-mono text-[10px] text-muted-foreground">{row.owner}</span>
+            <span className="flex-none whitespace-nowrap font-mono text-2xs text-muted-foreground">{row.owner}</span>
           )}
         </div>
       ))}

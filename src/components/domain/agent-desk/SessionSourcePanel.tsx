@@ -42,7 +42,7 @@ export function SessionSourcePanel({ session, onOpenSource }: { session: AgentSe
       <div className="flex items-start gap-2">
         <Icon size={16} className="mt-0.5 flex-none text-muted-foreground" aria-label={sourceKindLabel(source.kind)} />
         <div className="min-w-0 flex-1">
-          <p className="text-[10px] font-bold uppercase tracking-wide text-accent-text">{kicker}</p>
+          <p className="text-2xs font-bold uppercase tracking-wide text-accent-text">{kicker}</p>
           <p className="truncate text-xs font-semibold text-foreground">{title}</p>
           <p className="truncate font-mono text-2xs text-sub">{meta}</p>
         </div>
