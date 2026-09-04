@@ -1,6 +1,6 @@
 import { type DragEvent, useCallback } from 'react'
 import type { DockKind } from '@/lib/agentWorkspaceLayout'
-import { ALL_DOCK_ZONES, isNoOpDrop, type DockZone } from '@/lib/agentDeskDockPlacement'
+import { ALL_DOCK_ZONES, type DockZone } from '@/lib/agentDeskDockPlacement'
 import { useAgentDeskDragStore } from '@/stores/agentDeskDragStore'
 
 /** MIME type for the native drag payload, mirroring `REF_DND_MIME`'s pattern. */
@@ -66,7 +66,14 @@ export function useAgentDeskPanelDrag(kind: DockKind, fromZone: DockZone | 'popo
         if (!e.dataTransfer.types.includes(PANEL_DND_MIME)) return
         e.preventDefault()
         endDrag()
-        if (!draggingPanel || isNoOpDrop(draggingPanel, zone)) return
+        if (!draggingPanel) return
+        // Every drop goes through the one move path, including a drop onto
+        // the zone the panel is already in. This used to return silently
+        // there, so a deliberate drag gesture finished with no response at
+        // all -- indistinguishable from a broken drop target, and the one
+        // rule this app treats as absolute. `resolveDrop` already has the
+        // words for it ("The panel is already there."); it was simply never
+        // reached from a drag.
         onDropZone(zone)
       },
     }),

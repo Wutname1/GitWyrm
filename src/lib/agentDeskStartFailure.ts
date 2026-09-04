@@ -208,7 +208,11 @@ function unknownFailure(outcome: { kind: string }): StartFailureCard {
   return {
     kind: outcome.kind,
     title: 'The agent could not start',
-    body: 'Try again. If it keeps happening, send a bug report from Settings.',
+    // Agent Desk is its own window and has no Settings in it, so "send a
+      // bug report from Settings" named a place with no path from here. The
+      // graph panel already says "Open the main GitWyrm window first" for
+      // the same reason; this string was left behind.
+      body: 'Try again. If it keeps happening, open the main GitWyrm window and send a bug report from Settings.',
     detail: detail ?? outcome.kind,
     actions: ['tryAgain'],
   }
