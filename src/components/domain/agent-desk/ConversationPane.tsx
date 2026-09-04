@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Download, ExternalLink, FileDiff, GitFork, ListChecks } from 'lucide-react'
+import { Download, ExternalLink, FileDiff, GitFork, ListChecks, TriangleAlert } from 'lucide-react'
 import { toast } from 'sonner'
 import { commands, type MessageTarget, type SessionMessage } from '@/lib/bindings'
 import { useAgentSession } from '@/hooks/useAgentSessions'
@@ -409,7 +409,7 @@ export function ConversationPane({
   showSourceBanner = true,
   paneLabel,
 }: ConversationPaneProps) {
-  const { session, messages, state, isLoading, isError } = useAgentSession(sessionId)
+  const { session, messages, state, isLoading, isError, hasMissingEvents } = useAgentSession(sessionId)
   const targetNav = useMessageTargetNav(session)
   const [flashId, setFlashId] = useState<string | null>(null)
   const transcriptRef = useRef<HTMLDivElement | null>(null)
@@ -670,6 +670,19 @@ export function ConversationPane({
               }
               return nodes
             })
+          )}
+          {hasMissingEvents && (
+            // Said plainly rather than left to a silent gap. Reopening the
+            // chat refetches from the durable file, which has the messages
+            // this window missed -- so the fix is in the person's hands and
+            // the sentence names it.
+            <div
+              role="status"
+              className="flex items-start gap-1.5 rounded border border-[var(--gw-amber)]/40 bg-[var(--gw-amber)]/10 px-2 py-1 text-2xs leading-relaxed text-[var(--gw-amber)]"
+            >
+              <TriangleAlert size={12} className="mt-px flex-none" aria-hidden />
+              <span>Some of this chat did not reach this window. Close it and open it again to load the full record.</span>
+            </div>
           )}
           {runIsActive(state) && (
             // Announced: a screen-reader user needs the run state most, and it

@@ -22,6 +22,18 @@ interface SessionLiveEntry {
   messages: SessionMessage[]
   /** Highest sequence number seen per execution, for gap/duplicate detection. */
   lastSequenceByExecution: Record<string, number>
+  /**
+   * Executions where an event's sequence jumped past `lastSeen + 1`, meaning
+   * at least one event never arrived.
+   *
+   * The backend deliberately leaves this half to the client: it persists a
+   * gapped event with its sequence un-renumbered precisely "so a frontend
+   * listener can notice the jump" (`bridge.rs`). Nothing noticed. A dropped
+   * event was silently accepted and the transcript rendered as complete with
+   * turns missing -- which is the one thing this product says it will never
+   * do, in the surface a person reads to decide whether to keep the work.
+   */
+  gappedExecutionIds: string[]
   /** Latest state pushed by a `stateChanged` event, if newer than the query. */
   state: SessionState | null
   /** Executions superseded mid-flight; their further events are dropped. */
@@ -31,6 +43,7 @@ interface SessionLiveEntry {
 const EMPTY_ENTRY: SessionLiveEntry = {
   messages: [],
   lastSequenceByExecution: {},
+  gappedExecutionIds: [],
   state: null,
   supersededExecutionIds: [],
 }
@@ -148,12 +161,24 @@ export const useAgentSessionStore = create<AgentSessionStore>((set) => ({
         return s
       }
 
+      // A sequence that skips past the next expected number means an event
+      // never arrived. `sequence === 0` is the "not from an execution" case
+      // and is not part of any run, and `lastSeen === 0` is the first event
+      // this window has seen for the execution -- neither is a gap.
+      const gapped =
+        event.sequence !== 0 && lastSeen !== 0 && event.sequence > lastSeen + 1
+          ? entry.gappedExecutionIds.includes(execKey)
+            ? entry.gappedExecutionIds
+            : [...entry.gappedExecutionIds, execKey]
+          : entry.gappedExecutionIds
+
       return {
         bySession: {
           ...s.bySession,
           [event.sessionId]: {
             ...entry,
             messages: [...entry.messages, payload.message],
+            gappedExecutionIds: gapped,
             lastSequenceByExecution: {
               ...entry.lastSequenceByExecution,
               [execKey]: Math.max(lastSeen, event.sequence),

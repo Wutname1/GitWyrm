@@ -9,6 +9,44 @@ beforeEach(() => {
   useAgentSessionStore.setState({ bySession: {} })
 })
 
+describe('missing-event detection', () => {
+  // The backend persists a gapped event with its sequence un-renumbered
+  // precisely so a listener can notice the jump. Nothing noticed: a dropped
+  // event was silently accepted and the transcript rendered as complete with
+  // turns missing -- in the surface a person reads to decide whether to keep
+  // an agent's work.
+  const apply = (e: AgentSessionEvent) => useAgentSessionStore.getState().applyEvent(e)
+  const gaps = () => useAgentSessionStore.getState().bySession[SESSION]?.gappedExecutionIds ?? []
+
+  it('notices when an event never arrived', () => {
+    apply(appended(1, 'a'))
+    apply(appended(4, 'b'))
+    expect(gaps()).toContain(EXEC)
+  })
+
+  it('says nothing when events arrive in order', () => {
+    apply(appended(1, 'a'))
+    apply(appended(2, 'b'))
+    apply(appended(3, 'c'))
+    expect(gaps()).toEqual([])
+  })
+
+  it('does not treat the first event it sees as a gap', () => {
+    // A window that opens mid-run starts at whatever sequence is current;
+    // that is not a dropped event, and crying wolf there would train people
+    // to ignore the one case that matters.
+    apply(appended(7, 'a'))
+    expect(gaps()).toEqual([])
+  })
+
+  it('records an execution once, however many events it drops', () => {
+    apply(appended(1, 'a'))
+    apply(appended(5, 'b'))
+    apply(appended(9, 'c'))
+    expect(gaps()).toEqual([EXEC])
+  })
+})
+
 function message(id: string): SessionMessage {
   return {
     messageId: id,

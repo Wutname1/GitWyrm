@@ -107,9 +107,15 @@ export function useAgentSession(sessionId: string | null) {
     }
   }, [sessionId, session, liveEntry?.messages])
 
+  // Whether any event never arrived for this chat. Surfaced, not just
+  // recorded: the backend leaves gap detection to the client precisely so it
+  // can be said out loud, and a transcript that quietly renders as complete
+  // while turns are missing is the thing this product promises not to do.
+  const hasMissingEvents = (liveEntry?.gappedExecutionIds?.length ?? 0) > 0
+
   const state = liveEntry?.state ?? session?.header.state ?? null
 
-  return { ...query, session, messages, state }
+  return { ...query, session, messages, state, hasMissingEvents }
 }
 
 let listenerRefCount = 0
