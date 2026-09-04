@@ -87,4 +87,5 @@ competing sub-agents, the answer names the losing option too.
 | 79 | 2026-09-04 | Why did a button styled with the accent colour look grey? | Because `--accent` resolves to the same hex as the border colour; the real accent is `--primary`, which the rest of the app already uses. |
 | 80 | 2026-09-04 | What should Agent Setup show when the scan itself fails? | That it could not look, plainly separated from having none, with a retry -- the sibling catalog screen already did this. |
 | 81 | 2026-09-04 | Why move the summary counting out of the component? | Its failure mode was "the numbers do not add up", which is arithmetic and belongs somewhere it can be tested. |
+| 82 | 2026-09-04 | Should the mode pills be hidden or disabled on a read-only chat? | Disabled with the reason shown, following the provider list's pattern, so the option stays discoverable and screen-reader users hear why. |
 

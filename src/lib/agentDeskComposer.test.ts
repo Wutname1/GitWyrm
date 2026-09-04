@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  READ_ONLY_REASON,
   MODE_NOTES,
   canSendComposerDraft,
   modeToExecutionMode,
@@ -47,5 +48,14 @@ describe('MODE_NOTES', () => {
     expect(MODE_NOTES.Ask.length).toBeGreaterThan(0)
     expect(MODE_NOTES.Plan.length).toBeGreaterThan(0)
     expect(MODE_NOTES.Auto.length).toBeGreaterThan(0)
+  })
+})
+
+describe('READ_ONLY_REASON', () => {
+  it('says why in plain words, without naming anything internal', () => {
+    // The pills' tooltip and the note beside them share this one string so
+    // they cannot drift apart.
+    expect(READ_ONLY_REASON).toMatch(/cannot change files/)
+    expect(READ_ONLY_REASON).not.toMatch(/intent|policy|worktree|canWrite/i)
   })
 })

@@ -22,6 +22,7 @@ import { ProviderControl } from './ProviderControl'
 import { TeamShapeControl } from './TeamShapeControl'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useOpenRepo } from '@/hooks/useRepoActions'
+import { useIntentPolicy } from '@/hooks/useAgentSessions'
 import {
   startFailureCardForError,
   startFailureCardForExecution,
@@ -89,6 +90,13 @@ export function SessionComposer({
   )
   const [team, setTeam] = useState<ComposerTeam>(header?.preferredTeam === 'solo' ? 'solo' : 'helpers')
   const [teamOpen, setTeamOpen] = useState(false)
+
+  // Whether this chat can change files at all. Asked of the backend rather
+  // than re-derived here: `policy.rs` owns the rule, and a second copy of it
+  // in the UI is how the two start disagreeing. Assumed writable until the
+  // answer arrives, so the controls do not flicker shut on every open.
+  const intentPolicy = useIntentPolicy(header?.intent ?? null)
+  const canWrite = intentPolicy.data?.canWrite ?? true
   // `null` means "whatever the default is" -- deliberately not resolved to the
   // default tool's id, so a chat nobody gave a preference keeps following the
   // default if it ever changes.
@@ -397,7 +405,7 @@ export function SessionComposer({
         </div>
       )}
       <div className="rounded-lg border border-border bg-panel2 p-1.5">
-        <OperatingModeControl mode={mode} onChange={changeMode} />
+        <OperatingModeControl mode={mode} onChange={changeMode} canWrite={canWrite} />
 
         <Textarea
           // Stable id so "New chat" can put the caret straight in here.

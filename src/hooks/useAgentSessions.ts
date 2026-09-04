@@ -7,6 +7,7 @@ import {
   type AgentSessionEvent,
   type SessionListFilterInput,
 } from '@/lib/bindings'
+import type { SessionIntent } from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
 import { log } from '@/lib/log'
 import { liveOverlayIsRedundant, mergeSessionMessages, useAgentSessionStore } from '@/stores/agentSessionStore'
@@ -171,4 +172,25 @@ export function useAgentSessionListener() {
     // client. Neither should retrigger the subscription.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+}
+
+/**
+ * Whether a chat's purpose allows changing files at all.
+ *
+ * The backend owns this: `policy.rs` decides from the intent, and mode "can
+ * never widen what the intent allows". The composer used to offer Plan and
+ * Auto on every chat, including ones the engine launches with the write and
+ * shell tools denied -- so a person could pick Auto on "Explain this issue"
+ * and watch nothing happen, with no reason given.
+ *
+ * The answer depends only on the intent, so it never goes stale within a
+ * session.
+ */
+export function useIntentPolicy(intent: SessionIntent | null) {
+  return useQuery({
+    queryKey: keys.agentIntentPolicy(intent ?? 'none'),
+    enabled: intent != null,
+    staleTime: Infinity,
+    queryFn: async () => await commands.agentIntentPolicy(intent!),
+  })
 }

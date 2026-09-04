@@ -54,3 +54,12 @@ export function canSendComposerDraft(input: {
 }): boolean {
   return input.draft.trim().length > 0 && !input.sending && input.sessionId != null
 }
+
+/**
+ * Why Plan and Auto are unavailable in a chat that cannot change files.
+ *
+ * Said once, here, because the mode pills' tooltip and the note beside them
+ * must not drift apart, and because a control that refuses a click owes the
+ * person a reason rather than just going quiet.
+ */
+export const READ_ONLY_REASON = 'This chat only reads and explains, so it cannot change files.'
