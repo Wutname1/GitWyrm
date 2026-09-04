@@ -62,6 +62,36 @@ describe('agentDeskUiStore: hydration and persistence', () => {
     expect(parsed.layout.sourceBarsVisible).toBe(false)
   })
 
+  it('never puts one chat in both panes, swapping them instead', () => {
+    // Drafts are keyed by session id, so the same chat in two panes would give
+    // one conversation two composers writing the same draft -- typing in one
+    // would live-overwrite the other.
+    const store = useAgentDeskUiStore.getState()
+    store.hydrate()
+    store.openSplit()
+    store.setPaneSession('primary', 'session-a')
+    store.setPaneSession('secondary', 'session-b')
+
+    // Opening the secondary pane's chat in the primary pane swaps the two.
+    store.setPaneSession('primary', 'session-b')
+    const after = useAgentDeskUiStore.getState().layout
+    expect(after.primarySessionId).toBe('session-b')
+    expect(after.secondarySessionId).toBe('session-a')
+  })
+
+  it('leaves the other pane alone when opening a chat it is not already showing', () => {
+    const store = useAgentDeskUiStore.getState()
+    store.hydrate()
+    store.openSplit()
+    store.setPaneSession('primary', 'session-a')
+    store.setPaneSession('secondary', 'session-b')
+
+    store.setPaneSession('primary', 'session-c')
+    const after = useAgentDeskUiStore.getState().layout
+    expect(after.primarySessionId).toBe('session-c')
+    expect(after.secondarySessionId).toBe('session-b')
+  })
+
   it('round-trips a real layout through hydrate() after a previous session persisted it', () => {
     useAgentDeskUiStore.getState().hydrate()
     useAgentDeskUiStore.getState().openSplit()

@@ -175,8 +175,18 @@ export const useAgentDeskUiStore = create<AgentDeskUiState>((set, get) => ({
 
   setPaneSession: (pane, sessionId) => {
     set((s) => {
+      // One chat cannot occupy both panes. It would render two transcripts and
+      // two composers over the same session, and drafts are keyed by session
+      // id -- so typing in one pane would live-overwrite the other. Opening a
+      // chat that is already in the other pane swaps the two rather than
+      // duplicating it, which is also what a person means by the gesture.
+      const other = pane === 'primary' ? s.layout.secondarySessionId : s.layout.primarySessionId
+      const displaced = sessionId !== null && other === sessionId
+      const mine = pane === 'primary' ? s.layout.primarySessionId : s.layout.secondarySessionId
       const layout: AgentWorkspaceLayout =
-        pane === 'primary' ? { ...s.layout, primarySessionId: sessionId } : { ...s.layout, secondarySessionId: sessionId }
+        pane === 'primary'
+          ? { ...s.layout, primarySessionId: sessionId, secondarySessionId: displaced ? mine : s.layout.secondarySessionId }
+          : { ...s.layout, secondarySessionId: sessionId, primarySessionId: displaced ? mine : s.layout.primarySessionId }
       schedulePersist(layout, s.hydrated)
       return { layout }
     })
