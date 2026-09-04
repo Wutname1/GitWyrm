@@ -306,3 +306,57 @@ describe('MAX_CONCURRENT_HELPERS', () => {
     expect(Number(match![1])).toBe(MAX_CONCURRENT_HELPERS)
   })
 })
+
+describe('every state a node can be in has both a dot and a label tone', () => {
+  // These two lookup tables have now drifted apart twice: once when `failed`
+  // and `interrupted` fell through to the neutral dot, and again when the fix
+  // for `stopped` was applied to the text table and not the dot one. Checking
+  // by hand each time catches it after it ships.
+  //
+  // Every state the backend can put an execution in must produce a label, and
+  // that label must appear in both tables. Anything new fails here rather
+  // than rendering as "not started".
+  const EVERY_STATE = [
+    'draft',
+    'ready',
+    'preparing',
+    'working',
+    'needsInput',
+    'finished',
+    'failed',
+    'stopped',
+    'missingSource',
+    'interrupted',
+  ] as const
+
+  it('leaves no state rendering as the faint not-started dot by accident', async () => {
+    // @ts-expect-error -- no @types/node in this project; available at runtime
+    const { readFileSync } = await import('node:fs')
+    // @ts-expect-error -- no @types/node in this project; available at runtime
+    const { fileURLToPath } = await import('node:url')
+    const root = fileURLToPath(new URL('../', import.meta.url))
+    const panel = readFileSync(`${root}components/domain/agent-desk/AgentGraphPanel.tsx`, 'utf8')
+
+    const missing: string[] = []
+    for (const state of EVERY_STATE) {
+      const node = {
+        execution: exec({ executionId: 'h1', state }),
+        isLead: false,
+        blockedOn: [],
+        waitingForSlot: false,
+      }
+      const label = nodeStatusLabel(node)
+      if (label === null || label === undefined) continue
+      // `draft` and `ready` genuinely MEAN not-started, so the faint neutral
+      // dot is the right answer for them and only for them. Every other state
+      // describes something that has happened and must be distinguishable
+      // from a node nobody has touched.
+      if (state === 'draft' || state === 'ready') continue
+      if (nodeDotTone(node) === undefined) missing.push(`${state} -> "${label}" has no dot tone`)
+      if (!panel.includes(`'${label}'`) && !panel.includes(`${label}:`)) {
+        missing.push(`${state} -> "${label}" has no label tone`)
+      }
+    }
+    expect(missing, 'these states would render as if nothing had happened').toEqual([])
+  })
+})
