@@ -115,4 +115,5 @@ competing sub-agents, the answer names the losing option too.
 | 107 | 2026-09-04 | Should the Start screen say when each helper is finished, not just what it may touch? | Yes -- the plan carries a finish line for every helper and the screen where you agree to the plan never showed it. |
 | 108 | 2026-09-04 | Is "0 left" wrong for someone over their plan allowance? | It would be, but no real path populates the allowance yet, so no row renders and the clamp is unreachable for now. |
 | 109 | 2026-09-04 | Does GitWyrm withhold secrets when copying settings between apps? | No -- it writes them in full, because a connector without its credential does not work; the warning now says so instead of implying the opposite. |
+| 110 | 2026-09-04 | Should a run that crashed look the same as one that finished? | No -- both said "Ready to review" over the same file list, and what is in that list means something different in each case. |
 

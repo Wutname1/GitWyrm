@@ -1,4 +1,4 @@
-import type { OpenSpecSessionStatus, OpenSpecSourceContext, OpenSpecSourceOutcome } from '@/lib/bindings'
+import type { OpenSpecContextDriftOutcome, OpenSpecSessionStatus, OpenSpecSourceContext, OpenSpecSourceOutcome } from '@/lib/bindings'
 
 export type OpenSpecStatusTone = 'neutral' | 'amber' | 'red'
 
@@ -77,4 +77,40 @@ export function openSpecProgressLine(
     return progress.total === 1 ? 'The one task is done' : `All ${tasks(progress.total)} done`
   }
   return `${progress.done} of ${tasks(progress.total)} done`
+}
+
+/**
+ * Why the spec-drift check could not answer, when it could not.
+ *
+ * The panel tested `kind === 'checked' && diverged`, so five failure modes --
+ * the repo not open, no spec folder, a damaged or unreadable session file --
+ * rendered exactly like "the spec has not changed since the agent read it".
+ * That is a blocking safety signal reporting a false negative: a silent
+ * all-clear on a check that never ran.
+ *
+ * `checked` and `nothingToCompare` return null: the first is a real answer the
+ * caller reads directly, and the second means there is genuinely nothing to
+ * compare against, which is not a failure.
+ */
+export function explainDriftUnavailable(
+  outcome: OpenSpecContextDriftOutcome | undefined,
+  isError: boolean
+): string | null {
+  if (isError) return 'GitWyrm could not check whether the plan has changed since the agent read it.'
+  if (!outcome) return null
+  switch (outcome.kind) {
+    case 'checked':
+    case 'nothingToCompare':
+      return null
+    case 'repoNotOpen':
+      return 'This project is not open, so GitWyrm cannot tell whether the plan has changed.'
+    case 'noOpenSpecFolder':
+      return 'This project has no plan folder any more, so there is nothing to compare against.'
+    case 'sessionNotFound':
+      return 'That chat is no longer there, so its plan cannot be compared.'
+    case 'sessionDamaged':
+      return `That chat's saved file could not be read, so the plan could not be compared: ${outcome.reason}`
+    case 'sessionUnavailable':
+      return `GitWyrm could not read that chat right now, so the plan could not be compared: ${outcome.detail}`
+  }
 }

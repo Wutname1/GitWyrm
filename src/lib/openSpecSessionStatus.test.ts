@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { OpenSpecSessionStatus } from '@/lib/bindings'
-import { openSpecProgressLine, openSpecStatusLine } from './openSpecSessionStatus'
+import { explainDriftUnavailable, openSpecProgressLine, openSpecStatusLine } from './openSpecSessionStatus'
 
 describe('openSpecStatusLine', () => {
   it('shows nothing for an undefined status (still loading)', () => {
@@ -87,5 +87,20 @@ describe('openSpecProgressLine', () => {
       expect(openSpecProgressLine({ kind } as Parameters<typeof openSpecProgressLine>[0])).toBeNull()
     }
     expect(openSpecProgressLine(undefined)).toBeNull()
+  })
+})
+
+describe('explainDriftUnavailable', () => {
+  it('says when the check could not run, rather than implying nothing changed', () => {
+    expect(explainDriftUnavailable({ kind: 'repoNotOpen' }, false)).toMatch(/cannot tell/i)
+    expect(explainDriftUnavailable({ kind: 'sessionDamaged', reason: 'bad json' }, false)).toMatch(/bad json/)
+    expect(explainDriftUnavailable(undefined, true)).toMatch(/could not check/i)
+  })
+  it('stays silent when there is a real answer', () => {
+    // `checked` is read directly by the caller; `nothingToCompare` is not a
+    // failure, so neither should raise an alarm.
+    expect(explainDriftUnavailable({ kind: 'checked', diverged: false, launched_at: '' }, false)).toBeNull()
+    expect(explainDriftUnavailable({ kind: 'nothingToCompare' }, false)).toBeNull()
+    expect(explainDriftUnavailable(undefined, false)).toBeNull()
   })
 })

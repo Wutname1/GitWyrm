@@ -10,6 +10,7 @@ import type {
   ToggleOutcome,
 } from '@/lib/bindings'
 import {
+  runOutcomeLabel,
   explainDraftPullRequestRefusal,
   canEscalateToFix,
   changedPathStatusLabel,
@@ -685,5 +686,22 @@ describe('explainDraftPullRequestRefusal', () => {
     for (const k of kinds) {
       expect(explainDraftPullRequestRefusal(k)).not.toMatch(/outcome|session_id|executionId|worktree/i)
     }
+  })
+})
+
+describe('runOutcomeLabel', () => {
+  it('says nothing extra for a run that simply finished', () => {
+    // The state badge beside it already says the work is ready.
+    expect(runOutcomeLabel('finished')).toBeNull()
+  })
+  it('distinguishes the three ways a run does not simply finish', () => {
+    expect(runOutcomeLabel('stopped')).toMatch(/you stopped/i)
+    expect(runOutcomeLabel('failed')).toMatch(/did not finish/i)
+    expect(runOutcomeLabel('conflicted')).toMatch(/clash/i)
+  })
+  it('warns that what is there may be partial', () => {
+    // The point of the line: a crashed run was reviewed as if complete.
+    expect(runOutcomeLabel('stopped')).toMatch(/part-way|incomplete/i)
+    expect(runOutcomeLabel('failed')).toMatch(/incomplete/i)
   })
 })

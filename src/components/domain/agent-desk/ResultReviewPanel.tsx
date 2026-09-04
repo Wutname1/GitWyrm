@@ -38,6 +38,7 @@ import {
   hasFailingCheck,
   resultActionAvailability,
   resultStateLabel,
+  runOutcomeLabel,
   sortResultsNewestFirst,
   explainDraftPullRequestRefusal,
 } from '@/lib/agentDeskResult'
@@ -442,6 +443,17 @@ export function ResultReviewPanel({
           </span>
         )}
       </div>
+
+      {/*
+        How the run ended. `outcome` is on every record and was read by no
+        component, so a crashed run, a stopped one and a completed one all
+        showed the same badge, while the file list below means something
+        different in each case. Below the badge row rather than inside it: that
+        row is a justify-between header, and this is a sentence.
+      */}
+      {runOutcomeLabel(record.outcome) && (
+        <p className="text-2xs leading-relaxed text-[var(--gw-amber)]">{runOutcomeLabel(record.outcome)}</p>
+      )}
 
       {destination && (
         // Always visible, above everything: the answer to "where does this

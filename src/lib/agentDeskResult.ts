@@ -8,6 +8,7 @@ import type {
   KeepResultOutcome,
   ResultCheckOutcome,
   ResultChangedPath,
+  ResultOutcomeKind,
   ResultRecord,
   ResultState,
   SessionIntent,
@@ -736,5 +737,30 @@ export function explainDraftPullRequestRefusal(
       return `That chat's saved file could not be read: ${outcome.reason}`
     case 'sessionUnavailable':
       return `GitWyrm could not read that chat right now: ${outcome.detail}`
+  }
+}
+
+/**
+ * How a run ended, for the line above the file list.
+ *
+ * `ResultOutcomeKind` is persisted on every record and read by no component,
+ * so a run that crashed, one the person stopped, and one that hit a conflict
+ * all showed the same "Ready to review" badge as one that completed. Someone
+ * coming back to a finished run could not tell which had happened.
+ *
+ * `finished` returns null: the state badge beside it already says the work is
+ * ready, and repeating "it finished" adds nothing. The other three change what
+ * the reader should expect from the file list below.
+ */
+export function runOutcomeLabel(outcome: ResultOutcomeKind): string | null {
+  switch (outcome) {
+    case 'finished':
+      return null
+    case 'stopped':
+      return 'You stopped this run, so it may be part-way through.'
+    case 'failed':
+      return 'This run did not finish. What is here may be incomplete.'
+    case 'conflicted':
+      return 'This run hit a clash with other work and stopped there.'
   }
 }

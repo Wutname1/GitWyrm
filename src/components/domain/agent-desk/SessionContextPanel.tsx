@@ -9,6 +9,7 @@ import { adapterDisplayName } from '@/lib/agentImportDisplay'
 import { explainRefreshSourceOutcome } from '@/lib/agentDeskSources'
 import { describeError, log } from '@/lib/log'
 import { useOpenSpecContextDrift } from '@/hooks/useOpenspecSessionSource'
+import { explainDriftUnavailable } from '@/lib/openSpecSessionStatus'
 import { SessionUsageCard } from './SessionUsageCard'
 
 /**
@@ -133,14 +134,26 @@ export function SessionContextPanel({ session }: { session: AgentSession }) {
     }
   }
 
+  // Why the drift check could not answer. Without this, five failure modes --
+  // repo not open, no spec folder, damaged or unreadable session -- rendered
+  // exactly like "the spec has not changed", which is a silent all-clear on a
+  // check that never ran.
+  const driftUnavailable = isOpenSpecSource ? explainDriftUnavailable(drift.data, drift.isError) : null
+
   return (
     <div className="flex flex-col gap-2">
+      {driftUnavailable && (
+        <div className="flex items-start gap-1.5 rounded-md border border-border bg-panel2 px-2 py-1.5 text-2xs leading-relaxed text-muted-foreground">
+          <TriangleAlert size={12} className="mt-px flex-none text-[var(--gw-amber)]" aria-hidden />
+          <span className="min-w-0 flex-1">{driftUnavailable}</span>
+        </div>
+      )}
       {diverged && (
         <div className="flex items-start gap-1.5 rounded-md border border-[var(--gw-amber)]/40 bg-[var(--gw-amber)]/10 px-2 py-1.5 text-2xs leading-relaxed text-[var(--gw-amber)]">
           <TriangleAlert size={12} className="mt-px flex-none" aria-hidden />
           <div className="flex min-w-0 flex-1 flex-col gap-1.5">
             <span>
-              The spec changed since the last time an agent read it. Refresh it below, or just send a message -- the
+              The spec changed since the last time an agent read it. Refresh it below, or just send a message: the
               next turn reads the current files either way.
             </span>
             <button
