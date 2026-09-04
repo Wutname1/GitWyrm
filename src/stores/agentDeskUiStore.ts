@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { log, describeError } from '@/lib/log'
+import { resolveSplitCollapse } from '@/lib/agentDeskPaneTargeting'
 import {
   DEFAULT_AGENT_WORKSPACE_LAYOUT,
   DEFAULT_DOCK_SIZE_PX,
@@ -217,15 +218,12 @@ export const useAgentDeskUiStore = create<AgentDeskUiState>((set, get) => ({
       // Spec 5.6: collapsing keeps the *active* pane's session, including
       // promotion of the right pane -- so when secondary was active, its
       // session becomes the sole (primary) one rather than being discarded.
-      const keepSessionId =
-        s.layout.activePane === 'secondary' ? s.layout.secondarySessionId : s.layout.primarySessionId
-      const layout: AgentWorkspaceLayout = {
-        ...s.layout,
-        split: false,
-        activePane: 'primary',
-        primarySessionId: keepSessionId,
-        secondarySessionId: null,
-      }
+      //
+      // That rule lived here as a hand-inlined copy while `resolveSplitCollapse`
+      // sat exported, documented and tested sixty lines away with no caller.
+      // They agreed, but the last time this codebase kept parallel copies of a
+      // rule one of them silently omitted a state, so there is now one.
+      const layout: AgentWorkspaceLayout = { ...s.layout, split: false, ...resolveSplitCollapse(s.layout) }
       schedulePersist(layout, s.hydrated)
       return { layout }
     })
