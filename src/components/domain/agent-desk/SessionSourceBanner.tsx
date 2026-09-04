@@ -10,8 +10,8 @@ import {
   MessageSquareText,
 } from 'lucide-react'
 import type { SessionSource, SessionState } from '@/lib/bindings'
+import { describeSnapshotFreshness } from '@/lib/agentDeskSources'
 import { sourceKindLabel } from '@/lib/agentSessionGrouping'
-import { cn } from '@/lib/utils'
 
 export const SOURCE_KIND_ICON: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
   manual: MessageSquareText,
@@ -110,6 +110,10 @@ export function SessionSourceBanner({
   const { kicker, title, meta } = describeSource(source)
   const Icon = SOURCE_KIND_ICON[source.kind] ?? MessageSquareText
   const liveUnavailable = source.kind !== 'manual' && source.snapshot.liveUnavailable
+  // The banner is one dense row, so the age rides as a tooltip rather than a
+  // second line -- the full sentence lives in the Source panel.
+  const freshness =
+    source.kind === 'manual' ? null : describeSnapshotFreshness(source.snapshot.capturedAt, liveUnavailable)
   const missingSource = state === 'missingSource'
   const readOnly = source.kind === 'pullRequest' || source.kind === 'commit' || source.kind === 'diff'
 
@@ -134,11 +138,17 @@ export function SessionSourceBanner({
         {missingSource ? (
           <span className="font-semibold text-[var(--gw-red)]">Could not load this source</span>
         ) : liveUnavailable ? (
-          <span className="font-semibold text-[var(--gw-amber)]">No longer available</span>
+          <span className="font-semibold text-[var(--gw-amber)]" title={freshness ?? undefined}>
+            No longer available
+          </span>
         ) : readOnly ? (
-          <span className="font-semibold text-muted-foreground">Read-only review</span>
+          <span className="font-semibold text-muted-foreground" title={freshness ?? undefined}>
+            Read-only review
+          </span>
         ) : (
-          <span className={cn('font-semibold', 'text-accent-text')}>Live source</span>
+          <span className="font-semibold text-accent-text" title={freshness ?? undefined}>
+            Live source
+          </span>
         )}
       </div>
     </div>

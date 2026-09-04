@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { issueSourceInput, openSpecChangeSourceInput, openSpecTaskSourceInput, pullRequestSourceInput } from './agentDeskSources'
+import {
+  describeSnapshotFreshness,
+  issueSourceInput,
+  openSpecChangeSourceInput,
+  openSpecTaskSourceInput,
+  pullRequestSourceInput,
+} from './agentDeskSources'
 import type { IssueDetail, IssueSummary, PrDetail, PrSummary, SpecChange, SpecTask } from './bindings'
 
 const issueSummary = (over: Partial<IssueSummary> = {}): IssueSummary => ({
@@ -219,5 +225,39 @@ describe('openSpecTaskSourceInput', () => {
     const task = specTask({ text: '3.1 Do the thing' })
     const input = openSpecTaskSourceInput(change, task)
     expect(input.summary).toBe('3.1 Do the thing')
+  })
+})
+
+describe('describeSnapshotFreshness', () => {
+  const now = Date.parse('2026-09-03T12:00:00Z')
+  const at = (iso: string) => describeSnapshotFreshness(iso, false, now)
+
+  it('says how long ago the source was checked, in words not a timestamp', () => {
+    expect(at('2026-09-03T11:59:30Z')).toBe('Checked just now.')
+    expect(at('2026-09-03T11:45:00Z')).toBe('Checked 15 minutes ago.')
+    expect(at('2026-09-03T09:00:00Z')).toBe('Checked 3 hours ago.')
+    expect(at('2026-08-29T12:00:00Z')).toBe('Checked 5 days ago.')
+  })
+
+  it('uses the singular where it should', () => {
+    expect(at('2026-09-03T11:59:00Z')).toBe('Checked 1 minute ago.')
+    expect(at('2026-09-03T11:00:00Z')).toBe('Checked 1 hour ago.')
+    expect(at('2026-09-02T12:00:00Z')).toBe('Checked 1 day ago.')
+  })
+
+  it('stops counting rather than claiming precision it does not have', () => {
+    expect(at('2024-01-01T00:00:00Z')).toBe('Checked a long time ago.')
+  })
+
+  it('says the panel is showing a saved copy when the live source is gone', () => {
+    // "No longer available" alone tells the person the source is gone without
+    // saying what they are still looking at.
+    const line = describeSnapshotFreshness('2026-09-03T09:00:00Z', true, now)
+    expect(line).toMatch(/Saved copy from 3 hours ago/)
+    expect(line).toMatch(/what the chat still shows/)
+  })
+
+  it('says nothing rather than guessing at an unreadable timestamp', () => {
+    expect(describeSnapshotFreshness('not a date', false, now)).toBeNull()
   })
 })

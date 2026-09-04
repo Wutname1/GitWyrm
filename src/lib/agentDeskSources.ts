@@ -119,3 +119,43 @@ export function openSpecTaskSourceInput(
     summary: task.text,
   }
 }
+
+/**
+ * Plain-language line saying how old the saved copy of a source is, and
+ * whether it is still the live one.
+ *
+ * A session keeps a snapshot of what started it precisely so the history
+ * still reads correctly after the issue, pull request or spec moves on. That
+ * only works if the person can tell they are looking at a saved copy: without
+ * it, a months-old issue summary reads as current, and "No longer available"
+ * says the source is gone without saying what the panel is still showing.
+ *
+ * Returns `null` when there is nothing honest to say -- a manual session has
+ * no source, and an unparseable timestamp is not worth guessing at.
+ */
+export function describeSnapshotFreshness(
+  capturedAt: string,
+  liveUnavailable: boolean,
+  now: number = Date.now()
+): string | null {
+  const then = Date.parse(capturedAt)
+  if (Number.isNaN(then)) return null
+
+  const mins = Math.max(0, Math.floor((now - then) / 60000))
+  let age: string
+  if (mins < 1) age = 'just now'
+  else if (mins < 60) age = `${mins} minute${mins === 1 ? '' : 's'} ago`
+  else {
+    const hours = Math.floor(mins / 60)
+    if (hours < 24) age = `${hours} hour${hours === 1 ? '' : 's'} ago`
+    else {
+      const days = Math.floor(hours / 24)
+      age = days < 30 ? `${days} day${days === 1 ? '' : 's'} ago` : 'a long time ago'
+    }
+  }
+
+  // When the live source cannot be reached, the saved copy is all there is --
+  // say so, rather than leaving "No longer available" to imply the panel is
+  // showing nothing.
+  return liveUnavailable ? `Saved copy from ${age}. This is what the chat still shows.` : `Checked ${age}.`
+}

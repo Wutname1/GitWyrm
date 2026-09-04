@@ -3,6 +3,7 @@ import type { AgentSession } from '@/lib/bindings'
 import { sourceKindLabel } from '@/lib/agentSessionGrouping'
 import { openSpecStatusLine } from '@/lib/openSpecSessionStatus'
 import { useOpenSpecSessionStatus } from '@/hooks/useOpenspecSessionSource'
+import { describeSnapshotFreshness } from '@/lib/agentDeskSources'
 import { describeSource, SOURCE_KIND_ICON } from './SessionSourceBanner'
 
 /**
@@ -22,6 +23,10 @@ export function SessionSourcePanel({ session, onOpenSource }: { session: AgentSe
   const { kicker, title, meta } = describeSource(source)
   const Icon = SOURCE_KIND_ICON[source.kind] ?? MessageSquareText
   const liveUnavailable = source.kind !== 'manual' && source.snapshot.liveUnavailable
+  // How old the saved copy is. Without this the panel shows a summary that
+  // reads as current no matter how long ago it was captured.
+  const freshness =
+    source.kind === 'manual' ? null : describeSnapshotFreshness(source.snapshot.capturedAt, liveUnavailable)
   const missingSource = header.state === 'missingSource'
   const isOpenSpecSource = source.kind === 'openSpecChange' || source.kind === 'openSpecTask'
 
@@ -60,6 +65,8 @@ export function SessionSourcePanel({ session, onOpenSource }: { session: AgentSe
       ) : liveUnavailable ? (
         <p className="text-2xs font-semibold text-[var(--gw-amber)]">No longer available.</p>
       ) : null}
+
+      {freshness && <p className="text-2xs leading-relaxed text-muted-foreground">{freshness}</p>}
 
       <button
         type="button"
