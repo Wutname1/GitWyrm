@@ -686,21 +686,6 @@ pub async fn run_task(
         ),
     }};
 
-    // Say how it ended, in the transcript, before the state change.
-    //
-    // `RunStep::Ended` carries a hand-written sentence for each of the seven
-    // ways a run can finish, but Agent Desk turns that step into a bare
-    // `StateChanged` and keeps only the state -- so `Passed`, `NothingChanged`
-    // and `Unavailable` all arrived as an indistinguishable "Finished". The
-    // worst of those is `NothingChanged`: it breaks out of the audit loop
-    // before the verdict note is written, so a run that changed nothing
-    // produced no transcript entry at all and simply read as finished, next
-    // to an empty diff.
-    //
-    // Emitting the sentence as a `Note` first is what makes it survive: notes
-    // become transcript messages, and the `Ended` step still sets the state
-    // immediately after.
-    sink(state, RunStep::Note { text: detail.clone() });
     sink(state, RunStep::Ended { state, detail });
     conn.shutdown().await;
 }

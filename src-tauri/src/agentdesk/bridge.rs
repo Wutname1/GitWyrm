@@ -518,21 +518,25 @@ fn map_run_step(
     occurred_at: &str,
     event: &RunEventKind,
 ) -> AgentSessionEventKind {
-    // `Ended` is a state transition first and a transcript entry second: the
-    // session/execution state itself is what listeners actually branch on,
-    // so it is mapped to `StateChanged` rather than `MessageAppended` -- a
-    // `RunStep::Ended` still fully determines `event.state` above.
+    // `Ended` used to return `StateChanged` and drop its `detail`, under a
+    // comment claiming no field was lost. That was wrong: the step carries a
+    // hand-written sentence for each of seven outcomes (`cli_run.rs`'s
+    // `audit_end_state`), and collapsing them into three states made
+    // `Passed`, `NothingChanged` and `Unavailable` indistinguishable. The
+    // worst case was a run that changed nothing reading simply as "Finished"
+    // beside an empty diff.
     //
-    // Its `detail` IS dropped here, though -- this comment used to claim no
-    // field was lost, which was wrong and hid the fact that seven distinct
-    // ending sentences collapsed into three states. `cli_run` now emits that
-    // sentence as a `Note` just before the `Ended` step, so it reaches the
-    // transcript as a message and this mapping stays a pure state change.
-    if let RunStep::Ended { state, .. } = &event.step {
-        return AgentSessionEventKind::StateChanged {
-            state: map_run_state(*state),
-        };
-    }
+    // It now falls through to `build_message`, which renders it as a
+    // `MessageKind::System` row. Losing the explicit `StateChanged` costs
+    // nothing: `apply_run_event` moves the session's header state from
+    // `event.state` for every event regardless of kind (see the lead-state
+    // rule below), so the transition still happens -- it just arrives
+    // alongside the sentence instead of instead of it.
+    //
+    // Deliberately NOT emitted as a `RunStep::Note` from `cli_run`: notes
+    // coalesce into the preceding note from the same execution, so the
+    // ending sentence would have been glued onto the tail of the agent's
+    // last chat message rather than standing on its own as the app speaking.
 
     // Usage is bookkeeping, not conversation: it has already been folded into
     // the execution record by `apply_run_event`, and appending a transcript
@@ -850,7 +854,7 @@ mod tests {
     }
 
     #[test]
-    fn ended_is_a_state_change_not_a_transcript_message() {
+    fn ended_says_how_it_ended_and_still_moves_the_state() {
         let mut session = session();
         let exec = execution_id_for_run_session("run-1");
         let event = run_event(
@@ -864,12 +868,19 @@ mod tests {
         let BridgeOutcome::Applied { session: applied, event: durable } = outcome else {
             panic!("expected Applied");
         };
-        assert!(matches!(
-            durable.kind,
-            AgentSessionEventKind::StateChanged { state: SessionState::Finished }
-        ));
+        // This used to assert `StateChanged` and an empty transcript, which
+        // pinned the very behaviour that hid the ending sentence: seven
+        // distinct outcomes arrived as three states, and a run that changed
+        // nothing simply read "Finished" beside an empty diff.
+        let AgentSessionEventKind::MessageAppended { message } = durable.kind else {
+            panic!("expected the ending sentence to be appended as a message");
+        };
+        assert_eq!(message.kind, MessageKind::System);
+        assert!(message.plain_content.contains("Finished."), "{:?}", message.plain_content);
+        // The state transition is NOT lost by appending a message: the header
+        // tracks the lead execution's state for every event, whatever its kind.
         assert_eq!(applied.header.state, SessionState::Finished);
-        assert!(applied.messages.is_empty());
+        assert_eq!(applied.messages.len(), 1);
         assert!(applied.executions[0].ended_at.is_some());
     }
 

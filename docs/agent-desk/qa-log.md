@@ -69,4 +69,6 @@ competing sub-agents, the answer names the losing option too.
 | 61 | 2026-09-04 | Why move the gate's warning text rather than leave a working re-export? | Deleting the dead run surface would have silently taken the live gate's safety warnings with it. |
 | 62 | 2026-09-04 | Should a change we could not read show 0% progress? | No -- it shows nothing, because unknown must stay unknown and a change nobody could read is not a change with no progress. |
 | 63 | 2026-09-04 | Is a change with no tasks written yet at 0%? | No -- it reads "No tasks written yet", the distinction the backend already drew as "a draft rather than 0% of nothing". |
+| 64 | 2026-09-04 | Should a compile-time mechanism replace fixing these dropped-field bugs one at a time? | No -- both proposed lints were measured against this crate and neither catches the very defect that motivated them, so the per-instance fixes plus one narrow new sweep stay. |
+| 65 | 2026-09-04 | Why did the ending sentence need a system message rather than a note? | Notes get folded into the previous note, so it would have been glued onto the end of the agent's own last message instead of the app speaking for itself. |
 
