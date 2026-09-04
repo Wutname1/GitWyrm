@@ -470,11 +470,18 @@ export function DeskDetail({
   } | null>(null)
   const [drafting, setDrafting] = useState(false)
   const replaceDraft = useSpecDraftStore((s) => s.replace)
-  const changeHasDirty = useSpecDraftStore((s) => {
+  // Which tabs hold unsaved text. Previously this collapsed to a single
+  // boolean that nothing rendered, so a draft written by the AI -- including
+  // one Agent Desk's "Tell the spec" put here -- sat invisible in a file the
+  // person was not looking at, with a faded toast as its only evidence.
+  const dirtyTabs = useSpecDraftStore((s) => {
     const prefix = changeDraftPrefix(repoId, change.id)
-    return Object.entries(s.drafts).some(
-      ([key, draft]) => key.startsWith(prefix) && draft != null && draft.text !== draft.original
-    )
+    const tabs = new Set<Tab>()
+    for (const [key, draft] of Object.entries(s.drafts)) {
+      if (!key.startsWith(prefix) || draft == null || draft.text === draft.original) continue
+      tabs.add(tabForFile(key.slice(prefix.length)))
+    }
+    return tabs
   })
 
   // Selecting another change closes the editor. The draft stays in the store, so
@@ -606,6 +613,13 @@ export function DeskDetail({
             )}
           >
             {t.label}
+            {dirtyTabs.has(t.key) && (
+              <span
+                className="ml-1.5 inline-block size-1.5 rounded-full bg-primary align-middle"
+                title="Unsaved changes on this tab"
+                aria-label="has unsaved changes"
+              />
+            )}
             {t.key === "deltas" && (
               <span className="ml-1.5 rounded-full bg-panel3 px-1.5 font-mono text-2xs font-normal text-sub">
                 {change.deltas.length}

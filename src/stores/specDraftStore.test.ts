@@ -46,6 +46,12 @@ describe('specDraftStore', () => {
     expect(hasControlChar).toBe(false)
     expect(key).toBe(`${REPO} ${CHANGE} proposal.md`)
     expect(changeDraftPrefix(REPO, CHANGE)).toBe(`${REPO} ${CHANGE} `)
+    // Load-bearing: the spec tabs strip this prefix off a draft key to learn
+    // which file is dirty, so a key must be exactly prefix + filename.
+    expect(draftKey(REPO, CHANGE, 'proposal.md').slice(changeDraftPrefix(REPO, CHANGE).length)).toBe('proposal.md')
+    expect(draftKey(REPO, CHANGE, 'specs/a/spec.md').slice(changeDraftPrefix(REPO, CHANGE).length)).toBe(
+      'specs/a/spec.md'
+    )
   })
 
   it('holds the file contents it was opened with', () => {
