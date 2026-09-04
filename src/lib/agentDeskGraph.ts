@@ -1,4 +1,4 @@
-import type { AgentSession, CompletionCondition, HelperRole, ResultRecord, SessionMessage } from '@/lib/bindings'
+import type { AgentSession, CompletionCondition, HelperRole, RemoveHelperOutcome, ResultRecord, SessionMessage } from '@/lib/bindings'
 
 /**
  * Whether this chat has an agent graph worth showing.
@@ -171,4 +171,43 @@ export function revisionSeed(proposal: { helpers: { title: string }[] }): string
   if (proposal.helpers.length === 0) return 'Change this plan by: '
   const lines = proposal.helpers.map((h) => `- ${h.title}`).join('\n')
   return `Change this plan. It currently uses:\n${lines}\n\nWhat to change: `
+}
+
+/**
+ * What to say after removing a helper from a plan.
+ *
+ * `removed` returns a message rather than null because the plan may have been
+ * reshaped by more than the row that disappeared: dropping a helper others
+ * depended on prunes those edges, and a person watching one row vanish would
+ * not otherwise know the rest changed too.
+ *
+ * `wouldEmptyPlan` is not an error. Removing the last helper is the same
+ * request as "Use solo instead", which has its own button beside this one, so
+ * it points there rather than refusing blankly.
+ */
+export function explainRemoveHelperOutcome(outcome: RemoveHelperOutcome): { message: string; ok: boolean } {
+  switch (outcome.kind) {
+    case 'removed': {
+      const n = outcome.pruned_edges
+      if (n === 0) return { message: 'Removed from the plan.', ok: true }
+      return {
+        message: `Removed from the plan. ${n} step${n === 1 ? '' : 's'} that waited for it no longer do.`,
+        ok: true,
+      }
+    }
+    case 'wouldEmptyPlan':
+      return { message: 'That is the last one. Use "Use solo instead" to drop the whole team.', ok: false }
+    case 'noProposal':
+      return { message: 'There is no plan to change any more.', ok: false }
+    case 'helperNotFound':
+      return { message: 'That one is already gone from the plan.', ok: false }
+    case 'notFound':
+      return { message: 'That chat is no longer there.', ok: false }
+    case 'damaged':
+      return { message: `That chat's saved file could not be read: ${outcome.reason}`, ok: false }
+    case 'unavailable':
+      return { message: `GitWyrm could not read that chat right now: ${outcome.detail}`, ok: false }
+    case 'writeFailed':
+      return { message: `The plan could not be saved: ${outcome.detail} Nothing was changed.`, ok: false }
+  }
 }

@@ -1,13 +1,19 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { useQueryClient } from '@tanstack/react-query'
-import { ListTodo, TriangleAlert } from 'lucide-react'
+import { ListTodo, Loader2, TriangleAlert, X } from 'lucide-react'
 import { commands, type AgentSession, type ExecutionRecord } from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
 import { describeError, log } from '@/lib/log'
 import { describeOutcome } from '@/lib/agentDeskResult'
 import { useOpenRepo } from '@/hooks/useRepoActions'
-import { allowedPathLines, allowedPathsLabel, completionConditionLabel, helperRoleLabel } from '@/lib/agentDeskGraph'
+import {
+  allowedPathLines,
+  allowedPathsLabel,
+  completionConditionLabel,
+  explainRemoveHelperOutcome,
+  helperRoleLabel,
+} from '@/lib/agentDeskGraph'
 import {
   startFailureCardForError,
   startFailureCardForGraph,
@@ -33,7 +39,7 @@ export function AwaitingStartCard({
   onRevise: () => void
 }) {
   const qc = useQueryClient()
-  const [busy, setBusy] = useState<'start' | 'solo' | 'accepting' | 'opening' | null>(null)
+  const [busy, setBusy] = useState<'start' | 'solo' | 'accepting' | 'opening' | `remove:${string}` | null>(null)
   // Task 3.3 ("detect task/spec changes after draft and block Start until
   // refreshed or explicitly accepted"): when Start refuses with `stale`, this
   // card shows a warning and an explicit "Start anyway" action instead of the
@@ -170,6 +176,36 @@ export function AwaitingStartCard({
     }
   }
 
+  /**
+   * Drop one helper from the plan before Start.
+   *
+   * The plan is where file-write authority is granted, and the only options
+   * were approve every helper or throw the whole plan away. Editing a
+   * helper's paths or role deliberately is NOT offered here: a narrowed path
+   * is caught by nothing until the agent is refused mid-run, so those changes
+   * go through revision, where the model re-derives the whole plan.
+   */
+  const removeHelper = async (nodeId: string, title: string) => {
+    if (busy) return
+    setBusy(`remove:${nodeId}`)
+    try {
+      const outcome = unwrap(await commands.agentSessionRemoveProposedHelper(session.header.sessionId, nodeId))
+      const { message, ok } = explainRemoveHelperOutcome(outcome)
+      if (ok) {
+        refreshSession()
+        toast.success(`Removed "${title}".`, { description: message })
+      } else {
+        toast.error(`Could not remove "${title}".`, { description: message })
+      }
+    } catch (e) {
+      const detail = describeError(e)
+      log.error(`agent desk: could not remove proposed helper: ${detail}`)
+      toast.error(`Could not remove "${title}".`, { description: detail })
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const useSolo = async () => {
     if (busy) return
     setBusy('solo')
@@ -214,8 +250,32 @@ export function AwaitingStartCard({
           const scope = allowedPathLines(h.allowedPaths)
           return (
           <li key={h.nodeId} className="rounded border border-border bg-panel2 px-1.5 py-1 text-2xs">
-            <span className="font-semibold text-foreground">{h.title}</span>
-            <span className="text-muted-foreground"> · {helperRoleLabel(h.role)}</span>
+            <span className="flex items-start gap-2">
+              <span className="min-w-0 flex-1">
+                <span className="font-semibold text-foreground">{h.title}</span>
+                <span className="text-muted-foreground"> · {helperRoleLabel(h.role)}</span>
+              </span>
+              {/*
+                Drop this one before Start. The plan grants file-write scope and
+                its only options were approve-everything or discard-everything.
+                Not a confirm dialog: nothing has run yet, the plan is still a
+                proposal, and the agent can be asked for a new one at any time.
+              */}
+              <button
+                type="button"
+                onClick={() => void removeHelper(h.nodeId, h.title)}
+                disabled={busy !== null}
+                aria-label={`Remove ${h.title} from this plan`}
+                title={`Remove ${h.title} from this plan`}
+                className="flex-none rounded p-0.5 text-muted-foreground hover:bg-panel3 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {busy === `remove:${h.nodeId}` ? (
+                  <Loader2 size={11} className="animate-spin" aria-hidden />
+                ) : (
+                  <X size={11} aria-hidden />
+                )}
+              </button>
+            </span>
             {/*
               A line per path. Joined into one truncated line, three realistic
               paths run to ~155 characters and this panel can be 360px wide, so

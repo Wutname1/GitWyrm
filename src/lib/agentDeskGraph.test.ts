@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { allowedPathLines, allowedPathsLabel, canViewNodeChanges, completionConditionLabel, revisionSeed, helperRoleLabel, latestActivityLine, resultForNode, sessionHasGraph } from './agentDeskGraph'
+import { allowedPathLines, allowedPathsLabel, canViewNodeChanges, completionConditionLabel, explainRemoveHelperOutcome, revisionSeed, helperRoleLabel, latestActivityLine, resultForNode, sessionHasGraph } from './agentDeskGraph'
 
 type Session = Parameters<typeof sessionHasGraph>[0]
 
@@ -186,5 +186,28 @@ describe('revisionSeed', () => {
   })
   it('does not enumerate a solo plan', () => {
     expect(revisionSeed({ helpers: [] })).not.toMatch(/currently uses/)
+  })
+})
+
+describe('explainRemoveHelperOutcome', () => {
+  const removed = (pruned: number) =>
+    explainRemoveHelperOutcome({ kind: 'removed', pruned_edges: pruned, session: {} as never })
+
+  it('says when the rest of the plan was reshaped too', () => {
+    // One row vanishing does not tell you that other steps stopped waiting.
+    expect(removed(2).message).toMatch(/2 steps that waited for it no longer do/)
+    expect(removed(1).message).toMatch(/1 step that waited/)
+    expect(removed(2).ok).toBe(true)
+  })
+  it('stays quiet about edges when none were pruned', () => {
+    expect(removed(0).message).toBe('Removed from the plan.')
+  })
+  it('points at the button that does what removing the last one would', () => {
+    const r = explainRemoveHelperOutcome({ kind: 'wouldEmptyPlan' })
+    expect(r.ok).toBe(false)
+    expect(r.message).toMatch(/Use solo instead/)
+  })
+  it('keeps the reason a failure gave', () => {
+    expect(explainRemoveHelperOutcome({ kind: 'writeFailed', detail: 'disk full.' }).message).toMatch(/disk full/)
   })
 })

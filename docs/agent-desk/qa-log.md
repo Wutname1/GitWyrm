@@ -122,4 +122,5 @@ competing sub-agents, the answer names the losing option too.
 | 114 | 2026-09-04 | Should it also let you edit a helper's file paths or role? | No -- narrowing a path is caught by nothing until the agent is refused mid-run, so those changes go through revision where the whole plan is re-derived. |
 | 115 | 2026-09-04 | Was qa-log #42 right that the sequence map has no cleanup because nothing fills it? | No -- it was decided on a comment that was false in all three of its claims; production fills the map on every run event, and cleanup is now wired. |
 | 116 | 2026-09-04 | Why did clicking a chat sometimes do nothing? | The sidebar stays on screen beside the full-screen sections, so the chat opened behind one instead of replacing it. |
+| 117 | 2026-09-04 | Should removing a helper from a plan ask for confirmation? | No -- nothing has run yet and the plan is still a proposal, so a dialog would be ceremony over a change you can undo by asking for a new plan. |
 
