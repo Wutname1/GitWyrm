@@ -137,12 +137,12 @@ export function openSpecTaskSourceInput(
 /**
  * How long ago something was, in plain words.
  *
- * Lifted out of `describeSnapshotFreshness` so the import badge can say when a
- * message arrived using exactly the same vocabulary -- two places describing
- * age differently is the kind of small inconsistency that makes a surface feel
- * assembled rather than designed.
+ * Lifted out of `describeSnapshotFreshness` so the import badge and the
+ * config receipt list can say when something happened using exactly the same
+ * vocabulary -- several places describing age differently is the kind of small
+ * inconsistency that makes a surface feel assembled rather than designed.
  */
-function describeAge(elapsedMs: number): string {
+export function describeAge(elapsedMs: number): string {
   const mins = Math.max(0, Math.floor(elapsedMs / 60000))
   if (mins < 1) return 'just now'
   if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'} ago`

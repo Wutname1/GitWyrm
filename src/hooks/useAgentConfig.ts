@@ -54,6 +54,9 @@ export function useApplyAgentConfigCopy(repoId: string | null) {
     mutationFn: async (planId: string) => unwrap(await commands.agentConfigApplyCopy(planId)),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: keys.agentConfigInventory(repoId) })
+      // The receipt list shows an `undone` flag, so it has to be refetched or
+      // a row the user just undid keeps offering Undo.
+      qc.invalidateQueries({ queryKey: keys.agentConfigRecentOperations() })
     },
   })
 }
@@ -91,5 +94,22 @@ export function useUndoAgentConfigCopy(repoId: string | null) {
     onSettled: () => {
       qc.invalidateQueries({ queryKey: keys.agentConfigInventory(repoId) })
     },
+  })
+}
+
+/**
+ * Config changes GitWyrm has made, newest first, so Undo outlives the dialog.
+ *
+ * `agent_config_undo` has always taken an operation id and receipts have always
+ * been written to disk, but the id existed only in the apply dialog's own
+ * state -- close the dialog and the write was permanent in practice. The
+ * backend command that lists receipts was added to close exactly that gap and
+ * then had no caller at all, so the vision's "receipt and Undo" was still
+ * missing its second half.
+ */
+export function useAgentConfigRecentOperations() {
+  return useQuery({
+    queryKey: keys.agentConfigRecentOperations(),
+    queryFn: async () => unwrap(await commands.agentConfigRecentOperations()),
   })
 }

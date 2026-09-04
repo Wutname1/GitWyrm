@@ -58,6 +58,7 @@ export const keys = {
 
   /** Agent Setup: the cross-client skill/MCP inventory, scoped to a repo (or personal-only when null). */
   agentConfigInventory: (repoId: string | null) => ['agentConfigInventory', repoId] as const,
+  agentConfigRecentOperations: () => ['agentConfigRecentOperations'] as const,
   /** Agent Setup: which agent clients were detected on this machine, scoped to a repo (or null). */
   agentConfigDetectedClients: (repoId: string | null) => ['agentConfigDetectedClients', repoId] as const,
 

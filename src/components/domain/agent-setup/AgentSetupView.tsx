@@ -9,6 +9,7 @@ import { SyncSummaryLine, SyncTable } from './SyncTable'
 import { CopyPreviewDialog } from './CopyPreviewDialog'
 import { BatchReviewDialog } from './BatchReviewDialog'
 import { AgentCopiesOnDisk } from './AgentCopiesOnDisk'
+import { RecentConfigChanges } from './RecentConfigChanges'
 import { AgentCatalog } from './AgentCatalog'
 import { DetectedAppsTab } from './DetectedAppsTab'
 
@@ -19,7 +20,10 @@ const TABS: { id: SetupTab; label: string }[] = [
   { id: 'connections', label: 'Connections' },
   { id: 'providers', label: 'AI tools' },
   { id: 'detected', label: 'Detected apps' },
-  { id: 'disk', label: 'Disk use' },
+  // Named for what the tab holds, not just its first section: it now also
+  // lists the settings GitWyrm has changed in other apps, which "Disk use"
+  // would not lead anyone to look for.
+  { id: 'disk', label: 'What GitWyrm changed' },
 ]
 
 /**
@@ -113,7 +117,12 @@ export function AgentSetupView({ repoId, onClose }: { repoId: string | null; onC
         ) : tab === 'providers' ? (
           <AgentCatalog />
         ) : tab === 'disk' ? (
-          <AgentCopiesOnDisk />
+          // Both are machine-level facts about what GitWyrm has done outside
+          // this project: copies it is holding, and settings it has changed.
+          <div className="flex flex-col gap-3">
+            <AgentCopiesOnDisk />
+            <RecentConfigChanges repoId={repoId} />
+          </div>
         ) : (
           <DetectedAppsTab detections={detections.data ?? []} />
         )}

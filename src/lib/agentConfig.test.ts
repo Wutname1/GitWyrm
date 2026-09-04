@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  describeConfigOperation,
   explainConfigUndoOutcome,
   CLIENT_COLUMN_ORDER,
   CLIENT_LABEL,
@@ -242,5 +243,21 @@ describe('partitionBatchCandidates', () => {
     const { candidates, skipped } = partitionBatchCandidates([first, second])
     expect(candidates.map((c) => c.entry)).toEqual([first, second])
     expect(skipped).toEqual([])
+  })
+})
+
+describe('describeConfigOperation', () => {
+  it('says whether the file already existed', () => {
+    expect(describeConfigOperation({ client: 'Copilot', beforeHash: 'abc', undone: false })).toBe(
+      'Changed settings for Copilot'
+    )
+    expect(describeConfigOperation({ client: 'Copilot', beforeHash: null, undone: false })).toBe(
+      'Created settings for Copilot'
+    )
+  })
+  it('says when a change has already been put back', () => {
+    expect(describeConfigOperation({ client: 'Codex', beforeHash: 'abc', undone: true })).toBe(
+      'Changed settings for Codex (already put back)'
+    )
   })
 })

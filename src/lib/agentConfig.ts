@@ -177,3 +177,21 @@ export function explainConfigUndoOutcome(outcome: UndoOutcome): { message: strin
       return { message: `Could not put it back: ${outcome.detail}`, restored: false }
   }
 }
+
+/**
+ * One line describing a config change GitWyrm made, for the recent-changes
+ * list in Agent Setup.
+ *
+ * Says which app's settings were touched and whether the file existed before,
+ * because "changed a file you already had" and "created a file that was not
+ * there" are different things to undo. The path is shown separately by the
+ * caller; this is the sentence above it.
+ */
+export function describeConfigOperation(receipt: {
+  client: string
+  beforeHash: string | null
+  undone: boolean
+}): string {
+  const what = receipt.beforeHash === null ? 'Created settings for' : 'Changed settings for'
+  return receipt.undone ? `${what} ${receipt.client} (already put back)` : `${what} ${receipt.client}`
+}
