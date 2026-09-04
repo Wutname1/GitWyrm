@@ -45,13 +45,13 @@ export function ImportPicker({ onOpenSession }: { onOpenSession?: (sessionId: st
       <div>
         <h2 className="text-sm font-semibold text-foreground">Import chats</h2>
         <p className="text-xs text-muted-foreground">
-          Bring sessions in from other chat tools without changing anything there.
+          Bring chats in from other AI tools without changing anything there.
         </p>
       </div>
 
-      {adapters.isLoading && <p className="text-xs text-muted-foreground">Looking for chat tools…</p>}
+      {adapters.isLoading && <p className="text-xs text-muted-foreground">Looking for AI tools…</p>}
       {adapters.isError && (
-        <p className="text-xs text-[var(--gw-red)]">Could not check for chat tools: {describeError(adapters.error)}</p>
+        <p className="text-xs text-[var(--gw-red)]">Could not check for AI tools: {describeError(adapters.error)}</p>
       )}
 
       <div className="flex flex-col gap-1.5 overflow-y-auto">
@@ -122,16 +122,16 @@ function SessionList({
   if (!enabled) {
     return (
       <p className="text-xs text-muted-foreground">
-        This chat tool was found, but importing from it is not supported yet.
+        This AI tool was found, but importing from it is not supported yet.
       </p>
     )
   }
   if (scan.isLoading) {
-    return <p className="text-xs text-muted-foreground">Looking for sessions…</p>
+    return <p className="text-xs text-muted-foreground">Looking for chats…</p>
   }
   if (scan.isError) {
     return (
-      <p className="text-xs text-[var(--gw-red)]">Could not list sessions: {describeError(scan.error)}</p>
+      <p className="text-xs text-[var(--gw-red)]">Could not list chats: {describeError(scan.error)}</p>
     )
   }
   if (!scan.data || scan.data.kind !== 'scanned') {
@@ -145,7 +145,7 @@ function SessionList({
     )
   }
   if (scan.data.sessions.length === 0) {
-    return <p className="text-xs text-muted-foreground">No sessions found for this chat tool.</p>
+    return <p className="text-xs text-muted-foreground">No chats found for this AI tool.</p>
   }
 
   return (

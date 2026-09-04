@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { AlertTriangle, History, Loader2, Undo2 } from 'lucide-react'
 import { useAgentConfigRecentOperations, useUndoAgentConfigCopy } from '@/hooks/useAgentConfig'
 import { describeConfigOperation } from '@/lib/agentConfig'
@@ -30,6 +31,12 @@ function RelativeApplied({ at }: { at: string }) {
 export function RecentConfigChanges({ repoId }: { repoId: string | null }) {
   const receipts = useAgentConfigRecentOperations()
   const undo = useUndoAgentConfigCopy(repoId)
+  // Which row is being put back. `undo.isPending` is one flag shared by the
+  // whole list, so clicking one row greyed out every button at once with no
+  // sign of which one was working -- on a list whose entries are often the
+  // same words for different apps. The disk-copies list beside this one
+  // already tracks the row's own id.
+  const [undoing, setUndoing] = useState<string | null>(null)
   const rows = receipts.data ?? []
 
   if (receipts.isLoading) {
@@ -91,12 +98,19 @@ export function RecentConfigChanges({ repoId }: { repoId: string | null }) {
             {!r.undone && (
               <button
                 type="button"
-                onClick={() => undo.mutate(r.operationId)}
+                onClick={() => {
+                  setUndoing(r.operationId)
+                  undo.mutate(r.operationId, { onSettled: () => setUndoing(null) })
+                }}
                 disabled={undo.isPending}
                 className="flex flex-none items-center gap-1 rounded border border-border px-1.5 py-1 text-2xs font-semibold text-foreground hover:bg-panel2 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <Undo2 size={10} aria-hidden />
-                Put it back
+                {undoing === r.operationId ? (
+                  <Loader2 size={10} className="animate-spin motion-reduce:animate-none" aria-hidden />
+                ) : (
+                  <Undo2 size={10} aria-hidden />
+                )}
+                {undoing === r.operationId ? 'Putting it back…' : 'Put it back'}
               </button>
             )}
           </li>
