@@ -179,3 +179,4 @@ competing sub-agents, the answer names the losing option too.
 | 170 | 2026-09-04 | Does a failed file move really leave everything as it was? | Not quite -- the source may already have moved, though a retry still lands the right content, so the note now says that rather than promising more. |
 | 171 | 2026-09-04 | Could a helper you stopped look like one that never started? | Yes -- the dot stayed the faint not-started grey, because the fix for that had been applied to the wording beside it and not to the dot. |
 | 172 | 2026-09-04 | Is checking two parallel lists by hand each review a mechanism? | No -- they drifted twice, so a check now walks every state and fails if either list has forgotten one. |
+| 173 | 2026-09-04 | Could a failure message still come out as an internal code word? | Yes, in one place -- the wording for it existed elsewhere in the same file and just was not reachable from the path that needed it. |
