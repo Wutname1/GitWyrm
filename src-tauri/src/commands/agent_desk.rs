@@ -2537,7 +2537,12 @@ fn session_usage_at(root: &SessionStoreRoot, session_id: &str) -> SessionUsageOu
                 label: if is_lead {
                     "Lead".to_string()
                 } else {
-                    e.job_title.clone().unwrap_or_else(|| e.execution_id.clone())
+                    // A word, not a hex id. This fell back to `execution_id`,
+                    // so an untitled helper was named by an ellipsised hex
+                    // fragment in the hardest-truncated column of the cost
+                    // screen. Every other consumer falls back to a human word
+                    // and the graph's own comment states the rule.
+                    e.job_title.clone().unwrap_or_else(|| "Helper".to_string())
                 },
                 is_lead,
                 tokens,

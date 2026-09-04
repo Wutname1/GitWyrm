@@ -437,10 +437,16 @@ export function SessionComposer({
               There is no attachment picker behind this yet, so it says so. */}
           <button
             type="button"
-            disabled
+            // `aria-disabled`, not `disabled`, for the reason
+            // `OperatingModeControl` and `ProviderControl` both write down: a
+            // truly disabled button leaves the tab order, so the explanation
+            // attached to it is never announced -- decorative for exactly the
+            // people who need it read aloud. The click is guarded instead.
+            aria-disabled
+            onClick={(e) => e.preventDefault()}
             aria-label="Attach context (not available yet)"
             title="Attaching files and notes is not available yet"
-            className="flex h-6 w-6 flex-none items-center justify-center rounded text-muted-foreground opacity-40"
+            className="flex h-6 w-6 flex-none cursor-not-allowed items-center justify-center rounded text-muted-foreground opacity-40"
           >
             <Paperclip size={13} />
           </button>
