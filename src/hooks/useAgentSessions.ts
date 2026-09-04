@@ -121,6 +121,18 @@ export function useAgentSession(sessionId: string | null) {
 
 let listenerRefCount = 0
 let unlistenFn: (() => void) | null = null
+/**
+ * Set as soon as `listen()` is CALLED, not when it resolves.
+ *
+ * The ref count guarded against re-subscribing, but the guard read
+ * `unlistenFn`, which is only assigned in `.then()`. A second caller mounting
+ * while the first registration was still in flight therefore saw `null` and
+ * started its own subscription -- and since both assign `unlistenFn`, the
+ * first was overwritten and leaked, applying every event twice for the life
+ * of the window. React StrictMode's double-mount is exactly that shape, so
+ * this fired in development on every load.
+ */
+let listenerStarting = false
 
 /**
  * Subscribes to `agent-session-event` exactly once for the whole window and
@@ -140,27 +152,33 @@ export function useAgentSessionListener() {
   useEffect(() => {
     listenerRefCount += 1
 
-    let cancelled = false
-    if (!unlistenFn) {
+    if (!unlistenFn && !listenerStarting) {
+      listenerStarting = true
       void listen<AgentSessionEvent>(AGENT_SESSION_EVENT, (event) => {
         useAgentSessionStore.getState().applyEvent(event.payload)
         qc.invalidateQueries({ queryKey: keys.agentSession(event.payload.sessionId) })
         qc.invalidateQueries({ queryKey: keys.agentSessionsAll })
       })
         .then((stop) => {
-          if (cancelled) {
-            // Registration finished after every caller had already
-            // unmounted; tear it straight back down instead of leaking it.
+          listenerStarting = false
+          // Every caller unmounted while registration was in flight -- tear it
+          // straight back down instead of leaking it. `listenerRefCount` is
+          // the check, not a per-effect flag: one effect's cleanup running is
+          // not the same as nobody being left, and a per-effect flag would
+          // tear down a subscription a later mount still relies on.
+          if (listenerRefCount <= 0) {
             stop()
             return
           }
           unlistenFn = stop
         })
-        .catch((e) => log.error(`agent session listener: could not subscribe: ${String(e)}`))
+        .catch((e) => {
+          listenerStarting = false
+          log.error(`agent session listener: could not subscribe: ${String(e)}`)
+        })
     }
 
     return () => {
-      cancelled = true
       listenerRefCount -= 1
       if (listenerRefCount <= 0 && unlistenFn) {
         unlistenFn()
