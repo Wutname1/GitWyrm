@@ -92,7 +92,7 @@ export function SessionSidebar({
     const id = setTimeout(() => setDebouncedSearch(search.trim()), 180)
     return () => clearTimeout(id)
   }, [search])
-  const { headers, isLoading } = useAgentSessionHeaders({
+  const { headers, isLoading, diagnostics } = useAgentSessionHeaders({
     repoId: effectiveRepoId,
     projectPath: null,
     states: [],
@@ -269,6 +269,35 @@ export function SessionSidebar({
       />
       {isLoading && headers.length === 0 && (
         <p className="flex-none px-3 py-2 text-2xs text-muted-foreground">Loading chats…</p>
+      )}
+      {/*
+        A chat whose file cannot be read used to disappear with no sign at all,
+        which reads as lost work rather than as one damaged file. The backend
+        has always collected these, with a plain reason each, precisely so this
+        could be said out loud -- nothing was reading them.
+
+        It sits below the list, not over it: the other chats are fine and stay
+        the main thing on screen.
+      */}
+      {diagnostics.length > 0 && (
+        <div className="flex-none border-t border-border px-3 py-2">
+          <p className="text-2xs font-semibold text-[var(--gw-amber)]">
+            {diagnostics.length === 1
+              ? '1 chat could not be opened.'
+              : `${diagnostics.length} chats could not be opened.`}{' '}
+            Everything else here is fine.
+          </p>
+          <ul className="mt-1 flex flex-col gap-0.5">
+            {diagnostics.slice(0, 3).map((d) => (
+              <li key={d.path} className="truncate text-2xs text-muted-foreground" title={d.path}>
+                {d.reason}
+              </li>
+            ))}
+            {diagnostics.length > 3 && (
+              <li className="text-2xs text-muted-foreground">…and {diagnostics.length - 3} more</li>
+            )}
+          </ul>
+        </div>
       )}
     </div>
   )

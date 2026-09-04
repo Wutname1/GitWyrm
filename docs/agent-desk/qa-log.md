@@ -64,4 +64,6 @@ competing sub-agents, the answer names the losing option too.
 | 56 | 2026-09-04 | What general rule would have caught the wrong answer in #52? | A consumer proves reachability only when every one of its early-return guards is traced back to a real producer -- reading one field it renders is not enough. |
 | 57 | 2026-09-04 | Does a run that changed nothing tell the user so? | No -- it reports "Finished" with an empty diff, because the sentence written for exactly that case is discarded before it reaches the transcript. |
 | 58 | 2026-09-04 | Should the remaining 19 sub-floor text sites outside Agent Desk be fixed too? | Not in this task -- the rule is app-wide but those surfaces are outside the vision's scope, so they are recorded rather than swept up uninvited. |
+| 59 | 2026-09-04 | Where should the "some chats could not be opened" notice go? | Below the list rather than over it, because the other chats are fine and should stay the main thing on screen. |
+| 60 | 2026-09-04 | Does a Tailwind class passing typecheck mean it renders? | No -- `text-warning` typechecks but is not a token in this project and would have drawn plain grey, so colour classes must be checked against `index.css`. |
 
