@@ -1,8 +1,8 @@
 import { MessageSquareText } from 'lucide-react'
 import type { AgentSession } from '@/lib/bindings'
 import { sourceKindLabel } from '@/lib/agentSessionGrouping'
-import { openSpecStatusLine } from '@/lib/openSpecSessionStatus'
-import { useOpenSpecSessionStatus } from '@/hooks/useOpenspecSessionSource'
+import { openSpecProgressLine, openSpecStatusLine } from '@/lib/openSpecSessionStatus'
+import { useOpenSpecSessionContext, useOpenSpecSessionStatus } from '@/hooks/useOpenspecSessionSource'
 import { describeSnapshotFreshness } from '@/lib/agentDeskSources'
 import { describeSource, SOURCE_KIND_ICON } from './SessionSourceBanner'
 
@@ -37,6 +37,12 @@ export function SessionSourcePanel({ session, onOpenSource }: { session: AgentSe
   const openSpecStatus = useOpenSpecSessionStatus(session.header.sessionId, isOpenSpecSource && liveUnavailable)
   const statusLine = isOpenSpecSource ? openSpecStatusLine(openSpecStatus.data) : null
 
+  // How far along the change is. Asked only for an OpenSpec source, and only
+  // while the source is still there -- once it is gone the honest answer is
+  // the status line above, not a progress count from a stale copy.
+  const openSpecContext = useOpenSpecSessionContext(session.header.sessionId, isOpenSpecSource && !liveUnavailable)
+  const progressLine = isOpenSpecSource ? openSpecProgressLine(openSpecContext.data) : null
+
   return (
     <div className="flex flex-col gap-2 p-2">
       <div className="flex items-start gap-2">
@@ -65,6 +71,8 @@ export function SessionSourcePanel({ session, onOpenSource }: { session: AgentSe
       ) : liveUnavailable ? (
         <p className="text-2xs font-semibold text-[var(--gw-amber)]">No longer available.</p>
       ) : null}
+
+      {progressLine && <p className="text-2xs font-semibold text-foreground">{progressLine}</p>}
 
       {freshness && <p className="text-2xs leading-relaxed text-muted-foreground">{freshness}</p>}
 

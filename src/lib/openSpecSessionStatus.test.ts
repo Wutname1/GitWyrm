@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { OpenSpecSessionStatus } from '@/lib/bindings'
-import { openSpecStatusLine } from './openSpecSessionStatus'
+import { openSpecProgressLine, openSpecStatusLine } from './openSpecSessionStatus'
 
 describe('openSpecStatusLine', () => {
   it('shows nothing for an undefined status (still loading)', () => {
@@ -59,5 +59,27 @@ describe('openSpecStatusLine', () => {
     expect(openSpecStatusLine({ kind: 'sessionNotFound' })).toBeNull()
     expect(openSpecStatusLine({ kind: 'sessionDamaged', reason: 'bad json' })).toBeNull()
     expect(openSpecStatusLine({ kind: 'sessionUnavailable', detail: 'locked' })).toBeNull()
+  })
+})
+
+describe('openSpecProgressLine', () => {
+  const ctx = (progress: { done: number; total: number; percent: number; is_draft: boolean }) =>
+    ({ kind: 'found', value: { progress } }) as unknown as Parameters<typeof openSpecProgressLine>[0]
+
+  it('says how many tasks are done', () => {
+    expect(openSpecProgressLine(ctx({ done: 3, total: 8, percent: 38, is_draft: false }))).toBe('3 of 8 tasks done')
+  })
+  it('says so plainly when everything is done', () => {
+    expect(openSpecProgressLine(ctx({ done: 8, total: 8, percent: 100, is_draft: false }))).toBe('All 8 tasks done')
+  })
+  it('calls a change with no tasks a draft, not 0%', () => {
+    expect(openSpecProgressLine(ctx({ done: 0, total: 0, percent: 0, is_draft: true }))).toBe('No tasks written yet')
+  })
+  it('stays silent when the change could not be read', () => {
+    // Unknown must stay unknown -- never rendered as zero progress.
+    for (const kind of ['repoNotOpen', 'noOpenSpecFolder', 'sessionNotFound', 'notAnOpenSpecSource'] as const) {
+      expect(openSpecProgressLine({ kind } as Parameters<typeof openSpecProgressLine>[0])).toBeNull()
+    }
+    expect(openSpecProgressLine(undefined)).toBeNull()
   })
 })

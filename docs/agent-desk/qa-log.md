@@ -67,4 +67,6 @@ competing sub-agents, the answer names the losing option too.
 | 59 | 2026-09-04 | Where should the "some chats could not be opened" notice go? | Below the list rather than over it, because the other chats are fine and should stay the main thing on screen. |
 | 60 | 2026-09-04 | Does a Tailwind class passing typecheck mean it renders? | No -- `text-warning` typechecks but is not a token in this project and would have drawn plain grey, so colour classes must be checked against `index.css`. |
 | 61 | 2026-09-04 | Why move the gate's warning text rather than leave a working re-export? | Deleting the dead run surface would have silently taken the live gate's safety warnings with it. |
+| 62 | 2026-09-04 | Should a change we could not read show 0% progress? | No -- it shows nothing, because unknown must stay unknown and a change nobody could read is not a change with no progress. |
+| 63 | 2026-09-04 | Is a change with no tasks written yet at 0%? | No -- it reads "No tasks written yet", the distinction the backend already drew as "a draft rather than 0% of nothing". |
 

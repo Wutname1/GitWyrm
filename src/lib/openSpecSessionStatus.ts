@@ -1,4 +1,4 @@
-import type { OpenSpecSessionStatus } from '@/lib/bindings'
+import type { OpenSpecSessionStatus, OpenSpecSourceContext, OpenSpecSourceOutcome } from '@/lib/bindings'
 
 export type OpenSpecStatusTone = 'neutral' | 'amber' | 'red'
 
@@ -46,4 +46,30 @@ export function openSpecStatusLine(status: OpenSpecSessionStatus | undefined): O
     case 'sessionUnavailable':
       return null
   }
+}
+
+/**
+ * How much of an OpenSpec change is done, for the source panel.
+ *
+ * OpenSpec is the thing Agent Desk knows that a generic chat window does not,
+ * and none of the panels said how far along the change was -- the context
+ * command that answers it had no caller at all. This is the one line worth
+ * putting on the source panel: a person looking at an OpenSpec session wants
+ * to know how much is left before they read anything else.
+ *
+ * Every non-`found` outcome returns null rather than a zero. A change we
+ * could not read is not a change with no progress, and the vision is explicit
+ * that unknown stays unknown. `isDraft` is likewise not 0% -- the backend
+ * distinguishes "no tasks yet" from "none of the tasks are done", and so does
+ * this.
+ */
+export function openSpecProgressLine(
+  outcome: OpenSpecSourceOutcome<OpenSpecSourceContext> | undefined
+): string | null {
+  if (!outcome || outcome.kind !== 'found') return null
+  const { progress } = outcome.value
+  if (progress.is_draft) return 'No tasks written yet'
+  if (progress.total === 0) return null
+  if (progress.done === progress.total) return `All ${progress.total} tasks done`
+  return `${progress.done} of ${progress.total} tasks done`
 }
