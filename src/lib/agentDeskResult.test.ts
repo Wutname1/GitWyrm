@@ -230,10 +230,25 @@ describe('explainUndoOutcome', () => {
     expect(refusedHandEdited).toBe(true)
     expect(message).toContain('3')
   })
-  it('a single hand-edited change uses singular wording', () => {
+  it('a single changed file uses singular wording', () => {
     const { message } = explainUndoOutcome({ kind: 'refusedHandEdited', record: record(), modified: 1, untracked: 0 })
-    expect(message).toContain('1 hand-edited change')
-    expect(message).not.toContain('1 hand-edited changes')
+    expect(message).toContain('1 file')
+    expect(message).not.toContain('1 files')
+  })
+
+  it('says nothing was thrown away, and never says "worktree"', () => {
+    // The refusal is the safe outcome, so it has to read like one -- and this
+    // was the only place that word reached a user, in an error, about a thing
+    // they had never been shown.
+    const { message } = explainUndoOutcome({ kind: 'refusedHandEdited', record: record(), modified: 2, untracked: 0 })
+    expect(message).toContain('Nothing was thrown away')
+    expect(message).not.toMatch(/worktree/i)
+  })
+
+  it('calls out new files, which are the ones with no way back', () => {
+    const { message } = explainUndoOutcome({ kind: 'refusedHandEdited', record: record(), modified: 0, untracked: 1 })
+    expect(message).toMatch(/1 of them is new/)
+    expect(message).toMatch(/no saved version/)
   })
 })
 

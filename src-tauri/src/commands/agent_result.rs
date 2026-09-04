@@ -67,6 +67,46 @@ fn status_code_label(code: StatusCode) -> &'static str {
 ///
 /// Never reads file contents or diff text -- only path/status, matching the
 /// result model's "references, not copies" rule.
+/// Paths present in a worktree now that this result never recorded.
+///
+/// Compared as a set of (path, status) so a different `statuses()` ordering
+/// -- which git2 does not promise is stable -- can never read as a change.
+/// `None` means the worktree holds exactly what the agent left.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct UnexpectedPaths {
+    modified: u32,
+    untracked: u32,
+}
+
+fn count_unexpected_paths(recorded: &[ResultChangedPath], live: &[ResultChangedPath]) -> Option<UnexpectedPaths> {
+    use std::collections::BTreeSet;
+    let known: BTreeSet<(&str, &str)> = recorded
+        .iter()
+        .map(|p| (p.path.as_str(), p.status.as_str()))
+        .collect();
+
+    let mut out = UnexpectedPaths { modified: 0, untracked: 0 };
+    for entry in live {
+        if known.contains(&(entry.path.as_str(), entry.status.as_str())) {
+            continue;
+        }
+        // "A" is this module's own code for an added/untracked path
+        // (`StatusCode::Added`); everything else counts as a modification.
+        // Untracked is called out separately because it is the one with no
+        // way back -- a file never written to history cannot be recovered.
+        if entry.status == "A" {
+            out.untracked += 1;
+        } else {
+            out.modified += 1;
+        }
+    }
+    if out.modified == 0 && out.untracked == 0 {
+        None
+    } else {
+        Some(out)
+    }
+}
+
 fn changed_paths_for_worktree(worktree_path: &Path) -> Result<Vec<ResultChangedPath>, AppError> {
     let repo = git2::Repository::open(worktree_path)
         .map_err(|e| AppError::Other(format!("could not open worktree: {e}")))?;
@@ -444,18 +484,37 @@ fn undo_result_at(
         return UndoResultOutcome::NothingToUndo;
     };
 
-    // Hand-edit detection: an unreadable folder is treated as hand-edited,
-    // the same safe-direction-to-be-wrong-in stance
+    // Hand-edit detection.
+    //
+    // This used to ask `dirty_count` "is anything uncommitted here?", which
+    // is the wrong question: an agent's own output IS uncommitted (see
+    // `changed_paths_for_worktree` -- the result's file list is built from
+    // exactly the same `repo.statuses()` walk, and Keep only flips state
+    // without committing). So Undo refused on every result that changed
+    // anything, telling the person their own agent's output was "hand-edited"
+    // -- which made the safety net the whole review design leans on
+    // unreachable.
+    //
+    // The question that actually needs answering is "is anything here that
+    // the agent did not leave?", so the live worktree is compared against the
+    // set this result recorded when it was built. An unreadable worktree is
+    // still treated as touched: the same safe-direction-to-be-wrong-in stance
     // `commands::airun::ai_run_discard_plan` takes.
-    let dirt = worktree::dirty_count(Path::new(worktree_path)).unwrap_or(worktree::DirtyCount {
-        modified: 1,
-        untracked: 0,
-    });
-    if !dirt.is_clean() {
+    //
+    // KNOWN LIMIT, recorded rather than hidden: this compares paths and their
+    // status, not content. Editing a file the agent already changed leaves
+    // the set identical and is not detected. Closing that needs the agent's
+    // work committed inside its own worktree so a content diff has something
+    // to compare against -- see `docs/agent-desk/audit-2026-09-03.md`.
+    let unexpected = match changed_paths_for_worktree(Path::new(worktree_path)) {
+        Ok(live) => count_unexpected_paths(&record.changed_paths, &live),
+        Err(_) => Some(UnexpectedPaths { modified: 1, untracked: 0 }),
+    };
+    if let Some(unexpected) = unexpected {
         return UndoResultOutcome::RefusedHandEdited {
             record,
-            modified: dirt.modified,
-            untracked: dirt.untracked,
+            modified: unexpected.modified,
+            untracked: unexpected.untracked,
         };
     }
 
@@ -1925,8 +1984,79 @@ mod tests {
     }
 
     #[test]
-    fn undo_refuses_a_hand_edited_worktree() {
+    fn count_unexpected_paths_ignores_ordering() {
+        // git2 does not promise a stable `statuses()` order, so the same set
+        // in a different order must never read as a change.
+        let p = |path: &str, status: &str| ResultChangedPath {
+            path: path.into(),
+            old_path: None,
+            status: status.into(),
+        };
+        let recorded = vec![p("a.txt", "M"), p("b.txt", "A")];
+        let live = vec![p("b.txt", "A"), p("a.txt", "M")];
+        assert_eq!(count_unexpected_paths(&recorded, &live), None);
+    }
+
+    #[test]
+    fn count_unexpected_paths_separates_a_new_file_from_a_changed_one() {
+        // Untracked is counted apart because it is the one with no way back.
+        let p = |path: &str, status: &str| ResultChangedPath {
+            path: path.into(),
+            old_path: None,
+            status: status.into(),
+        };
+        let recorded = vec![p("a.txt", "M")];
+        let live = vec![p("a.txt", "M"), p("mine.txt", "A"), p("theirs.txt", "M")];
+        assert_eq!(
+            count_unexpected_paths(&recorded, &live),
+            Some(UnexpectedPaths { modified: 1, untracked: 1 })
+        );
+    }
+
+    #[test]
+    fn count_unexpected_paths_notices_a_status_that_changed_under_it() {
+        // The agent added a file and a person then deleted it: same path,
+        // different status, so it is not what the agent left.
+        let p = |path: &str, status: &str| ResultChangedPath {
+            path: path.into(),
+            old_path: None,
+            status: status.into(),
+        };
+        let recorded = vec![p("a.txt", "A")];
+        let live = vec![p("a.txt", "D")];
+        assert_eq!(
+            count_unexpected_paths(&recorded, &live),
+            Some(UnexpectedPaths { modified: 1, untracked: 0 })
+        );
+    }
+
+    #[test]
+    fn count_unexpected_paths_allows_the_agent_work_to_have_been_cleaned_up() {
+        // Fewer paths than recorded is not a hand edit to refuse over --
+        // there is simply less to discard than there was.
+        let p = |path: &str, status: &str| ResultChangedPath {
+            path: path.into(),
+            old_path: None,
+            status: status.into(),
+        };
+        assert_eq!(count_unexpected_paths(&[p("a.txt", "M"), p("b.txt", "A")], &[p("a.txt", "M")]), None);
+    }
+
+    /// The bug this iteration set out to prove, stated as the user meets it.
+    ///
+    /// An agent's work is left UNCOMMITTED in its worktree -- `changed_paths`
+    /// is built from `repo.statuses()`, and Keep only flips state -- so
+    /// `dirty_count` sees the agent's own output and a human's edit as the
+    /// same thing. The result is that Undo, the safety net the whole review
+    /// design leans on, refuses on every result that changed anything, and
+    /// tells the person their own agent's output is "hand-edited".
+    ///
+    /// Named for the behaviour a person would report, not the mechanism.
+    #[test]
+    fn undo_works_on_an_ordinary_result_nobody_touched() {
         let (_dir, root) = temp_root();
+        // A worktree holding exactly what an agent that created one file
+        // leaves behind: a base commit, plus an uncommitted new file.
         let wt = worktree_with_a_change();
         let locks = SessionLocks::new();
         seed_session(&root, "sess-1", "exec-1");
@@ -1942,6 +2072,45 @@ mod tests {
             Vec::new(),
             None,
         );
+
+        // The result records the agent's own change, which is the proof that
+        // the dirt below is the agent's and not a person's.
+        let records = result::read_results(&root, "sess-1").unwrap();
+        assert_eq!(records[0].changed_paths.len(), 1, "the agent's own change is the recorded result");
+
+        let outcome = undo_result_at(&locks, &root, "sess-1", "exec-1");
+        assert!(
+            matches!(outcome, UndoResultOutcome::Discarded { .. }),
+            "Undo must work on a result nobody has touched -- got {outcome:?}"
+        );
+    }
+
+    #[test]
+    fn undo_refuses_a_hand_edited_worktree() {
+        let (_dir, root) = temp_root();
+        // The agent's own output, recorded as this result's changed files.
+        let wt = worktree_with_a_change();
+        let locks = SessionLocks::new();
+        seed_session(&root, "sess-1", "exec-1");
+        build_result_at(
+            &locks,
+            &root,
+            "sess-1",
+            "exec-1".into(),
+            ResultOutcomeKind::Finished,
+            Some(wt.path().to_string_lossy().into_owned()),
+            None,
+            None,
+            Vec::new(),
+            None,
+        );
+
+        // NOW a person adds a file of their own. This is what the test always
+        // claimed to cover: before, it used the agent's own untouched output
+        // as the "hand edit", so it passed for the wrong reason and hid the
+        // fact that Undo refused on every result.
+        std::fs::write(wt.path().join("mine.txt"), "written by a person").unwrap();
+
         let outcome = undo_result_at(&locks, &root, "sess-1", "exec-1");
         match outcome {
             UndoResultOutcome::RefusedHandEdited { modified, untracked, .. } => {

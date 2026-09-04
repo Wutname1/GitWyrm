@@ -189,10 +189,18 @@ export function explainUndoOutcome(outcome: UndoResultOutcome): { message: strin
     case 'discarded':
       return { message: null, refusedHandEdited: false }
     case 'refusedHandEdited': {
+      // Counts only what the agent did NOT leave, so this now names real
+      // human edits rather than the agent's own output. "worktree" was also
+      // the one place that word reached a user, in an error, about a thing
+      // they had never been shown.
       const total = outcome.modified + outcome.untracked
-      const noun = total === 1 ? 'change' : 'changes'
+      const noun = total === 1 ? 'file' : 'files'
+      const newFiles =
+        outcome.untracked > 0
+          ? ` ${outcome.untracked} of them ${outcome.untracked === 1 ? 'is new, so it has' : 'are new, so they have'} no saved version to go back to.`
+          : ''
       return {
-        message: `This worktree has ${total} hand-edited ${noun} since the agent finished. Open it to look, or discard by hand.`,
+        message: `${total} ${noun} in the agent's copy of your project changed after it finished. Nothing was thrown away.${newFiles} Open the folder to look, or remove them yourself first.`,
         refusedHandEdited: true,
       }
     }
