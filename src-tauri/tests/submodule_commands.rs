@@ -361,3 +361,30 @@ fn updating_to_a_commit_not_yet_downloaded_fetches_it_first() {
         "the shell path must land on the commit the parent records"
     );
 }
+
+/// A submodule sits on a detached HEAD after `git submodule update`, which is
+/// normal but invisible -- and committing there loses work. The UI can only say
+/// so if the state is reported.
+#[test]
+fn reports_whether_the_nested_checkout_is_on_a_branch() {
+    let Some((parent, _up, _first, _tip)) = fixture("headbranch") else {
+        return;
+    };
+    let nested = parent.join("vendor/lib");
+
+    // `git submodule update` is what leaves it detached.
+    git(&parent, &["submodule", "update", "--init", "--", "vendor/lib"]);
+    let detached = gitwyrm_lib::git_submodule::all_submodules(&Repository::open(&parent).unwrap());
+    assert_eq!(
+        detached[0].head_branch, None,
+        "a detached nested checkout must report no branch"
+    );
+
+    git(&nested, &["checkout", "-q", "main"]);
+    let on_branch = gitwyrm_lib::git_submodule::all_submodules(&Repository::open(&parent).unwrap());
+    assert_eq!(
+        on_branch[0].head_branch.as_deref(),
+        Some("main"),
+        "once on a branch, the branch must be named"
+    );
+}

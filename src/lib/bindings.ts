@@ -5599,7 +5599,15 @@ ahead: number;
 /**
  * Commits the workdir is behind the recorded commit.
  */
-behind: number; state: SubmoduleState }
+behind: number; 
+/**
+ * Branch the nested checkout is on, when it is on one at all.
+ * 
+ * `git submodule update` leaves a detached HEAD, which is the normal
+ * resting state and not a fault -- but it is invisible in the UI unless
+ * said out loud, and a user who commits there can lose the work.
+ */
+head_branch: string | null; state: SubmoduleState }
 /**
  * How a branch stands against the remote. Distinguishes the three cases the
  * old `(0, 0)` collapsed together: genuinely in sync, no upstream configured,

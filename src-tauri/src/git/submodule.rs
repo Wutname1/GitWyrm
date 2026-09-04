@@ -161,6 +161,18 @@ pub fn all_submodules(repo: &git2::Repository) -> Vec<SubmoduleStatus> {
             }
         };
 
+        // Which branch the nested checkout is on, if any. A detached HEAD is
+        // what `git submodule update` leaves behind, so this is common rather
+        // than broken -- it just has to be visible.
+        let head_branch = sub.open().ok().and_then(|nested| {
+            let head = nested.head().ok()?;
+            if head.is_branch() {
+                head.shorthand().ok().map(str::to_string)
+            } else {
+                None
+            }
+        });
+
         out.push(SubmoduleStatus {
             name: sub.name().unwrap_or(&path).to_string(),
             url: sub.url().ok().flatten().map(str::to_string),
@@ -169,6 +181,7 @@ pub fn all_submodules(repo: &git2::Repository) -> Vec<SubmoduleStatus> {
             workdir_sha: checked_out.map(|o| o.to_string()),
             ahead,
             behind,
+            head_branch,
             state,
             path,
         });
