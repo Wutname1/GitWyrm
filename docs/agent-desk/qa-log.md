@@ -190,3 +190,6 @@ competing sub-agents, the answer names the losing option too.
 | 181 | 2026-09-04 | Should the automatic absence check be widened to cover hooks? | No -- the default there is one link in a chain and the error check often lives in another file, so widening it reported five correct behaviours as bugs. |
 | 182 | 2026-09-04 | Does reopening a chat erase a warning that part of it was lost? | No -- the missing message was saved all along; only this window missed it live, so reopening genuinely loads the full record. |
 | 183 | 2026-09-04 | Could a new AI tool be added and never appear, with no error? | Yes -- a tool missing from the on/off list is treated as off, so a check now compares the list against the tools that actually exist. |
+| 184 | 2026-09-04 | Could one chat's "Sending" show up on a different chat? | Yes -- the typing box is reused when a pane switches chats, so its busy flags travelled with it while the failure message beside them did not. |
+| 185 | 2026-09-04 | Does changing the mode or AI tool mid-run affect the run in progress? | No -- those are settled when a turn starts, and nothing said so, so it now says the change is for the next turn. |
+| 186 | 2026-09-04 | Was leaving a note for after the current turn discoverable? | No -- the Send button is replaced by Stop while working, so Enter was the only way and nothing mentioned it. |
