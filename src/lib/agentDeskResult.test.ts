@@ -83,6 +83,23 @@ describe('resultActionAvailability', () => {
     expect(a.canDraftPullRequest).toBe(false)
   })
 
+  it('never offers to teach the spec from work that was not accepted', () => {
+    // The spec is the project's source of truth and the one place a mistake
+    // outlives the session, so writing back to it is a post-acceptance
+    // gesture. This used to be ungated: you could Undo an agent's work and
+    // then tell the spec what that discarded work proved.
+    const wt = { worktreePath: 'C:/wt', changedPaths: [path('M')] }
+    expect(resultActionAvailability({ state: 'reviewing', ...wt }).canTellSpec).toBe(false)
+    expect(resultActionAvailability({ state: 'revisionRequested', ...wt }).canTellSpec).toBe(false)
+    expect(resultActionAvailability({ state: 'discarded', ...wt }).canTellSpec).toBe(false)
+  })
+
+  it('offers to teach the spec once the work has been accepted', () => {
+    const wt = { worktreePath: 'C:/wt', changedPaths: [path('M')] }
+    expect(resultActionAvailability({ state: 'kept', ...wt }).canTellSpec).toBe(true)
+    expect(resultActionAvailability({ state: 'committed', ...wt }).canTellSpec).toBe(true)
+  })
+
   it('a reviewing result with changes can be kept and undone', () => {
     const r = record({ state: 'reviewing', worktreePath: 'C:/wt', changedPaths: [path('M')] })
     const a = resultActionAvailability(r)

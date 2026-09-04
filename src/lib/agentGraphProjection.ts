@@ -94,12 +94,17 @@ export function nodeStatusLabel(node: GraphTreeNode): string {
 
 /** `.ag-node-dot`'s tone class family: `lead | done | working | waiting`, or
  * `undefined` for the neutral/queued dot. */
-export function nodeDotTone(node: GraphTreeNode): 'lead' | 'done' | 'working' | 'waiting' | undefined {
+export function nodeDotTone(
+  node: GraphTreeNode
+): 'lead' | 'done' | 'working' | 'waiting' | 'attention' | 'interrupted' | undefined {
   if (node.isLead) return 'lead'
   const label = nodeStatusLabel(node)
   if (label === 'done') return 'done'
   if (label === 'working' || label === 'starting') return 'working'
   if (label === 'waiting' || label === 'conflict') return 'waiting'
+  // A node that needs a person must never be quieter than one that is fine.
+  if (label === 'failed' || label === 'source missing') return 'attention'
+  if (label === 'stopped early') return 'interrupted'
   return undefined
 }
 
@@ -112,9 +117,23 @@ export function isNodeActive(execution: ExecutionRecord): boolean {
 export function graphSummary(executions: ExecutionRecord[]): string {
   const working = executions.filter((e) => e.state === 'working' || e.state === 'preparing').length
   const waiting = executions.filter((e) => e.state === 'needsInput').length
+  // Counted so a dead helper cannot hide behind its peers: a graph of three
+  // where one failed used to summarise as "2 working", which is true and
+  // materially misleading -- the header is what a person glances at to decide
+  // whether the run still needs them.
+  const stuck = executions.filter(
+    (e) => e.state === 'failed' || e.state === 'missingSource' || e.state === 'interrupted'
+  ).length
   const parts: string[] = []
   if (working > 0) parts.push(`${working} working`)
   if (waiting > 0) parts.push(`${waiting} waiting`)
-  if (parts.length === 0) return `${executions.length} agent${executions.length === 1 ? '' : 's'}`
+  if (stuck > 0) parts.push(`${stuck} stopped`)
+  // A run with nothing live still says how many agents it has, so a finished
+  // graph reads "3 agents" rather than going blank -- and a graph whose only
+  // notable state is a stopped agent still says the total alongside it, since
+  // "1 stopped" alone loses how many there were.
+  const total = `${executions.length} agent${executions.length === 1 ? '' : 's'}`
+  if (parts.length === 0) return total
+  if (working === 0 && waiting === 0) return `${total} · ${parts.join(' · ')}`
   return parts.join(' · ')
 }

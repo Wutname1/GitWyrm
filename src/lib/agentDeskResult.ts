@@ -59,6 +59,8 @@ export interface ResultActionAvailability {
   canCommit: boolean
   canDraftPullRequest: boolean
   canCleanup: boolean
+  /** Writing back to the spec is only offered once the work has been accepted. */
+  canTellSpec: boolean
 }
 
 export function resultActionAvailability(record: Pick<ResultRecord, 'state' | 'worktreePath' | 'changedPaths'>): ResultActionAvailability {
@@ -71,6 +73,13 @@ export function resultActionAvailability(record: Pick<ResultRecord, 'state' | 'w
     canCommit: record.state === 'kept',
     canDraftPullRequest: record.state === 'committed',
     canCleanup: record.state === 'committed' || record.state === 'discarded' || record.state === 'cleanupNeeded',
+    // Teaching the spec is a POST-acceptance gesture. Every other action here
+    // gates on state; this one did not, so a result that was still being
+    // reviewed -- or one the person had explicitly thrown away with Undo --
+    // could still be written back into the spec as though it had proved
+    // something. The spec is the project's source of truth, and it is the one
+    // place a mistake outlives the session.
+    canTellSpec: record.state === 'kept' || record.state === 'committed',
   }
 }
 

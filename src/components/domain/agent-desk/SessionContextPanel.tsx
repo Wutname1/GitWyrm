@@ -1,6 +1,12 @@
-import { Blocks, FolderGit2, GitBranch, Layers3, Link2, TriangleAlert } from 'lucide-react'
-import type { AgentSession } from '@/lib/bindings'
+import { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
+import { Blocks, FolderGit2, GitBranch, Layers3, Link2, Loader2, TriangleAlert } from 'lucide-react'
+import { commands, type AgentSession } from '@/lib/bindings'
+import { keys, unwrap } from '@/lib/queryKeys'
 import { sourceKindLabel } from '@/lib/agentSessionGrouping'
+import { explainRefreshSourceOutcome } from '@/lib/agentDeskSources'
+import { describeError, log } from '@/lib/log'
 import { useOpenSpecContextDrift } from '@/hooks/useOpenspecSessionSource'
 import { SessionUsageCard } from './SessionUsageCard'
 
@@ -70,16 +76,51 @@ export function SessionContextPanel({ session }: { session: AgentSession }) {
   // for why polling rather than the file watcher today.
   const drift = useOpenSpecContextDrift(session.header.sessionId, isOpenSpecSource)
   const diverged = drift.data?.kind === 'checked' && drift.data.diverged
+  const qc = useQueryClient()
+  const [refreshing, setRefreshing] = useState(false)
+
+  // The banner used to name this action without offering it -- the command
+  // existed and had no button anywhere in the app, which reads to a beginner
+  // as their own mistake rather than a missing control.
+  const refreshSource = async () => {
+    if (refreshing) return
+    setRefreshing(true)
+    try {
+      const outcome = unwrap(await commands.agentSessionRefreshSource(session.header.sessionId))
+      const { message, ok } = explainRefreshSourceOutcome(outcome)
+      if (ok) toast.success(message)
+      else toast.warning(message)
+      void qc.invalidateQueries({ queryKey: keys.agentSession(session.header.sessionId) })
+      void drift.refetch()
+    } catch (e) {
+      const detail = describeError(e)
+      log.error(`agent desk: could not refresh the session source: ${detail}`)
+      toast.error('Could not refresh the source.', { description: detail })
+    } finally {
+      setRefreshing(false)
+    }
+  }
 
   return (
     <div className="flex flex-col gap-2">
       {diverged && (
         <div className="flex items-start gap-1.5 rounded-md border border-[var(--gw-amber)]/40 bg-[var(--gw-amber)]/10 px-2 py-1.5 text-2xs leading-relaxed text-[var(--gw-amber)]">
           <TriangleAlert size={12} className="mt-px flex-none" aria-hidden />
-          <span>
-            The OpenSpec source changed since the last time an agent read it. Refresh the source,
-            or send a message so the next turn reads the current files.
-          </span>
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <span>
+              The spec changed since the last time an agent read it. Refresh it below, or just send a message -- the
+              next turn reads the current files either way.
+            </span>
+            <button
+              type="button"
+              onClick={() => void refreshSource()}
+              disabled={refreshing}
+              className="inline-flex w-fit items-center gap-1 rounded border border-[var(--gw-amber)]/50 px-1.5 py-0.5 text-2xs font-semibold hover:bg-[var(--gw-amber)]/15 disabled:opacity-60"
+            >
+              {refreshing ? <Loader2 size={11} className="animate-spin motion-reduce:animate-none" aria-hidden /> : null}
+              {refreshing ? 'Refreshing…' : 'Refresh the source'}
+            </button>
+          </div>
         </div>
       )}
 

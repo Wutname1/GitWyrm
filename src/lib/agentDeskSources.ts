@@ -6,6 +6,7 @@ import type {
   ProviderId,
   SessionSourceInput,
   SpecChange,
+  RefreshSourceOutcome,
   SpecTask,
 } from '@/lib/bindings'
 
@@ -158,4 +159,35 @@ export function describeSnapshotFreshness(
   // say so, rather than leaving "No longer available" to imply the panel is
   // showing nothing.
   return liveUnavailable ? `Saved copy from ${age}. This is what the chat still shows.` : `Checked ${age}.`
+}
+
+/**
+ * Plain-language result of refreshing a session's source, and whether the
+ * refresh actually reached the live source.
+ *
+ * The drift banner used to tell people to "Refresh the source" while the
+ * command behind it had no button anywhere in the app -- an instruction
+ * without an action, which reads to a beginner as their own mistake. Now the
+ * button exists, this says what it did.
+ */
+export function explainRefreshSourceOutcome(outcome: RefreshSourceOutcome): { message: string; ok: boolean } {
+  switch (outcome.kind) {
+    case 'refreshed':
+      return outcome.changed
+        ? { message: 'Refreshed. The chat now shows the current version.', ok: true }
+        : { message: 'Checked -- the source had not changed after all.', ok: true }
+    case 'liveUnavailable':
+      return {
+        message: `Could not reach the original, so the saved copy was kept: ${outcome.detail}`,
+        ok: false,
+      }
+    case 'notFound':
+      return { message: 'That chat could not be found.', ok: false }
+    case 'damaged':
+      return { message: `That chat's file is damaged: ${outcome.reason}`, ok: false }
+    case 'unavailable':
+      return { message: `That chat could not be read right now: ${outcome.detail}`, ok: false }
+    case 'writeFailed':
+      return { message: `Could not save the refreshed copy: ${outcome.detail}`, ok: false }
+  }
 }

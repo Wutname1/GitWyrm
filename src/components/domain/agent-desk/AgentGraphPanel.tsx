@@ -12,15 +12,23 @@ import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
 import { AwaitingStartCard } from './AwaitingStartCard'
 import { ResultReviewPanel } from './ResultReviewPanel'
 
+// Every label `nodeStatusLabel` can emit has a tone. The two that were
+// missing -- 'source missing' and 'stopped early' -- fell through to muted
+// grey, which made a dead agent render CALMER than a working one and let a
+// person scanning the tree miss it entirely.
 const STATUS_TONE: Record<string, string> = {
   working: 'text-accent-text',
   starting: 'text-accent-text',
   waiting: 'text-[var(--gw-amber)]',
   conflict: 'text-[var(--gw-amber)]',
   failed: 'text-[var(--gw-red)]',
+  'source missing': 'text-[var(--gw-red)]',
   stopped: 'text-muted-foreground',
+  'stopped early': 'text-[var(--gw-amber)]',
   done: 'text-added',
   queued: 'text-muted-foreground',
+  'not started': 'text-muted-foreground',
+  ready: 'text-muted-foreground',
 }
 
 const DOT_TONE: Record<string, string> = {
@@ -28,6 +36,8 @@ const DOT_TONE: Record<string, string> = {
   done: 'bg-added',
   working: 'bg-accent-text animate-pulse motion-reduce:animate-none',
   waiting: 'bg-[var(--gw-amber)]',
+  attention: 'bg-[var(--gw-red)]',
+  interrupted: 'bg-[var(--gw-amber)]',
 }
 
 /** One row in the graph tree: an L-shaped connector for helper rows, a

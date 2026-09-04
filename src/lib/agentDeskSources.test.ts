@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   describeSnapshotFreshness,
+  explainRefreshSourceOutcome,
   issueSourceInput,
   openSpecChangeSourceInput,
   openSpecTaskSourceInput,
@@ -259,5 +260,30 @@ describe('describeSnapshotFreshness', () => {
 
   it('says nothing rather than guessing at an unreadable timestamp', () => {
     expect(describeSnapshotFreshness('not a date', false, now)).toBeNull()
+  })
+})
+
+describe('explainRefreshSourceOutcome', () => {
+  const session = {} as never
+
+  it('distinguishes a real refresh from a check that found nothing changed', () => {
+    expect(explainRefreshSourceOutcome({ kind: 'refreshed', session, changed: true }).message).toMatch(/now shows the current/i)
+    expect(explainRefreshSourceOutcome({ kind: 'refreshed', session, changed: false }).message).toMatch(/had not changed/i)
+  })
+
+  it('says the saved copy was kept when the original could not be reached', () => {
+    // Never overwrite the snapshot with nothing -- the chat still has to read
+    // correctly, so the person is told which version they are looking at.
+    const out = explainRefreshSourceOutcome({ kind: 'liveUnavailable', session, detail: 'offline' })
+    expect(out.ok).toBe(false)
+    expect(out.message).toMatch(/saved copy was kept/i)
+    expect(out.message).toMatch(/offline/)
+  })
+
+  it('carries the reason through for every failure rather than a bare "failed"', () => {
+    expect(explainRefreshSourceOutcome({ kind: 'damaged', reason: 'bad json' }).message).toMatch(/bad json/)
+    expect(explainRefreshSourceOutcome({ kind: 'unavailable', detail: 'locked' }).message).toMatch(/locked/)
+    expect(explainRefreshSourceOutcome({ kind: 'writeFailed', detail: 'disk full' }).message).toMatch(/disk full/)
+    expect(explainRefreshSourceOutcome({ kind: 'notFound' }).ok).toBe(false)
   })
 })

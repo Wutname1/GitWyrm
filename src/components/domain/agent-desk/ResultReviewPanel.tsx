@@ -503,7 +503,7 @@ export function ResultReviewPanel({
         )}
         {/* Only for a chat that came from a spec, and only once the AI is
             set up: otherwise the loop does not apply, or cannot run. */}
-        {isOpenSpecTask && specAi.configured && (
+        {isOpenSpecTask && specAi.configured && availability.canTellSpec && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <ActionButton

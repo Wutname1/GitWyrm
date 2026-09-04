@@ -118,6 +118,21 @@ describe('nodeDotTone', () => {
     }
     expect(nodeDotTone(node)).toBe('done')
   })
+
+  it('a node that needs a person is never quieter than one that is fine', () => {
+    // A failed or interrupted helper used to fall through to the neutral dot,
+    // rendering CALMER than a working node (which at least pulses), so a
+    // person scanning the tree could miss the only node that needed them.
+    const helper = (state: ExecutionRecord['state']) => ({
+      execution: exec({ executionId: 'h1', state }),
+      isLead: false,
+      blockedOn: [],
+      waitingForSlot: false,
+    })
+    expect(nodeDotTone(helper('failed'))).toBe('attention')
+    expect(nodeDotTone(helper('missingSource'))).toBe('attention')
+    expect(nodeDotTone(helper('interrupted'))).toBe('interrupted')
+  })
 })
 
 describe('isNodeActive', () => {
@@ -148,19 +163,36 @@ describe('interrupted state (backend reconciliation on load)', () => {
     expect(label).not.toBe('done')
   })
 
-  it('does not get the working or waiting dot tone', () => {
+  it('does not get the working or waiting dot tone, and is not silent either', () => {
     const node = {
       execution: exec({ executionId: 'h1', state: 'interrupted' }),
       isLead: false,
       blockedOn: [],
       waitingForSlot: false,
     }
-    expect(nodeDotTone(node)).toBeUndefined()
+    const tone = nodeDotTone(node)
+    // The point of this test is that an interrupted agent must not be mistaken
+    // for one that is still doing something. It used to assert `undefined`,
+    // which satisfied that by making it the NEUTRAL dot -- calmer than a
+    // working node, so a person scanning the tree could miss the one node that
+    // needed them. Its own tone satisfies the original intent properly.
+    expect(tone).not.toBe('working')
+    expect(tone).not.toBe('waiting')
+    expect(tone).not.toBe('done')
+    expect(tone).toBe('interrupted')
   })
 
-  it('is excluded from the working/waiting counts in the panel summary', () => {
+  it('is excluded from the working/waiting counts, but still visible in the summary', () => {
+    // Excluded from working/waiting, as this test has always required -- but
+    // not silent: a stopped agent that no peer is covering for has to reach
+    // the header a person glances at, and the total stays so "1 stopped" does
+    // not lose how many agents there were.
     const executions = [exec({ executionId: 'a', state: 'interrupted' }), exec({ executionId: 'b', state: 'finished' })]
-    expect(graphSummary(executions)).toBe('2 agents')
+    const summary = graphSummary(executions)
+    expect(summary).not.toMatch(/working/)
+    expect(summary).not.toMatch(/waiting/)
+    expect(summary).toMatch(/2 agents/)
+    expect(summary).toMatch(/1 stopped/)
   })
 })
 
