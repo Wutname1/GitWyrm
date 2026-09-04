@@ -228,14 +228,20 @@ function Choice({
       aria-pressed={selected}
       className={cn(
         'flex flex-col gap-0.5 rounded-md border px-2.5 py-2 text-left transition-colors',
+        // A tint and a faint border were the whole selected state, with the
+        // same text colour either way -- which DESIGN.md's Selected Must Read
+        // rule forbids, and this is the first screen a new person meets. The
+        // composer's equivalent control already colours its label; this adds
+        // that plus a tick, so the choice reads at a glance.
         selected
-          ? 'border-primary/60 bg-soft'
+          ? 'border-primary bg-soft'
           : 'border-border hover:bg-panel3'
       )}
     >
       <span className="flex items-center gap-1.5">
-        {icon && <span className="text-muted-foreground">{icon}</span>}
-        <span className="text-xs font-semibold text-foreground">{title}</span>
+        {icon && <span className={selected ? 'text-accent-text' : 'text-muted-foreground'}>{icon}</span>}
+        <span className={cn('text-xs font-semibold', selected ? 'text-accent-text' : 'text-foreground')}>{title}</span>
+        {selected && <Check size={12} className="ml-auto flex-none text-accent-text" aria-hidden />}
       </span>
       <span className="text-2xs leading-snug text-muted-foreground">{detail}</span>
     </button>

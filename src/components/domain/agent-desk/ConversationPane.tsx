@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils'
 import { Markdown } from '@/components/ui/markdown'
 import { DisabledHint } from '@/components/ui/tooltip'
 import { isNearBottom } from '@/lib/agentDeskScroll'
-import { computeRailTicks, userMessagesForRail } from '@/lib/agentDeskRail'
+import { computeRailTicks, currentMessageForScroll, userMessagesForRail } from '@/lib/agentDeskRail'
 import { groupEventStacks, type EventStackGroup } from '@/lib/agentDeskEvents'
 import { parsePlanChecklist } from '@/lib/agentDeskPlan'
 import { displayText, foldThoughtSummaries } from '@/lib/agentDeskTranscript'
@@ -454,6 +454,9 @@ export function ConversationPane({
   }, [eventGroups])
 
   const [railTicks, setRailTicks] = useState<ReturnType<typeof computeRailTicks>>([])
+  // Each message's measured offset, kept so a scroll event can move the rail's
+  // marker without touching the DOM again.
+  const railInputsRef = useRef<Parameters<typeof computeRailTicks>[0]>([])
   // Measured transcript width, so the rail popup can be sized to at least
   // half of it (tasks.md 5.2) instead of a fixed rem value that has no
   // relationship to the pane it is jumping around in.
@@ -475,7 +478,10 @@ export function ConversationPane({
         const offsetTop = node ? node.getBoundingClientRect().top - containerTop + el.scrollTop : 0
         return { messageId: m.messageId, offsetTop }
       })
-      setRailTicks(computeRailTicks(inputs, el.scrollHeight))
+      // Remembered so the scroll handler can recompute the "you are here"
+      // tick without re-measuring every message on every scroll event.
+      railInputsRef.current = inputs
+      setRailTicks(computeRailTicks(inputs, el.scrollHeight, currentMessageForScroll(inputs, el.scrollTop)))
       setTranscriptWidth(el.clientWidth)
     }
     measure()
@@ -502,6 +508,13 @@ export function ConversationPane({
         scrollHeight: el.scrollHeight,
         clientHeight: el.clientHeight,
       })
+      // Move the rail's "you are here" tick. Recomputed from the remembered
+      // offsets rather than re-measuring the DOM, so this stays cheap enough
+      // to run on a passive scroll listener.
+      const inputs = railInputsRef.current
+      if (inputs.length > 0) {
+        setRailTicks(computeRailTicks(inputs, el.scrollHeight, currentMessageForScroll(inputs, el.scrollTop)))
+      }
     }
     el.addEventListener('scroll', onScroll, { passive: true })
     return () => el.removeEventListener('scroll', onScroll)

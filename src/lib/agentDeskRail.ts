@@ -70,3 +70,26 @@ export function truncateSnippet(content: string, maxLines: number): { text: stri
 export function userMessagesForRail(messages: SessionMessage[]): SessionMessage[] {
   return messages.filter((m) => m.role === 'user')
 }
+
+/**
+ * Which message the reader is currently looking at, given a scroll position.
+ *
+ * `computeRailTicks` has always accepted a `currentMessageId`, and the caller
+ * never passed one -- so the "you are here" tick fell back to the newest
+ * message and sat there however far you scrolled. The one affordance for
+ * orienting yourself in a long transcript could not orient.
+ *
+ * The current message is the last one whose top has passed the top of the
+ * viewport: that is the message whose content fills the screen, rather than
+ * the next one about to appear. Before the first message's top is reached, the
+ * first message is current.
+ */
+export function currentMessageForScroll(inputs: RailTickInput[], scrollTop: number): string | undefined {
+  if (inputs.length === 0) return undefined
+  let current = inputs[0].messageId
+  for (const input of inputs) {
+    if (input.offsetTop <= scrollTop) current = input.messageId
+    else break
+  }
+  return current
+}

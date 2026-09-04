@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionMessage } from '@/lib/bindings'
-import { computeRailTicks, truncateSnippet, userMessagesForRail } from './agentDeskRail'
+import { computeRailTicks, currentMessageForScroll, truncateSnippet, userMessagesForRail } from './agentDeskRail'
 
 function userMessage(overrides: Partial<SessionMessage> & { messageId: string }): SessionMessage {
   return {
@@ -139,5 +139,25 @@ describe('computeRailTicks at 1/50/500 user messages', () => {
     for (let i = 1; i < ticks.length; i++) {
       expect(ticks[i].position).toBeGreaterThanOrEqual(ticks[i - 1].position)
     }
+  })
+})
+
+describe('currentMessageForScroll', () => {
+  const inputs = [
+    { messageId: 'a', offsetTop: 0 },
+    { messageId: 'b', offsetTop: 500 },
+    { messageId: 'c', offsetTop: 1200 },
+  ]
+
+  it('follows the reader down the transcript', () => {
+    expect(currentMessageForScroll(inputs, 0)).toBe('a')
+    expect(currentMessageForScroll(inputs, 600)).toBe('b')
+    expect(currentMessageForScroll(inputs, 1500)).toBe('c')
+  })
+  it('treats the first message as current before its top is reached', () => {
+    expect(currentMessageForScroll(inputs, -20)).toBe('a')
+  })
+  it('has no answer for an empty transcript', () => {
+    expect(currentMessageForScroll([], 0)).toBeUndefined()
   })
 })
