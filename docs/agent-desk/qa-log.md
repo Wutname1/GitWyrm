@@ -177,3 +177,5 @@ competing sub-agents, the answer names the losing option too.
 | 168 | 2026-09-04 | Should the import note be written before the chat instead of after? | No -- a note pointing at a chat that is not there breaks every later update permanently, which is worse than the duplicate it would prevent. |
 | 169 | 2026-09-04 | Was the note about duplicate imports corrected where a reader would find it? | No -- last pass fixed the behaviour and left the original promise standing, so the safeguard looked deletable. |
 | 170 | 2026-09-04 | Does a failed file move really leave everything as it was? | Not quite -- the source may already have moved, though a retry still lands the right content, so the note now says that rather than promising more. |
+| 171 | 2026-09-04 | Could a helper you stopped look like one that never started? | Yes -- the dot stayed the faint not-started grey, because the fix for that had been applied to the wording beside it and not to the dot. |
+| 172 | 2026-09-04 | Is checking two parallel lists by hand each review a mechanism? | No -- they drifted twice, so a check now walks every state and fails if either list has forgotten one. |
