@@ -195,15 +195,13 @@ export function nodeUsageLine(usage: ExecutionUsage | null | undefined): string 
   if (!usage) return null
   const parts: string[] = []
   const tokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0)
-  if (usage.inputTokens != null || usage.outputTokens != null) parts.push(`${formatTokenCount(tokens)} tokens`)
+  // The card's own formatter, not a second one. A local copy claimed in its
+  // comment to match this and did not: it printed "1.5M" where the card
+  // printed "1.5m", diverging only above a million -- so the two disagreed
+  // exactly in the long runs where cost matters most, and the comment
+  // discouraged anyone from checking.
+  if (usage.inputTokens != null || usage.outputTokens != null) parts.push(formatTokens(tokens))
   if (usage.turns != null && usage.turns > 0) parts.push(`${usage.turns} turn${usage.turns === 1 ? '' : 's'}`)
   if (usage.costMicroUsd != null) parts.push(formatCost(usage.costMicroUsd / 1_000_000))
   return parts.length > 0 ? parts.join(' · ') : null
-}
-
-/** Compact token count: 1200 -> "1.2k". Kept local so the graph line matches the usage card. */
-function formatTokenCount(n: number): string {
-  if (n < 1000) return String(n)
-  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`
-  return `${(n / 1_000_000).toFixed(1)}M`
 }

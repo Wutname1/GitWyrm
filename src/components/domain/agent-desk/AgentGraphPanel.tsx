@@ -6,6 +6,7 @@ import { commands, type AgentSession, type ExecutionRecord, type ResultRecord } 
 import { keys, unwrap } from '@/lib/queryKeys'
 import { describeError, log } from '@/lib/log'
 import { nodeUsageLine } from '@/lib/agentDeskUsage'
+import { runIsActive } from '@/lib/agentDeskResult'
 import { cn } from '@/lib/utils'
 import { buildGraphTree, graphSummary, nodeDotTone, nodeStatusLabel, type GraphTreeNode } from '@/lib/agentGraphProjection'
 import { canViewNodeChanges, latestActivityLine, resultForNode } from '@/lib/agentDeskGraph'
@@ -177,7 +178,7 @@ function InspectorCard({
   // is a different fact from "it was free" -- so no line at all rather than a
   // row of zeros.
   const usageLine = nodeUsageLine(execution.usage)
-  const canStop = execution.state === 'working' || execution.state === 'preparing' || execution.state === 'needsInput'
+  const canStop = runIsActive(execution.state)
   const [resolving, setResolving] = useState<'helper' | 'integrated' | null>(null)
 
   // R6.8: preserve both sides of a conflict and resume only the selected
@@ -412,7 +413,7 @@ export function AgentGraphPanel({ session }: { session: AgentSession }) {
   })
   const records = resultsQuery.data?.kind === 'found' ? resultsQuery.data.records : undefined
   const activeCount = executions.filter(
-    (e) => e.state === 'working' || e.state === 'preparing' || e.state === 'needsInput'
+    (e) => runIsActive(e.state)
   ).length
 
   useEffect(() => {

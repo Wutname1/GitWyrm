@@ -523,3 +523,72 @@ export function summarizeDiskUsage(copies: Array<{ sizeBytes: number | null }>):
   if (measured.length === 0) return `${copies.length} agent ${noun}, size unknown.`
   return `${copies.length} agent ${noun} using ${formatDiskSize(total)}${tail}.`
 }
+
+/**
+ * Whether a run is still going — the one predicate, in one place.
+ *
+ * This rule was written out by hand in four places and one copy left out
+ * `needsInput`, so the transcript showed nothing at all while an agent waited
+ * for an answer: the composer swapped Send for Stop and the graph offered
+ * Stop, but the pane the person was actually reading looked idle at the exact
+ * moment it most needed them. A user watching stillness concludes the run
+ * died and presses Stop on work that was one answer away from finishing.
+ *
+ * The same shape of defect was fixed once before, for `failed` vs
+ * `interrupted`, with a comment eleven lines from where it recurred here.
+ * Fixing the instance did not stop the shape; a single exported predicate
+ * does.
+ */
+export function runIsActive(state: SessionState | null | undefined): boolean {
+  return state === 'working' || state === 'preparing' || state === 'needsInput'
+}
+
+/**
+ * What a still-running chat should say it is doing.
+ *
+ * `needsInput` gets its own words rather than the "Working…" pulse: an agent
+ * blocked on a person is not working, and saying so is the difference between
+ * waiting patiently and giving up on a run.
+ */
+export function runActivityLabel(state: SessionState | null | undefined): string | null {
+  switch (state) {
+    case 'preparing':
+      return 'Getting ready…'
+    case 'working':
+      return 'Working…'
+    case 'needsInput':
+      return 'Waiting for your answer…'
+    default:
+      return null
+  }
+}
+
+/**
+ * The badge treatment for a result state — exhaustive, so a new state cannot
+ * ship unstyled.
+ *
+ * The chained-`&&` version this replaces had no branch for `cleanupNeeded`,
+ * so the one state meaning "you still have something to do" rendered with no
+ * background at all — reading as less urgent than "Discarded", which needs
+ * nothing. A `switch` with no default means TypeScript fails the build when
+ * the next variant lands, which is the guarantee the Rust side already gives
+ * itself.
+ */
+export function resultStateTone(state: ResultState): string {
+  switch (state) {
+    case 'committed':
+      return 'bg-success/15 text-success'
+    case 'kept':
+      return 'bg-accent/15 text-accent'
+    case 'reviewing':
+    case 'revisionRequested':
+      return 'bg-muted text-muted-foreground'
+    case 'cleanupNeeded':
+      // Still asks something of the person, so it must not be quieter than a
+      // state that asks nothing.
+      return 'bg-[var(--gw-amber)]/15 text-[var(--gw-amber)]'
+    case 'discarded':
+    case 'cleanupFailed':
+      return 'bg-destructive/15 text-destructive'
+  }
+}

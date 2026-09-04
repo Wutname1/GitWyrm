@@ -59,9 +59,15 @@ export function SessionUsageCard({ sessionId }: { sessionId: string }) {
         <div className="border-t border-border px-2 py-1.5">
           {query.isLoading ? (
             <p className="py-1 text-2xs text-muted-foreground">Loading usage…</p>
-          ) : rows.length === 0 ? (
+          ) : rows.length === 0 && agentLines.length === 0 ? (
             // Usage honesty (tasks.md 7.4): nothing measured yet is stated
             // plainly, never rendered as a row of zeros.
+            //
+            // Gated on BOTH lists. The per-agent lines are computed from a
+            // different field than the session rows, so a provider reporting
+            // per-agent figures but no session totals used to print "no usage
+            // data yet" directly above a populated list -- the card breaking
+            // its own honesty rule in the one place it is most load-bearing.
             <p className="py-1 text-2xs leading-relaxed text-muted-foreground">
               No usage data yet for this chat.
             </p>

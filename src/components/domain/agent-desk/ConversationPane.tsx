@@ -14,6 +14,7 @@ import { parsePlanChecklist } from '@/lib/agentDeskPlan'
 import { displayText, foldThoughtSummaries } from '@/lib/agentDeskTranscript'
 import { shouldShowResultPanel } from '@/lib/agentDeskResult'
 import { gateBody, gateOptions, gateRequestOf, gateSummary, type GateOption } from '@/lib/agentDeskGate'
+import { runActivityLabel, runIsActive } from '@/lib/agentDeskResult'
 import { log, describeError } from '@/lib/log'
 import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
 import { SessionSourceBanner } from './SessionSourceBanner'
@@ -669,12 +670,26 @@ export function ConversationPane({
               return nodes
             })
           )}
-          {(state === 'working' || state === 'preparing') && (
+          {runIsActive(state) && (
             // Announced: a screen-reader user needs the run state most, and it
-            // was the one transition this pane changed silently.
+            // was the one transition this pane changed silently. The predicate
+            // is shared so this cannot drift out of step with the composer's
+            // Stop button again -- it did, and `needsInput` fell through the
+            // gap, leaving the transcript blank while an agent waited.
             <div role="status" aria-live="polite" className="flex items-center gap-2 px-1 py-1 text-2xs text-muted-foreground">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary motion-reduce:animate-none" aria-hidden />
-              <span>{state === 'preparing' ? 'Getting ready…' : 'Working…'}</span>
+              <span
+                className={cn(
+                  'h-1.5 w-1.5 rounded-full',
+                  // Waiting is not working: a pulse says "busy, sit tight",
+                  // which is the wrong thing to say to someone whose answer
+                  // is the only thing the run is missing.
+                  state === 'needsInput'
+                    ? 'bg-[var(--gw-amber)]'
+                    : 'animate-pulse bg-primary motion-reduce:animate-none'
+                )}
+                aria-hidden
+              />
+              <span>{runActivityLabel(state)}</span>
             </div>
           )}
           {/* Startup recovery writes `failed`, while this line was gated only on

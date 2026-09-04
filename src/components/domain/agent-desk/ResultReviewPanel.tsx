@@ -25,6 +25,7 @@ import {
   changedPathStatusLabel,
   changedPathsSummaryLine,
   describeCommitDestination,
+  resultStateTone,
   explainCleanupOutcome,
   failingCheckLines,
   checksSummaryLine,
@@ -424,10 +425,7 @@ export function ResultReviewPanel({
         <span
           className={cn(
             'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-2xs font-medium',
-            record.state === 'committed' && 'bg-success/15 text-success',
-            record.state === 'kept' && 'bg-accent/15 text-accent',
-            (record.state === 'reviewing' || record.state === 'revisionRequested') && 'bg-muted text-muted-foreground',
-            (record.state === 'discarded' || record.state === 'cleanupFailed') && 'bg-destructive/15 text-destructive',
+            resultStateTone(record.state)
           )}
         >
           {resultStateLabel(record.state)}

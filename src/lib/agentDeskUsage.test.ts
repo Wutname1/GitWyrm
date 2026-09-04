@@ -137,6 +137,10 @@ describe('buildUsageRows', () => {
     expect(buildUsageRows(usage)[0].value).toBe('$0.0034')
   })
 
+  it('formats big numbers the same way the usage card does', () => {
+    expect(nodeUsageLine({ inputTokens: 1_500_000 })).toBe('1.5m tokens')
+  })
+
   it('never rounds a real charge down to nothing', () => {
     // Cost arrives in millionths of a dollar, so four decimal places is not
     // enough on its own -- anything under $0.00005 would print "$0.0000",
@@ -209,6 +213,9 @@ describe('nodeUsageLine', () => {
   it('says what one agent spent', () => {
     const line = nodeUsageLine({ inputTokens: 1200, outputTokens: 800, turns: 3, costMicroUsd: 40000 })
     expect(line).toMatch(/2.0k tokens/)
+    // Same formatter as the usage card, so the two can never disagree about
+    // the same number -- a local copy once printed "1.5M" where the card
+    // printed "1.5m", and only above a million, where it mattered most.
     expect(line).toMatch(/3 turns/)
     expect(line).toMatch(/\$0.04/)
   })

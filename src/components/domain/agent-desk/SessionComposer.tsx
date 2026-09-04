@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { ArrowUp, Paperclip, Sparkles, Square } from 'lucide-react'
 import { commands, type AgentSessionHeader } from '@/lib/bindings'
 import { unwrap, keys } from '@/lib/queryKeys'
+import { runIsActive } from '@/lib/agentDeskResult'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { describeError, log } from '@/lib/log'
 import { Textarea } from '@/components/ui/textarea'
@@ -204,7 +205,7 @@ export function SessionComposer({
 
   const canSend = canSendComposerDraft({ draft, sessionId, sending })
   // A run is going, so the action button offers the way out of it.
-  const running = header?.state === 'working' || header?.state === 'preparing' || header?.state === 'needsInput'
+  const running = runIsActive(header?.state)
   const [stopping, setStopping] = useState(false)
 
   const stopRun = async () => {

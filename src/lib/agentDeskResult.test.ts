@@ -16,6 +16,8 @@ import {
   describeCommitDestination,
   explainCleanupOutcome,
   failingCheckLines,
+  runActivityLabel,
+  runIsActive,
   formatDiskSize,
   summarizeDiskUsage,
   checksSummaryLine,
@@ -526,5 +528,52 @@ describe('summarizeDiskUsage', () => {
 
   it('says plainly when there are none', () => {
     expect(summarizeDiskUsage([])).toBe('No agent copies on disk.')
+  })
+})
+
+describe('runIsActive', () => {
+  // This rule was written by hand in four places and one copy left out
+  // `needsInput`, so the transcript showed nothing while an agent waited for
+  // an answer -- the composer offered Stop, the graph offered Stop, and the
+  // pane the person was reading looked idle.
+  it('counts a chat waiting on the person as still going', () => {
+    expect(runIsActive('needsInput')).toBe(true)
+    expect(runIsActive('working')).toBe(true)
+    expect(runIsActive('preparing')).toBe(true)
+  })
+
+  it('is false for every state where nothing is running', () => {
+    for (const state of ['draft', 'ready', 'finished', 'failed', 'stopped', 'interrupted', 'missingSource'] as const) {
+      expect(runIsActive(state)).toBe(false)
+    }
+  })
+
+  it('treats an unknown state as not running rather than throwing', () => {
+    expect(runIsActive(null)).toBe(false)
+    expect(runIsActive(undefined)).toBe(false)
+  })
+})
+
+describe('runActivityLabel', () => {
+  it('says waiting rather than working when the agent needs an answer', () => {
+    // "Working…" beside a pulse tells someone to sit tight, which is the
+    // wrong thing to say when their answer is the only thing missing.
+    expect(runActivityLabel('needsInput')).toBe('Waiting for your answer…')
+    expect(runActivityLabel('working')).toBe('Working…')
+    expect(runActivityLabel('preparing')).toBe('Getting ready…')
+  })
+
+  it('says nothing for a chat that is not running', () => {
+    expect(runActivityLabel('finished')).toBeNull()
+    expect(runActivityLabel(null)).toBeNull()
+  })
+
+  it('has words for every state it claims to be active', () => {
+    // The two must not disagree: an active state with no label would render
+    // an empty status line.
+    for (const state of ['working', 'preparing', 'needsInput'] as const) {
+      expect(runIsActive(state)).toBe(true)
+      expect(runActivityLabel(state)).not.toBeNull()
+    }
   })
 })
