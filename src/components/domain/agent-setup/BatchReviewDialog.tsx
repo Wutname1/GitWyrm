@@ -176,6 +176,17 @@ export function BatchReviewDialog({
             {outcomes ? 'Close' : 'Cancel'}
           </Button>
           {stage === 'ready' && !outcomes && (
+            // Said before the decision, not only in the results afterwards.
+            // Each file is written safely on its own -- saved first, and
+            // skipped if it changed since the preview -- but the batch is not
+            // one all-or-nothing operation, so a failure partway leaves some
+            // apps updated and others not.
+            <p className="mr-auto max-w-[24rem] text-2xs leading-relaxed text-muted-foreground">
+              Each file is saved first and skipped if it changed since this preview. They are copied one at a time, so
+              if one fails the earlier ones stay copied.
+            </p>
+          )}
+          {stage === 'ready' && !outcomes && (
             <Button size="sm" onClick={runApply} disabled={applyBatch.isPending || plans.length === 0}>
               {applyBatch.isPending ? <Loader2 size={13} className="animate-spin" /> : null}
               Apply {plans.length} plan{plans.length === 1 ? '' : 's'}

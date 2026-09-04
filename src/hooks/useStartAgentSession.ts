@@ -117,6 +117,13 @@ export function useStartAgentSession() {
     if (startingKey) return null
     // Step (a): visible acknowledgement before awaiting anything.
     setStartingKey(request.key)
+    // `startingKey` only reaches the eye when the component that read it is
+    // still mounted. A context menu unmounts the moment an item is chosen, so
+    // on that path -- the right-click gesture the product leads with -- it
+    // renders into nothing and the app appears to ignore the click. A toast
+    // outlives the menu, so it is the acknowledgement that always lands. Every
+    // outcome below replaces it by id rather than stacking a second one.
+    const ackId = toast.loading('Starting a chat for this…')
     try {
       // Step (b): open/focus Agent Desk concurrently with the durable
       // create below -- neither needs to wait on the other, and a slow
@@ -149,21 +156,23 @@ export function useStartAgentSession() {
           // `outcome.start` is that attempt's own outcome (`null` only in a
           // forward-compatibility case that does not occur in this build,
           // see `StartAgentSessionOutcome::Created`'s doc comment).
+          toast.dismiss(ackId)
           if (outcome.start) reportCreatedStart(outcome.start)
           return outcome.session
         case 'focusedExisting':
-          toast.info('Already working on this. Focused the existing chat.')
+          toast.info('Already working on this. Focused the existing chat.', { id: ackId })
           return outcome.session
         case 'writeFailed':
-          toast.error('Could not start a chat for this.', { description: outcome.detail })
+          toast.error('Could not start a chat for this.', { id: ackId, description: outcome.detail })
           return null
         default:
+          toast.dismiss(ackId)
           return null
       }
     } catch (e) {
       const message = describeError(e)
       log.error(`agent desk: could not start session from source: ${message}`)
-      toast.error('Could not start a chat for this.', { description: message })
+      toast.error('Could not start a chat for this.', { id: ackId, description: message })
       return null
     } finally {
       // Step (d): clear on every path, success or failure.
