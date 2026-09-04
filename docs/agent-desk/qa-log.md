@@ -103,4 +103,5 @@ competing sub-agents, the answer names the losing option too.
 | 95 | 2026-09-04 | Should the attach-context UI be built now? | Not at the end of a pass -- the backend is complete but the UI carries real design decisions, so it is recorded as feature work. |
 | 96 | 2026-09-04 | Should a chat whose file could not be read show "no usage data yet"? | No -- that states an absence the app has not earned; it now says the cost is unknown and why, with a retry. |
 | 97 | 2026-09-04 | Why did the chat pane shrink below its own minimum? | The size limit was only applied when the divider was dragged, never when the window itself changed. |
+| 98 | 2026-09-04 | Is "Open the source" ever shown as a dead disabled button? | No -- every caller guards the handler on the same value as the session the panel needs to render, so the disabled case cannot be reached. |
 
