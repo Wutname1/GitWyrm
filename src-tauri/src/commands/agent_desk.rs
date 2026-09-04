@@ -2499,7 +2499,16 @@ fn session_usage_at(root: &SessionStoreRoot, session_id: &str) -> SessionUsageOu
             .fold(None, |acc: Option<u32>, turns| Some(acc.unwrap_or(0).saturating_add(turns)));
         reported.map(|turns| UsageValue {
             value: f64::from(turns),
-            source: UsageSource::ProviderReported,
+            // Measured, not reported: `UsageTotals::turns`'s own doc says
+            // "Always known, because GitWyrm counts them itself rather than
+            // asking the provider", and the token/cost totals below state the
+            // rule -- `Measured` is for what GitWyrm can verify itself.
+            //
+            // Every usage figure was stamped `ProviderReported`, so
+            // `UsageSource::Measured` was constructed nowhere in the tree and
+            // the vision's three-way labelling was one-way in practice. This
+            // is the one figure that is genuinely ours to claim.
+            source: UsageSource::Measured,
         })
     };
 
@@ -5339,6 +5348,41 @@ mod tests {
         // Totals still include the helper.
         assert_eq!(usage.session_tokens.map(|v| v.value), Some(1_700.0));
         assert_eq!(usage.session_requests.map(|v| v.value), Some(5.0));
+    }
+
+    /// The turn count is the one usage figure GitWyrm works out itself.
+    ///
+    /// `UsageTotals::turns`'s own doc says so: "Always known, because GitWyrm
+    /// counts them itself rather than asking the provider." And the comment
+    /// beside the token/cost totals states the rule this file follows --
+    /// "`Measured` is reserved for what GitWyrm can verify itself (message
+    /// counts, helper counts)."
+    ///
+    /// Every figure was nonetheless stamped `ProviderReported`, so the
+    /// vision's three-way labelling (measured / estimated / unavailable) was
+    /// one-way in practice: `Measured` was constructed nowhere in the tree.
+    /// Recorded as N6 across passes 24-41 and carried unfixed.
+    #[test]
+    fn a_turn_count_is_labelled_measured_not_provider_reported() {
+        let (_dir, root) = temp_root();
+        let locks = test_locks();
+        let (session_id, _, _) = seed_lead_and_helper_usage(&root, &locks);
+
+        let SessionUsageOutcome::Available { usage } = session_usage_at(&root, &session_id) else {
+            panic!("expected Available");
+        };
+        let turns = usage.session_requests.expect("a turn count was recorded");
+        assert_eq!(
+            turns.source,
+            UsageSource::Measured,
+            "GitWyrm counts turns itself, so claiming the provider reported them is wrong"
+        );
+        // The figures that DO come from the provider must stay as they are.
+        assert_eq!(
+            usage.session_tokens.expect("tokens").source,
+            UsageSource::ProviderReported,
+            "token counts really do come from the provider"
+        );
     }
 
     #[test]

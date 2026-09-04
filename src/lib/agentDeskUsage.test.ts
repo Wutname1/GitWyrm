@@ -425,3 +425,27 @@ describe('cached input tokens', () => {
     expect(line).not.toContain('cached')
   })
 })
+
+describe('a measured figure is not marked as an estimate', () => {
+  // `UsageSource::Measured` had never been constructed by the backend, so the
+  // frontend had never actually received one. Now that turn counts carry it
+  // (GitWyrm counts them itself), check the card treats it as a real figure
+  // rather than falling through to the "est." badge.
+  it('shows no estimate badge for a measured turn count', () => {
+    const rows = buildUsageRows({
+      sessionTokens: null,
+      sessionRequests: { value: 5, source: 'measured' },
+      sessionCostUsd: null,
+      planLimit: null,
+      planResetAt: null,
+      contextUsed: null,
+      contextSize: null,
+      activeHelperCount: null,
+      dataTimestamp: '2026-09-04T00:00:00Z',
+      agents: [],
+    })
+    const session = rows.find((r) => r.key === 'session')!
+    expect(session.value).toContain('5 turns')
+    expect(session.isEstimate).toBe(false)
+  })
+})
