@@ -48,11 +48,23 @@ function kindLabel(kind: SessionMessage['kind']): string {
   }
 }
 
-/** Short avatar initials: "You" for the user, first two letters of the provider/model otherwise. */
+/**
+ * Short avatar initials: "You" for the user, otherwise the first letters of
+ * whoever produced the message.
+ *
+ * `message.provider` is set only on imported messages, and holds an adapter
+ * id ("vscode-copilot"). Slicing it raw gave "VS"/"OP"/"CL", and every native
+ * message -- the overwhelming majority -- fell through to `'Lead'` and
+ * avatared as "LE": a truncation artifact, not a name, on the most-repeated
+ * glyph in the product.
+ *
+ * Resolving the id first means the initials come from a real name, and native
+ * messages say "AI" rather than two letters of a word nobody chose.
+ */
 function avatarInitials(message: SessionMessage): string {
   if (message.role === 'user') return 'You'
-  const source = message.provider ?? 'Lead'
-  return source.slice(0, 2)
+  if (!message.provider) return 'AI'
+  return adapterDisplayName(message.provider).slice(0, 2)
 }
 
 /**
@@ -298,7 +310,12 @@ function MessageRow({
       <div className="min-w-0">
         <div className="mb-1 flex flex-wrap items-center gap-1.5 text-2xs font-semibold text-foreground">
           <span className={cn(isApproval && 'text-[var(--gw-amber)]')}>{kindLabel(message.kind)}</span>
-          {message.provider && <span className="font-normal text-muted-foreground">{message.provider}</span>}
+          {/* The stored value is an adapter id ("vscode-copilot"), so an imported
+              chat bylined every message with an internal token while the badge
+              beside it resolved the same string to a real name. */}
+          {message.provider && (
+            <span className="font-normal text-muted-foreground">{adapterDisplayName(message.provider)}</span>
+          )}
           <span className="font-normal text-muted-foreground">{formatClock(message.timestamp)}</span>
           {message.import && <ImportedBadge adapterId={message.import.adapterId} importedAt={message.import.importedAt} />}
         </div>
@@ -363,7 +380,12 @@ function StandaloneThoughtRow({ message }: { message: SessionMessage }) {
       <div className="min-w-0">
         <div className="mb-1 flex flex-wrap items-center gap-1.5 text-2xs font-semibold text-foreground">
           <span>{kindLabel(message.kind)}</span>
-          {message.provider && <span className="font-normal text-muted-foreground">{message.provider}</span>}
+          {/* The stored value is an adapter id ("vscode-copilot"), so an imported
+              chat bylined every message with an internal token while the badge
+              beside it resolved the same string to a real name. */}
+          {message.provider && (
+            <span className="font-normal text-muted-foreground">{adapterDisplayName(message.provider)}</span>
+          )}
           <span className="font-normal text-muted-foreground">{formatClock(message.timestamp)}</span>
         </div>
         <ThoughtBlock text={message.plainContent} />
