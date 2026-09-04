@@ -29,6 +29,14 @@ export function AgentCatalog() {
     queryFn: async () => unwrap(await commands.agentProvidersList(null)),
   })
   const [refreshing, setRefreshing] = useState(false)
+  // Every hook must run on every render, so these live above the early
+  // returns below. They were added underneath them, which made the hook
+  // count jump from two to four the moment the query settled -- React throws
+  // "Rendered more hooks than during the previous render" on that transition,
+  // which is every ordinary open of this tab, and the app-level boundary
+  // replaced the whole window with the crash screen.
+  const defaultAgentTool = useWorkspaceStore((st) => st.defaultAgentTool)
+  const setDefaultAgentTool = useWorkspaceStore((st) => st.setDefaultAgentTool)
 
   async function refresh() {
     setRefreshing(true)
@@ -75,8 +83,6 @@ export function AgentCatalog() {
     )
   }
 
-  const defaultAgentTool = useWorkspaceStore((st) => st.defaultAgentTool)
-  const setDefaultAgentTool = useWorkspaceStore((st) => st.setDefaultAgentTool)
   const rows = query.data?.providers ?? []
   const installed = rows.filter((r) => r.installed)
   const missing = rows.filter((r) => !r.installed)
