@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AlertTriangle, CheckCircle2, Loader2, RotateCcw, ShieldAlert } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Loader2, RotateCcw, ShieldCheck } from 'lucide-react'
 import type { ClientId, RedactedCopyPlan, DestinationApplyResult, InventoryEntry } from '@/lib/bindings'
 import { CLIENT_COLUMN_ORDER, clientLabel, eligibleDestinationsFor } from '@/lib/agentConfig'
 import { useApplyAgentConfigCopy, usePreviewAgentConfigCopy, useUndoAgentConfigCopy } from '@/hooks/useAgentConfig'
@@ -104,6 +104,12 @@ export function CopyPreviewDialog({
             </Button>
           )}
           {plan && !results && (
+            <p className="mr-auto max-w-[22rem] text-2xs leading-relaxed text-muted-foreground">
+              Your current file is saved first, so you can put it back. If it changed since this preview, nothing is
+              written.
+            </p>
+          )}
+          {plan && !results && (
             <Button size="sm" onClick={runApply} disabled={apply.isPending}>
               {apply.isPending ? <Loader2 size={13} className="animate-spin" /> : null}
               Apply
@@ -183,15 +189,20 @@ export function PlanReview({ plan }: { plan: RedactedCopyPlan }) {
               {dest.warnings.map((w, i) => (
                 <li
                   key={i}
+                  // `secretNotCopied` is GitWyrm deliberately leaving a
+                  // credential behind -- the strongest thing this dialog does
+                  // for the person. Styled as a warning it read as "your token
+                  // broke", so it now reads as protection: green, a check
+                  // shield, at the type floor rather than below it.
                   className={cn(
-                    'flex items-start gap-1.5 rounded px-1.5 py-1 text-[10.5px]',
+                    'flex items-start gap-1.5 rounded px-1.5 py-1 text-2xs',
                     w.kind === 'secretNotCopied'
-                      ? 'bg-[color-mix(in_srgb,var(--gw-amber)_14%,transparent)] text-[color-mix(in_srgb,var(--gw-amber)_88%,var(--gw-text))]'
+                      ? 'bg-[color-mix(in_srgb,var(--gw-green)_14%,transparent)] text-[color-mix(in_srgb,var(--gw-green)_88%,var(--gw-text))]'
                       : 'text-muted-foreground'
                   )}
                 >
                   {w.kind === 'secretNotCopied' ? (
-                    <ShieldAlert size={12} className="mt-px flex-none" aria-hidden />
+                    <ShieldCheck size={12} className="mt-px flex-none" aria-hidden />
                   ) : (
                     <AlertTriangle size={12} className="mt-px flex-none" aria-hidden />
                   )}

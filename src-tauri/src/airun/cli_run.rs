@@ -749,9 +749,12 @@ fn handle(
                 summary,
                 respond,
             } = request;
-            let gate = GateRequest::Unclassified {
-                summary: summary.clone(),
-            };
+            // Classified rather than always `Unclassified`: a shell command
+            // that publishes work reaches this point looking exactly like an
+            // ordinary edit, because no capability distinguishes them. The
+            // card has to say so, or the person approves a push believing
+            // they approved a file change.
+            let gate = GateRequest::classify(&summary);
 
             if let Err(refusal) = policy.check_tool_capability(started, capability) {
                 // Refused BEFORE disk is ever touched, and before the run even

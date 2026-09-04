@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  explainConfigUndoOutcome,
+  CLIENT_COLUMN_ORDER,
+  CLIENT_LABEL,
   clientLabel,
   eligibleDestinationsFor,
   formatSummaryLine,
@@ -64,6 +67,53 @@ describe('clientLabel', () => {
     expect(clientLabel('claude-code')).toBe('Claude')
     expect(clientLabel('open-code')).toBe('OpenCode')
     expect(clientLabel('vs-code-copilot')).toBe('Copilot')
+  })
+})
+
+describe('explainConfigUndoOutcome', () => {
+  // Undo used to report the same thing whether or not it put anything back.
+  it('only reports restored when something was actually put back', () => {
+    expect(explainConfigUndoOutcome({ kind: 'restored', receipt: {} as never }).restored).toBe(true)
+    expect(explainConfigUndoOutcome({ kind: 'alreadyUndone' }).restored).toBe(false)
+    expect(explainConfigUndoOutcome({ kind: 'operationNotFound' }).restored).toBe(false)
+    expect(explainConfigUndoOutcome({ kind: 'restoreFailed', detail: 'disk full' }).restored).toBe(false)
+  })
+
+  it('says plainly that a newer edit was left alone, since the file is NOT back to how it was', () => {
+    // The case that matters most: silence here means the person believes
+    // another app's config was restored when it was deliberately not touched.
+    const out = explainConfigUndoOutcome({
+      kind: 'concurrentChangeRefused',
+      expectedHash: 'aaa',
+      actualHash: 'bbb',
+    })
+    expect(out.restored).toBe(false)
+    expect(out.message).toMatch(/changed after/i)
+  })
+
+  it('carries the reason through when the restore itself failed', () => {
+    expect(explainConfigUndoOutcome({ kind: 'restoreFailed', detail: 'disk full' }).message).toMatch(/disk full/)
+  })
+})
+
+describe('CLIENT_COLUMN_ORDER', () => {
+  // The invariant this file did not previously assert. A hand-written column
+  // list dropped `open-chamber`, which has a real writer: it was pre-ticked as
+  // an eligible destination, had no checkbox to untick, and had no column
+  // showing its state -- so a copy could land in it without ever being
+  // offered. That is the same "wrote to an app nobody selected" failure the
+  // batch dialog was built to prevent, reintroduced one constant away.
+  it('shows every client that has a name, so none can be written to unseen', () => {
+    const named = Object.keys(CLIENT_LABEL).sort()
+    expect([...CLIENT_COLUMN_ORDER].sort()).toEqual(named)
+  })
+
+  it('lists each client exactly once', () => {
+    expect(new Set(CLIENT_COLUMN_ORDER).size).toBe(CLIENT_COLUMN_ORDER.length)
+  })
+
+  it('includes open-chamber specifically, the one that was missing', () => {
+    expect(CLIENT_COLUMN_ORDER).toContain('open-chamber')
   })
 })
 

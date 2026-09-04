@@ -71,6 +71,20 @@ pub enum GateRequest {
     OutsideRepo {
         path: String,
     },
+    /// Sending work off this machine -- a push, a pull-request action, a
+    /// posted comment or review, a merge.
+    ///
+    /// Its own variant because the product's promise is that the agent never
+    /// silently pushes, posts, merges or changes an external service. Nothing
+    /// in the capability table can enforce that: a provider asks to run a
+    /// shell command, which classifies as an ordinary write, so `git push`
+    /// and `sed -i` arrive at the gate looking identical. Naming the
+    /// consequence is what makes the person's approval an informed one.
+    Publish {
+        /// What the command does, in the user's terms ("send commits to
+        /// GitHub"), not the command line itself.
+        effect: String,
+    },
     /// Something the agent asked for that GitWyrm cannot classify.
     ///
     /// Exists so an unrecognised request is shown as what it is rather than
@@ -97,8 +111,48 @@ impl GateRequest {
                 }
             }
             GateRequest::OutsideRepo { path } => format!("Touch {path}, outside this folder?"),
+            GateRequest::Publish { effect } => format!("Send this out: {effect}?"),
             GateRequest::Unclassified { summary } => format!("Allow this: {summary}?"),
         }
+    }
+
+    /// Reads a provider's own one-line summary and, when it describes work
+    /// leaving this machine, returns the [`GateRequest::Publish`] that names
+    /// that consequence.
+    ///
+    /// Deliberately conservative in one direction only: a missed publish is
+    /// shown as `Unclassified`, which still gates the run and still shows the
+    /// raw summary, so the failure mode is a vaguer card rather than a silent
+    /// publish. Matching is done on whole words so that `git push` is caught
+    /// while a path like `src/pusher.rs` is not.
+    pub fn classify(summary: &str) -> GateRequest {
+        let lower = summary.to_lowercase();
+        let words: Vec<&str> = lower.split(|c: char| !c.is_ascii_alphanumeric()).filter(|w| !w.is_empty()).collect();
+        let has = |w: &str| words.iter().any(|x| *x == w);
+        let has_pair = |a: &str, b: &str| words.windows(2).any(|p| p[0] == a && p[1] == b);
+
+        // `git push`, and the force variants that arrive as the same word.
+        if has("git") && has("push") {
+            return GateRequest::Publish { effect: "send commits to the server".into() };
+        }
+        // Host CLIs: `gh pr create|merge`, `gh pr comment`, `glab mr merge`.
+        if has("gh") || has("glab") {
+            if has("merge") {
+                return GateRequest::Publish { effect: "merge a pull request".into() };
+            }
+            if has("comment") || has("review") {
+                return GateRequest::Publish { effect: "post a comment on the project's website".into() };
+            }
+            if has("create") || has("close") || has("edit") {
+                return GateRequest::Publish { effect: "change a pull request or issue on the project's website".into() };
+            }
+        }
+        // Plain-language phrasings a provider may use instead of a command.
+        if has_pair("push", "to") || has_pair("publish", "to") {
+            return GateRequest::Publish { effect: "send this work to the server".into() };
+        }
+
+        GateRequest::Unclassified { summary: summary.to_string() }
     }
 }
 
@@ -376,5 +430,87 @@ mod tests {
         };
         assert!(!item.done);
         assert!(!item.detail.is_empty());
+    }
+
+    // -- GateRequest::classify: the product promises the agent never silently
+    // pushes, posts, merges or changes an external service. No capability can
+    // enforce that, because a publishing command arrives as an ordinary shell
+    // write. Naming the consequence on the card is the enforcement. --
+
+    #[test]
+    fn a_git_push_is_named_as_sending_work_out_not_as_a_generic_ask() {
+        let gate = GateRequest::classify("Run `git push origin main`");
+        assert!(
+            matches!(gate, GateRequest::Publish { .. }),
+            "a push must be classified as publishing, got {gate:?}"
+        );
+        // The card must say what happens, in the user's terms.
+        assert!(gate.title().contains("Send this out"), "title was {:?}", gate.title());
+        assert!(gate.title().contains("commits"), "title was {:?}", gate.title());
+    }
+
+    #[test]
+    fn a_force_push_is_still_a_publish() {
+        assert!(matches!(
+            GateRequest::classify("git push --force-with-lease origin feature"),
+            GateRequest::Publish { .. }
+        ));
+    }
+
+    #[test]
+    fn host_cli_actions_name_the_specific_consequence() {
+        let merge = GateRequest::classify("gh pr merge 318 --squash");
+        assert!(matches!(&merge, GateRequest::Publish { effect } if effect.contains("merge")), "{merge:?}");
+
+        let comment = GateRequest::classify("gh pr comment 318 --body 'looks good'");
+        assert!(matches!(&comment, GateRequest::Publish { effect } if effect.contains("comment")), "{comment:?}");
+
+        let create = GateRequest::classify("gh pr create --title 'Fix it'");
+        assert!(matches!(&create, GateRequest::Publish { .. }), "{create:?}");
+
+        // GitLab's CLI reaches the same conclusion.
+        assert!(matches!(GateRequest::classify("glab mr merge 12"), GateRequest::Publish { .. }));
+    }
+
+    #[test]
+    fn a_plain_language_publish_is_caught_without_a_command_line() {
+        assert!(matches!(
+            GateRequest::classify("Push to the remote so CI can run"),
+            GateRequest::Publish { .. }
+        ));
+    }
+
+    /// The half of the behaviour that keeps the classifier honest: matching on
+    /// whole words means an ordinary edit that merely CONTAINS one of these
+    /// words is not dressed up as a publish. Crying wolf on every file edit
+    /// would teach people to click through the one card that matters.
+    #[test]
+    fn ordinary_work_is_not_mislabelled_as_publishing() {
+        for summary in [
+            "Edit src/pusher.rs",
+            "Write to gh-pages/index.html",
+            "Run `npm test`",
+            "Delete build/output.txt",
+            "Add a comment to the merge helper's docstring",
+        ] {
+            let gate = GateRequest::classify(summary);
+            assert!(
+                matches!(gate, GateRequest::Unclassified { .. }),
+                "{summary:?} must not be classified as publishing, got {gate:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unrecognised_ask_still_gates_and_still_shows_its_own_summary() {
+        // The failure mode is a vaguer card, never a silent pass.
+        let gate = GateRequest::classify("Do something GitWyrm has never seen");
+        match gate {
+            GateRequest::Unclassified { ref summary } => {
+                assert_eq!(summary, "Do something GitWyrm has never seen");
+            }
+            other => panic!("expected Unclassified, got {other:?}"),
+        }
+        assert!(gate.title().contains("Allow this"));
     }
 }

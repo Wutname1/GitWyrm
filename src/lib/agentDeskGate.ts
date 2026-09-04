@@ -45,6 +45,12 @@ export function gateSummary(request: GateRequest): string {
         : `Delete ${request.paths.length} files, including ${request.paths[0]}?`
     case 'outsideRepo':
       return `Change something outside this project, at ${request.path}?`
+    case 'publish':
+      // Named as leaving the machine, because that is the consequence the
+      // person is actually approving. A publishing command reaches the gate
+      // looking like any other shell write, so this wording is the only
+      // thing that distinguishes it.
+      return `Send work out of this project -- ${request.effect}?`
     case 'unclassified':
       return request.summary
   }

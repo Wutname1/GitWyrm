@@ -61,11 +61,22 @@ describe('gateSummary', () => {
       [{ kind: 'deleteFiles', paths: ['a.txt'] }, /a\.txt/],
       [{ kind: 'deleteFiles', paths: ['a.txt', 'b.txt'] }, /2 files/],
       [{ kind: 'outsideRepo', path: 'C:/other' }, /C:\/other/],
+      [{ kind: 'publish', effect: 'send commits to the server' }, /send commits to the server/],
       [{ kind: 'unclassified', summary: 'do a weird thing' }, /do a weird thing/],
     ]
     for (const [request, expected] of cases) {
       expect(gateSummary(request)).toMatch(expected)
     }
+  })
+
+  it('says a publish leaves the project, since that is what undo cannot take back', () => {
+    // The product's promise is that the agent never silently pushes, posts or
+    // merges. A publishing command arrives at the gate looking like any other
+    // shell write, so this wording is the only thing telling the person what
+    // they are actually approving.
+    const summary = gateSummary({ kind: 'publish', effect: 'merge a pull request' })
+    expect(summary).toMatch(/out of this project/i)
+    expect(summary).toMatch(/merge a pull request/)
   })
 })
 

@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { commands, type ClientId } from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
+import { explainConfigUndoOutcome } from '@/lib/agentConfig'
 
 /**
  * Agent Setup: read-only inventory scan (architecture.md section 13,
@@ -76,6 +78,16 @@ export function useUndoAgentConfigCopy(repoId: string | null) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (operationId: string) => unwrap(await commands.agentConfigUndo(operationId)),
+    // The outcome used to be discarded, so a refused undo looked exactly like
+    // a successful one -- the person believed another app's config was back to
+    // how it was when it may not have been touched at all. The refusal case
+    // that matters most is `concurrentChangeRefused`: the file changed after
+    // the copy, so putting it back would clobber that newer edit.
+    onSuccess: (outcome) => {
+      const { message, restored } = explainConfigUndoOutcome(outcome)
+      if (restored) toast.success(message)
+      else toast.warning(message)
+    },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: keys.agentConfigInventory(repoId) })
     },

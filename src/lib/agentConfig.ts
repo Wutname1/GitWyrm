@@ -1,4 +1,4 @@
-import type { ClientId, ClientSyncStatus, InventoryEntry, ItemKind, ClientSyncState } from '@/lib/bindings'
+import type { ClientId, ClientSyncStatus, InventoryEntry, ItemKind, ClientSyncState, UndoOutcome } from '@/lib/bindings'
 
 /**
  * Aggregate counts for the setup view's summary line (mockup: "18 skills
@@ -74,8 +74,18 @@ export function clientLabel(client: ClientId): string {
   return CLIENT_LABEL[client]
 }
 
-/** Every client column in the fixed order the mockup's table uses. */
-export const CLIENT_COLUMN_ORDER: ClientId[] = ['codex', 'claude-code', 'open-code', 'vs-code-copilot']
+/**
+ * Every client column, in the fixed order the table shows them.
+ *
+ * Derived from `CLIENT_LABEL` rather than hand-listed. A hand-written list
+ * silently dropped `open-chamber`, which has a real writer in the backend
+ * registry: it was pre-ticked by `eligibleDestinationsFor` (which reads the
+ * row's own per-client states, not this order), had no checkbox to untick,
+ * and had no column showing its state -- so a copy could be written to it
+ * without ever being offered. Keying off the label map means adding a client
+ * cannot repeat that: a new key appears here the moment it has a name.
+ */
+export const CLIENT_COLUMN_ORDER: ClientId[] = Object.keys(CLIENT_LABEL) as ClientId[]
 
 /** Plain-language summary line: "18 skills found - 11 match - 3 differ - 4 exist in one app". */
 export function formatSummaryLine(summary: InventorySummary, kind: ItemKind): string {
@@ -134,4 +144,36 @@ export function partitionBatchCandidates(entries: InventoryEntry[]): {
     }
   }
   return { candidates, skipped }
+}
+
+/**
+ * Plain-language explanation of an Undo outcome, with whether it actually
+ * put anything back.
+ *
+ * Exists because the undo mutation used to resolve this value and throw it
+ * away, so pressing Undo looked identical whether the file was restored or
+ * deliberately left alone. The most important case is
+ * `concurrentChangeRefused`: the file changed after GitWyrm wrote it, so
+ * undoing would clobber a newer edit -- nothing was touched, and the person
+ * needs to know their file is NOT back to how it was.
+ *
+ * Mirrors `explainUndoOutcome` in `agentDeskResult.ts`, which does the same
+ * job for an agent run's own undo.
+ */
+export function explainConfigUndoOutcome(outcome: UndoOutcome): { message: string; restored: boolean } {
+  switch (outcome.kind) {
+    case 'restored':
+      return { message: 'Put back. The file is how it was before the copy.', restored: true }
+    case 'alreadyUndone':
+      return { message: 'That copy was already put back, so nothing changed.', restored: false }
+    case 'operationNotFound':
+      return { message: 'That copy could not be found, so nothing was changed.', restored: false }
+    case 'concurrentChangeRefused':
+      return {
+        message: 'Left alone -- the file changed after GitWyrm copied to it, and putting it back would undo that newer change.',
+        restored: false,
+      }
+    case 'restoreFailed':
+      return { message: `Could not put it back: ${outcome.detail}`, restored: false }
+  }
 }

@@ -5399,6 +5399,18 @@ export type GateAnswer = "allowOnce" | "findAnotherWay" | "stopRun"
  */
 export type GateRequest = { kind: "addDependency"; name: string } | { kind: "runInstall"; command: string } | { kind: "networkAccess"; target: string } | { kind: "deleteFiles"; paths: string[] } | { kind: "outsideRepo"; path: string } | 
 /**
+ * Sending work off this machine -- a push, a pull-request action, a
+ * posted comment or review, a merge.
+ * 
+ * Its own variant because the product's promise is that the agent never
+ * silently pushes, posts, merges or changes an external service. Nothing
+ * in the capability table can enforce that: a provider asks to run a
+ * shell command, which classifies as an ordinary write, so `git push`
+ * and `sed -i` arrive at the gate looking identical. Naming the
+ * consequence is what makes the person's approval an informed one.
+ */
+{ kind: "publish"; effect: string } | 
+/**
  * Something the agent asked for that GitWyrm cannot classify.
  * 
  * Exists so an unrecognised request is shown as what it is rather than

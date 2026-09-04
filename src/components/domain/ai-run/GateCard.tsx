@@ -79,6 +79,8 @@ export function gateTitle(request: GateRequest): string {
         : `Delete ${request.paths.length} files?`
     case 'outsideRepo':
       return `Touch ${request.path}, outside this folder?`
+    case 'publish':
+      return `Send this out of your project: ${request.effect}?`
     case 'unclassified':
       return `Allow this: ${request.summary}?`
   }
@@ -98,6 +100,11 @@ export function gateBody(request: GateRequest): string {
     case 'outsideRepo':
       // The one gate whose consequence outlives the run, so it says so.
       return `${request.path} is outside the folder you opened, so it isn't covered by undo. Changes there stay even if you undo this run.`
+    case 'publish':
+      // The one gate whose consequence leaves this machine, so it says so
+      // plainly: undo can put your own files back, but it cannot recall
+      // something other people can already see.
+      return `This would ${request.effect}, so it leaves this computer and other people may see it. Undoing the run afterwards cannot take it back.`
     case 'unclassified':
       // Shown when GitWyrm cannot tell what the AI is asking for. Says exactly
       // that rather than dressing it up as a known kind of request, which

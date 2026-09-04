@@ -191,6 +191,8 @@ function gateHistoryText(step: Extract<RunStep, { kind: 'gate' }>): string {
       return `Asked about deleting ${r.paths.length} file(s)`
     case 'outsideRepo':
       return `Asked about touching ${r.path}`
+    case 'publish':
+      return `Asked about sending work out: ${r.effect}`
     case 'unclassified':
       return `Asked about ${r.summary}`
   }
