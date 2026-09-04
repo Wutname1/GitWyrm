@@ -86,7 +86,7 @@ export function PaneDetailPopover({
             }}
             className={cn(
               'flex h-[26px] w-[26px] flex-none items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-panel3 hover:text-foreground',
-              isOpen && 'border-border bg-panel3 text-foreground'
+              isOpen && 'border-primary/60 bg-soft text-accent-text'
             )}
           >
             <Icon size={14} aria-hidden />

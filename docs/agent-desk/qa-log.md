@@ -149,3 +149,7 @@ competing sub-agents, the answer names the losing option too.
 | 140 | 2026-09-04 | Did the usage figures say how old they were? | No -- they are polled every 30 seconds and the timestamp built for saying so was never shown. |
 | 141 | 2026-09-04 | Was anything checking React hook rules? | No -- there is no ESLint in this repo, so a crash that blanked the whole window on every open of the AI tools tab shipped unseen. |
 | 142 | 2026-09-04 | Should a guard be trusted before it has caught its own instance? | No -- both new detectors this pass were silently wrong at first, and only reverting the real defect proved they worked. |
+| 143 | 2026-09-04 | Could an unreadable file be replaced by a blank one? | Yes -- four places read a file, defaulted to empty on failure, then wrote it back, discarding the real contents. |
+| 144 | 2026-09-04 | Should Delete be blocked while GitWyrm checks for a working copy? | No -- the check walks every folder and can take seconds, and every other confirmation here waits only on its own action, so it says it is still checking instead. |
+| 145 | 2026-09-04 | Was F87's fix actually written? | No -- the audit, the commit and the changelog all recorded it while the code only ever counted two values and ignored both. |
+| 146 | 2026-09-04 | Is "has not looked yet" the same as "could not look"? | Yes, to the person reading -- both mean GitWyrm does not know, and the guard only covered the second. |

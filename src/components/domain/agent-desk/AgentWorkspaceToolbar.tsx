@@ -88,7 +88,11 @@ export function AgentWorkspaceToolbar({
             className={cn(
               'flex h-[25px] flex-none items-center gap-1.5 rounded border border-transparent px-1.5 text-2xs text-sub',
               'hover:border-border hover:bg-panel3 hover:text-foreground',
-              dock && 'border-border bg-panel3 text-foreground'
+              // "On" used the same three declarations as this button's own hover, and
+              // --gw-panel3 and --gw-border are the same hex in most themes -- so a
+              // toggle that was on looked unset the moment the pointer moved away.
+              // The house pattern for a selected control is border-primary/bg-soft.
+              dock && 'border-primary/60 bg-soft text-accent-text'
             )}
           >
             <PanelsTopLeft size={13} aria-hidden />
@@ -164,7 +168,7 @@ function ToolbarButton({
       className={cn(
         'flex h-[25px] flex-none items-center gap-1.5 rounded border border-transparent px-1.5 text-2xs text-sub',
         'hover:border-border hover:bg-panel3 hover:text-foreground',
-        pressed && 'border-border bg-panel3 text-foreground'
+        pressed && 'border-primary/60 bg-soft text-accent-text'
       )}
     >
       <Icon size={13} aria-hidden />
