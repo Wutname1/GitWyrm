@@ -108,3 +108,26 @@ describe('a branch held by another worktree', () => {
     expect(classifyError(new Error(RAW)).severity).toBe('warning')
   })
 })
+
+/**
+ * A terminal open beside the app is enough to cause this, so it is routine
+ * rather than a fault. The backend lists it as expected; the frontend needs the
+ * matching rule or the two layers disagree and it is filed as a crash.
+ */
+describe('another program holding the index', () => {
+  const RAW =
+    'git error: the index is locked; this might be due to a concurrent or crashed process; class=Index (10); code=Locked (-14)'
+
+  it('says what to do without git jargon', () => {
+    const { message } = classifyError(new Error(RAW))
+    expect(message).toBe(
+      'Another program is using this repository right now. Wait for it to finish, then try again.',
+    )
+    expect(message).not.toMatch(/index/i)
+    expect(message).not.toMatch(/class=/)
+  })
+
+  it('is a warning, so it never becomes a crash report', () => {
+    expect(classifyError(new Error(RAW)).severity).toBe('warning')
+  })
+})
