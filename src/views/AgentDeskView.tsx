@@ -20,7 +20,7 @@ import { OpenSpecEmbeddedDetail } from '@/components/domain/agent-desk/OpenSpecE
 import { useAgentSession, useAgentSessionHeaders } from '@/hooks/useAgentSessions'
 import { useOrphanResultReconciliation } from '@/hooks/useOrphanResultReconciliation'
 import { useContainerWidth } from '@/hooks/useContainerWidth'
-import { resolveDrop, resolveResponsiveMode, resolveSplitPresentation, shouldHideButtonLabels, zoneLabel } from '@/lib/agentDeskDock'
+import { dockKindLabel, resolveDrop, resolveResponsiveMode, resolveSplitPresentation, shouldHideButtonLabels, zoneLabel } from '@/lib/agentDeskDock'
 import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
 import { cn } from '@/lib/utils'
 import { resolveAgentDeskShellState } from '@/views/agentDeskViewState'
@@ -538,7 +538,16 @@ export function AgentDeskView() {
 
   const onPin = (pane: PaneId, kind: DockKind, edge: 'left' | 'right' | 'bottom') => {
     if (pane !== layout.activePane) setActivePane(pane)
+    const replaced = layout.dock && layout.dock.kind !== kind ? layout.dock.kind : null
     openDock(kind, edge)
+    // Only one panel can be pinned, so pinning a second one removes the first.
+    // This path used to say nothing at all: the panel a person was watching
+    // simply vanished, with no way to tell what had happened to it.
+    toast.success(
+      replaced
+        ? `${dockKindLabel(kind)} pinned. ${dockKindLabel(replaced)} was unpinned to make room.`
+        : `${dockKindLabel(kind)} pinned.`
+    )
   }
 
   /**
@@ -571,8 +580,15 @@ export function AgentDeskView() {
       return
     }
     const placement = zoneToPlacement(outcome.zone)
+    const replaced = layout.dock && layout.dock.kind !== kind ? layout.dock.kind : null
     openDock(kind, placement.edge, placement.leftOrder)
-    toast.success(`Panel pinned: ${zoneLabel(outcome.zone).toLowerCase()}.`)
+    // Name what was displaced. "Panel pinned" alone left the person to notice
+    // for themselves that a different panel had gone.
+    toast.success(
+      replaced
+        ? `${dockKindLabel(kind)} pinned ${zoneLabel(outcome.zone).toLowerCase()}. ${dockKindLabel(replaced)} was unpinned to make room.`
+        : `${dockKindLabel(kind)} pinned ${zoneLabel(outcome.zone).toLowerCase()}.`
+    )
   }
 
   const onMoveDock = (zone: DockZone) => {

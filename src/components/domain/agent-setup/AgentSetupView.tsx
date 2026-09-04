@@ -86,6 +86,10 @@ export function AgentSetupView({ repoId, onClose }: { repoId: string | null; onC
             key={t.id}
             type="button"
             role="tab"
+            // A `tablist` whose tabs point at no panel tells a screen reader
+            // the tabs exist and nothing about what they control.
+            id={`agent-setup-tab-${t.id}`}
+            aria-controls="agent-setup-panel"
             aria-selected={tab === t.id}
             onClick={() => setTab(t.id)}
             className={cn(
@@ -98,7 +102,12 @@ export function AgentSetupView({ repoId, onClose }: { repoId: string | null; onC
         ))}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-3.5">
+      <div
+        role="tabpanel"
+        id="agent-setup-panel"
+        aria-labelledby={`agent-setup-tab-${tab}`}
+        className="min-h-0 flex-1 overflow-y-auto p-3.5"
+      >
         {/* Disk use is exempt like Detected apps: it reads its own query and
             must not sit behind a scan of the OTHER agent apps' config, which
             answers a different question entirely. */}

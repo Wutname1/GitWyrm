@@ -51,10 +51,24 @@ export function SyncTable({
         </thead>
         <tbody>
           {rows.map((entry) => (
+            // Reachable by keyboard. This was a bare `<tr onClick>`: not
+            // focusable, not activatable by Enter, so the one screen in the app
+            // that writes to OTHER applications' config files could only be
+            // driven with a mouse. `<tr>` cannot be a `<button>` without
+            // breaking table layout, so it takes the row role plus an explicit
+            // tab stop and key handler.
             <tr
               key={entry.itemId}
+              tabIndex={0}
+              aria-label={`Review copying ${entry.displayName}`}
               onClick={() => onSelectItem(entry)}
-              className="cursor-pointer border-b border-border transition-colors hover:bg-panel2"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  onSelectItem(entry)
+                }
+              }}
+              className="cursor-pointer border-b border-border transition-colors hover:bg-panel2 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary"
             >
               <td className="px-1.5 py-2 align-middle">
                 <div className="flex flex-col gap-0.5">
