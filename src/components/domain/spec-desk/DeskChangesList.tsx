@@ -112,11 +112,24 @@ export function DeskChangesList({
   archivedCount,
   selectedId,
   repoId,
+  isLoading = false,
+  isError = false,
 }: {
   changes: SpecChange[]
   archivedCount: number
   selectedId: string | undefined
   repoId: string
+  /**
+   * Whether the scan is still running or has failed.
+   *
+   * Both callers passed `data ?? []` and dropped these, so an empty array meant
+   * three different things -- still looking, could not look, and genuinely
+   * none -- all rendered as "No active changes in openspec/changes." On the
+   * surface the vision calls the defining advantage, that told someone their
+   * spec folder was empty before it had been read.
+   */
+  isLoading?: boolean
+  isError?: boolean
 }) {
   const [filter, setFilter] = useState<Filter>('active')
   const [showArchive, setShowArchive] = useState(false)
@@ -164,7 +177,13 @@ export function DeskChangesList({
       </div>
 
       <div className="flex-1 overflow-y-auto p-2">
-        {rows.length === 0 ? (
+        {isLoading && changes.length === 0 ? (
+          <p className="px-2 py-3 text-2xs text-muted-foreground">Looking for changes…</p>
+        ) : isError && changes.length === 0 ? (
+          <p className="px-2 py-3 text-2xs text-[var(--gw-amber)]">
+            GitWyrm could not read this project's changes. This is not the same as having none.
+          </p>
+        ) : rows.length === 0 ? (
           <p className="px-2 py-3 text-2xs text-muted-foreground">
             {changes.length === 0
               ? 'No active changes in openspec/changes.'

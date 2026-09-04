@@ -115,6 +115,8 @@ export function SpecDeskView() {
         >
           <DeskChangesList
             changes={changes}
+            isLoading={changesQuery.isLoading}
+            isError={changesQuery.isError}
             archivedCount={status.data?.archived_count ?? 0}
             selectedId={change?.id}
             repoId={repo.id}

@@ -70,6 +70,11 @@ export function openSpecProgressLine(
   const { progress } = outcome.value
   if (progress.is_draft) return 'No tasks written yet'
   if (progress.total === 0) return null
-  if (progress.done === progress.total) return `All ${progress.total} tasks done`
-  return `${progress.done} of ${progress.total} tasks done`
+  // A one-task change is the common case for a task-scoped session, so the
+  // singular is not an edge case here.
+  const tasks = (n: number) => `${n} task${n === 1 ? '' : 's'}`
+  if (progress.done === progress.total) {
+    return progress.total === 1 ? 'The one task is done' : `All ${tasks(progress.total)} done`
+  }
+  return `${progress.done} of ${tasks(progress.total)} done`
 }

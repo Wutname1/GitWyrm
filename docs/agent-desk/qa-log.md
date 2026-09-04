@@ -110,4 +110,5 @@ competing sub-agents, the answer names the losing option too.
 | 102 | 2026-09-04 | How should a pane decide whether its chat still exists? | By asking the backend about that one chat, not by looking for it in a list that is both filtered and paged. |
 | 103 | 2026-09-04 | Why did an older chat vanish when the window reopened? | It was past the hundred the list loads, so it was not found and the pane treated it as deleted. |
 | 104 | 2026-09-04 | What should happen after choosing to carry on an imported chat here? | You land in the chat -- being told it is continuing while staying on the import list gives you no way to reach it. |
+| 105 | 2026-09-04 | Where should the OpenSpec list's loading and failure states live? | In the shared list component, so both screens that use it benefit and a third one inherits it. |
 

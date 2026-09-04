@@ -40,6 +40,8 @@ export function OpenSpecEmbeddedDetail({ repoId, repoPath }: { repoId: string; r
     <div className="grid min-h-0 flex-1 grid-cols-[220px_minmax(0,1fr)_306px]">
       <DeskChangesList
         changes={changes}
+        isLoading={changesQuery.isLoading}
+        isError={changesQuery.isError}
         archivedCount={status.data?.archived_count ?? 0}
         selectedId={change?.id}
         repoId={repoId}

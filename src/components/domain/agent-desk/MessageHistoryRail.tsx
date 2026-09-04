@@ -125,7 +125,7 @@ export function MessageHistoryRail({
           className="p-1 motion-reduce:transition-none motion-reduce:data-[state=open]:animate-none motion-reduce:data-[state=closed]:animate-none"
         >
           <div className="max-h-80 overflow-y-auto">
-            {userMessages.map((m, i) => {
+            {userMessages.map((m) => {
               const { text, truncated } = truncateSnippet(m.plainContent || 'message', 3)
               return (
                 <button
@@ -137,7 +137,10 @@ export function MessageHistoryRail({
                   }}
                   className={cn(
                     'block w-full rounded px-2 py-1.5 text-left text-2xs leading-snug text-sub hover:bg-panel2 hover:text-foreground',
-                    i === userMessages.length - 1 && 'bg-soft text-foreground'
+                    // The tick beside this row already knows where the reader
+                    // is; this list said "the newest one" regardless, so the
+                    // only part with readable text contradicted it.
+                    railTicks.find((t) => t.messageId === m.messageId)?.isCurrent && 'bg-soft text-foreground'
                   )}
                 >
                   <span className="block whitespace-pre-wrap">
