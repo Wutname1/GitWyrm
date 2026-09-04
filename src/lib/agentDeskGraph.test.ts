@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canViewNodeChanges, latestActivityLine, resultForNode, sessionHasGraph } from './agentDeskGraph'
+import { allowedPathsLabel, canViewNodeChanges, helperRoleLabel, latestActivityLine, resultForNode, sessionHasGraph } from './agentDeskGraph'
 
 type Session = Parameters<typeof sessionHasGraph>[0]
 
@@ -98,5 +98,33 @@ describe('result helpers', () => {
     expect(canViewNodeChanges(record('h1', null, 2))).toBe(false)
     expect(canViewNodeChanges(record('h1', 'C:/wt/h1', 0))).toBe(false)
     expect(canViewNodeChanges(record('h1', 'C:/wt/h1', 2))).toBe(true)
+  })
+})
+
+describe('helperRoleLabel', () => {
+  it('says what the helper does, not what the code calls it', () => {
+    expect(helperRoleLabel('researcher')).toBe('Looks things up')
+    expect(helperRoleLabel('builder')).toBe('Makes the changes')
+    expect(helperRoleLabel('verifier')).toBe('Checks the work')
+  })
+  it('never leaks an unrecognised token to the screen', () => {
+    expect(helperRoleLabel('some-new-role')).toBe('Helper')
+    expect(helperRoleLabel(null)).toBe('Helper')
+    expect(helperRoleLabel(undefined)).toBe('Helper')
+  })
+})
+
+describe('allowedPathsLabel', () => {
+  it('names the files a helper may change', () => {
+    expect(allowedPathsLabel(['src/a.ts'])).toBe('src/a.ts')
+    expect(allowedPathsLabel(['src/a.ts', 'src/b.ts'])).toBe('src/a.ts, src/b.ts')
+  })
+  it('keeps a long list readable without hiding how long it is', () => {
+    expect(allowedPathsLabel(['a', 'b', 'c', 'd', 'e'])).toBe('a, b, c and 2 more')
+  })
+  it('says an empty list is wider, not narrower', () => {
+    // No path scope means every file is in scope. Rendering nothing here
+    // would read as "no files", which is the opposite of what it means.
+    expect(allowedPathsLabel([])).toBe('Any file in this project')
   })
 })

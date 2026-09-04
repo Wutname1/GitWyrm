@@ -76,4 +76,6 @@ competing sub-agents, the answer names the losing option too.
 | 68 | 2026-09-04 | If a provider reports input tokens but not output, what should a helper's usage line say? | It names the half it knows ("1.2k tokens in") rather than adding zero for the other and showing a partial figure as the total. |
 | 69 | 2026-09-04 | Which of the two agent-graph projections is the real one? | The TypeScript one the panel actually uses; the registered backend command is dead and is missing a distinction the panel renders, so wiring it up would quietly downgrade the display. |
 | 70 | 2026-09-04 | Does an unread field in the generated bindings always mean something is missing from the screen? | No -- four of five checked this pass were fine as they stand, so each hit needs tracing to what the user actually sees before it counts as a finding. |
+| 71 | 2026-09-04 | Should the Start screen show which files each helper may change? | Yes -- it is the boundary the app actually enforces, and it was the one fact missing from the screen where you grant that permission. |
+| 72 | 2026-09-04 | What should an empty allowed-paths list say? | "Any file in this project", because no scope is wider rather than narrower and blank would read as "no files". |
 

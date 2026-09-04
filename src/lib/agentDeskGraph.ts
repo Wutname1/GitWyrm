@@ -1,4 +1,4 @@
-import type { AgentSession, ResultRecord, SessionMessage } from '@/lib/bindings'
+import type { AgentSession, HelperRole, ResultRecord, SessionMessage } from '@/lib/bindings'
 
 /**
  * Whether this chat has an agent graph worth showing.
@@ -63,4 +63,47 @@ export function resultForNode(records: ResultRecord[] | undefined, executionId: 
  * worktree, and a builder that changed nothing has nothing to diff. */
 export function canViewNodeChanges(record: Pick<ResultRecord, 'worktreePath' | 'changedPaths'> | null): boolean {
   return record !== null && record.worktreePath !== null && record.changedPaths.length > 0
+}
+
+/**
+ * What a helper's job is, in words a person uses.
+ *
+ * `HelperRole` is stored as `researcher`/`builder`/`verifier`, and both places
+ * that showed it printed the stored token verbatim -- including the approval
+ * card, the one screen where someone authorises agents to change their files.
+ * House rule: no internal token reaches the user.
+ *
+ * An unrecognised value falls back to "Helper" rather than leaking the raw
+ * string, matching how `changedPathStatusLabel` handles an unknown status code.
+ */
+export function helperRoleLabel(role: HelperRole | string | null | undefined): string {
+  switch (role) {
+    case 'researcher':
+      return 'Looks things up'
+    case 'builder':
+      return 'Makes the changes'
+    case 'verifier':
+      return 'Checks the work'
+    default:
+      return 'Helper'
+  }
+}
+
+/**
+ * Which files a helper is allowed to change, said plainly.
+ *
+ * `allowedPaths` is the boundary the backend actually enforces
+ * (`policy.rs`'s `check_path_allowance` refuses a write outside it), and it
+ * rendered in no component at all -- so someone pressing Start authorised
+ * file-writing agents while the scope of that permission was the one fact
+ * they could not see.
+ *
+ * An empty list means the policy is not path-scoped, which is *wider*, not
+ * narrower -- so it says so rather than showing nothing and reading as
+ * "no files".
+ */
+export function allowedPathsLabel(paths: string[]): string {
+  if (paths.length === 0) return 'Any file in this project'
+  if (paths.length <= 3) return paths.join(', ')
+  return `${paths.slice(0, 3).join(', ')} and ${paths.length - 3} more`
 }

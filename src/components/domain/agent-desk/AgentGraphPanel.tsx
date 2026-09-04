@@ -9,7 +9,7 @@ import { nodeUsageLine } from '@/lib/agentDeskUsage'
 import { describeOutcomeKind, explainStopOutcome, runIsActive } from '@/lib/agentDeskResult'
 import { cn } from '@/lib/utils'
 import { buildGraphTree, graphSummary, nodeDotTone, nodeStatusLabel, type GraphTreeNode } from '@/lib/agentGraphProjection'
-import { canViewNodeChanges, latestActivityLine, resultForNode } from '@/lib/agentDeskGraph'
+import { canViewNodeChanges, helperRoleLabel, latestActivityLine, resultForNode } from '@/lib/agentDeskGraph'
 import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
 import { AwaitingStartCard } from './AwaitingStartCard'
 import { ResultReviewPanel } from './ResultReviewPanel'
@@ -63,7 +63,13 @@ function GraphNodeRow({
   const title = isLead ? 'Lead agent' : (execution.jobTitle ?? 'Helper')
   const meta = isLead
     ? 'owns source + integration'
-    : [execution.helperRole, execution.worktreePath ? 'can change files' : 'reads only'].filter(Boolean).join(' · ')
+    : [
+        // The stored role token ('builder') is not a phrase anyone says.
+        execution.helperRole ? helperRoleLabel(execution.helperRole) : undefined,
+        execution.worktreePath ? 'can change files' : 'reads only',
+      ]
+        .filter(Boolean)
+        .join(' · ')
 
   return (
     <div className={cn('relative', !isLead && 'pl-6')}>
@@ -156,7 +162,7 @@ function InspectorCard({
   const filesLine = isLead
     ? undefined
     : [
-        execution.helperRole,
+        execution.helperRole ? helperRoleLabel(execution.helperRole) : undefined,
         changedFileCount > 0 ? `${changedFileCount} file${changedFileCount === 1 ? '' : 's'} changed` : undefined,
       ]
         .filter(Boolean)

@@ -7,6 +7,7 @@ import { keys, unwrap } from '@/lib/queryKeys'
 import { describeError, log } from '@/lib/log'
 import { describeOutcomeKind } from '@/lib/agentDeskResult'
 import { useOpenRepo } from '@/hooks/useRepoActions'
+import { allowedPathsLabel, helperRoleLabel } from '@/lib/agentDeskGraph'
 import {
   startFailureCardForError,
   startFailureCardForGraph,
@@ -202,11 +203,20 @@ export function AwaitingStartCard({
         Plan ready to review
       </div>
       <p className="mt-1.5 text-2xs leading-relaxed text-foreground">{proposal.leadSummary}</p>
+      {/*
+        Each helper's job AND which of your files it may change. This list
+        used to show the title and the stored role token only, so someone
+        pressing Start authorised file-writing agents without being shown the
+        boundary the backend then enforces against them.
+      */}
       <ul className="mt-1.5 flex flex-col gap-1">
         {proposal.helpers.map((h) => (
           <li key={h.nodeId} className="rounded border border-border bg-panel2 px-1.5 py-1 text-2xs">
             <span className="font-semibold text-foreground">{h.title}</span>
-            <span className="text-muted-foreground"> · {h.role}</span>
+            <span className="text-muted-foreground"> · {helperRoleLabel(h.role)}</span>
+            <span className="mt-0.5 block truncate text-2xs text-sub" title={h.allowedPaths.join(', ')}>
+              Can change: {allowedPathsLabel(h.allowedPaths)}
+            </span>
           </li>
         ))}
       </ul>
