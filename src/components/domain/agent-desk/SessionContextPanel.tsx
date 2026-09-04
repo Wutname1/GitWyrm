@@ -11,6 +11,27 @@ import { describeError, log } from '@/lib/log'
 import { useOpenSpecContextDrift } from '@/hooks/useOpenspecSessionSource'
 import { SessionUsageCard } from './SessionUsageCard'
 
+/**
+ * A backslash, built from its character code. Written this way because a
+ * literal backslash in a regex does not reliably survive the tooling that
+ * edits this file, and a silently-wrong separator would leave Windows paths
+ * unsplit while Unix ones looked fine.
+ */
+const BACKSLASH = String.fromCharCode(92)
+
+/**
+ * The last two segments of a path, which is the part a person recognises.
+ *
+ * The context card puts its value in the bold slot, so a full Windows path was
+ * the most prominent text in the card and truncated from the right, which
+ * keeps the drive letter and hides the folder. The whole path is on hover.
+ */
+function shortPath(path: string): string {
+  const parts = path.split(BACKSLASH).join('/').split('/').filter(Boolean)
+  if (parts.length <= 2) return path
+  return `…/${parts.slice(-2).join('/')}`
+}
+
 /** One "label / value" row, matching the mockup's `.ag-context-row`. */
 function ContextRow({
   icon: Icon,
@@ -24,7 +45,15 @@ function ContextRow({
   return (
     <div className="flex items-center gap-2 border-t border-border px-2 py-1.5 first:border-t-0">
       <Icon size={13} className="flex-none text-muted-foreground" aria-hidden />
-      <strong className="min-w-0 flex-1 truncate text-2xs font-semibold text-foreground">{value}</strong>
+      <strong
+        className="min-w-0 flex-1 truncate text-2xs font-semibold text-foreground"
+        // The full value on hover: the row truncates from the right, which for
+        // a filesystem path hides the folder name and keeps the drive letter --
+        // the least useful half.
+        title={value}
+      >
+        {value}
+      </strong>
       <span className="flex-none text-2xs text-muted-foreground">{label}</span>
     </div>
   )
@@ -129,7 +158,14 @@ export function SessionContextPanel({ session }: { session: AgentSession }) {
 
       <section className="rounded-md border border-border bg-panel2">
         <ContextRow icon={FolderGit2} label="project" value={session.header.repoName} />
-        <ContextRow icon={GitBranch} label="repository" value={session.header.repoPath} />
+        {/*
+          Shown as "…\parentolder" rather than the whole path. The bold slot
+          is the most prominent text in the card, and a full `C:\...` path
+          truncated from the right shows the drive letter and hides the folder
+          -- machine text in a person-facing position. The full path is on
+          hover, and the project's own name is the row above.
+        */}
+        <ContextRow icon={GitBranch} label="folder" value={shortPath(session.header.repoPath)} />
         <ContextRow icon={Link2} label="source" value={sourceSummary(session)} />
       </section>
 

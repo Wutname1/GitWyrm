@@ -115,6 +115,20 @@ export function SessionSidebar({
   const containerRef = useRef<HTMLDivElement>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
 
+  // Escape closes the drawer wherever focus happens to be. This used to sit as
+  // `onKeyDown` on the drawer's own div, which is not focusable -- so the key
+  // only worked if focus had already landed inside, and the comment promising
+  // "keyboard users close via the toggle or Escape" was true only sometimes.
+  useEffect(() => {
+    if (!drawerOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setDrawerOpen(false)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [drawerOpen])
+
+
   // Measure the WINDOW, not this element.
   //
   // This used to observe `containerRef` -- the sidebar's own wrapper -- which
@@ -339,9 +353,6 @@ export function SessionSidebar({
           <div
             className={cn('absolute inset-y-0 left-9 z-50 shadow-lg')}
             style={{ width: SIDEBAR_MIN_PX }}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') setDrawerOpen(false)
-            }}
           >
             {body}
           </div>

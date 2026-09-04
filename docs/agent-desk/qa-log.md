@@ -89,4 +89,5 @@ competing sub-agents, the answer names the losing option too.
 | 81 | 2026-09-04 | Why move the summary counting out of the component? | Its failure mode was "the numbers do not add up", which is arithmetic and belongs somewhere it can be tested. |
 | 82 | 2026-09-04 | Should the mode pills be hidden or disabled on a read-only chat? | Disabled with the reason shown, following the provider list's pattern, so the option stays discoverable and screen-reader users hear why. |
 | 83 | 2026-09-04 | Should more than one panel be pinnable at once? | Not decided here -- the vision's plural "panels" suggests yes, but that is a layout model change, so this pass only makes the replacement visible. |
+| 84 | 2026-09-04 | Why is a backslash written as a character code in the context panel? | Because the literal kept being eaten by the tooling, and the wrong version failed silently on Windows paths while looking correct on Unix ones. |
 
