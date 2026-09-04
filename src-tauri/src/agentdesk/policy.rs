@@ -435,7 +435,73 @@ fn path_matches_glob(path: &str, glob: &str) -> bool {
     if let Some(prefix) = glob.strip_suffix("/*") {
         return path.starts_with(&format!("{prefix}/")) && !path[prefix.len() + 1..].contains('/');
     }
+    // `*` inside a segment. This was missing: the doc above has always claimed
+    // "`*` matches within one segment", and a glob like `src/*.rs` hit no
+    // branch and fell through to `path == glob`, matching nothing. The Start
+    // card displays these paths as the permission being granted and
+    // `check_path_allowance` then refuses every write, so the helper appeared
+    // to run and produced nothing, with no way for the person to widen it.
+    if glob.contains('*') {
+        return segments_match(&path, &glob);
+    }
     path == glob
+}
+
+/// Compare path and glob segment by segment, where a `*` in a segment matches
+/// any run of characters within that segment and never across a `/`.
+///
+/// Separate from `path_matches_glob` so the `**` cases above keep their own
+/// early returns: `**` spans segments, which is a different question from
+/// what this answers.
+fn segments_match(path: &str, glob: &str) -> bool {
+    let path_parts: Vec<&str> = path.split('/').collect();
+    let glob_parts: Vec<&str> = glob.split('/').collect();
+    if path_parts.len() != glob_parts.len() {
+        return false;
+    }
+    path_parts
+        .iter()
+        .zip(glob_parts.iter())
+        .all(|(p, g)| segment_matches(p, g))
+}
+
+/// One segment against one glob segment. `*` matches any run of characters
+/// (including none) within the segment.
+fn segment_matches(segment: &str, glob: &str) -> bool {
+    if !glob.contains('*') {
+        return segment == glob;
+    }
+    let mut rest = segment;
+    let mut parts = glob.split('*').peekable();
+    // A leading literal must be at the start; `*foo` has an empty first part,
+    // which anchors nothing.
+    if let Some(first) = parts.next() {
+        match rest.strip_prefix(first) {
+            Some(tail) => rest = tail,
+            None => return false,
+        }
+    }
+    let mut pending: Option<&str> = None;
+    while let Some(part) = parts.next() {
+        if parts.peek().is_none() {
+            // Trailing literal must end the segment, unless the glob ended
+            // with `*` (empty last part), which matches whatever is left.
+            pending = Some(part);
+            break;
+        }
+        if part.is_empty() {
+            continue;
+        }
+        match rest.find(part) {
+            Some(at) => rest = &rest[at + part.len()..],
+            None => return false,
+        }
+    }
+    match pending {
+        Some("") => true,
+        Some(tail) => rest.len() >= tail.len() && rest.ends_with(tail),
+        None => true,
+    }
 }
 
 /// A tool an execution might try to call, coarse enough to gate against
@@ -598,6 +664,61 @@ pub fn check_tool_capability(
 
 #[cfg(test)]
 mod tests {
+
+    /// A write boundary must not widen by accident. `*` is the only wildcard
+    /// this adds, and it must never cross a `/` -- otherwise `src/*.rs` would
+    /// quietly authorise `src/vendor/secrets.rs`.
+    #[test]
+    fn a_star_never_crosses_a_slash() {
+        assert!(!super::path_matches_glob("src/a/b.rs", "src/*.rs"));
+        assert!(!super::path_matches_glob("a/b/c.md", "*.md"));
+        // Three segments cannot match a two-star-segment glob of four parts.
+        assert!(!super::path_matches_glob("src/deep/nested/x.rs", "src/*/x.rs"));
+        assert!(super::path_matches_glob("src/deep/x.rs", "src/*/x.rs"));
+    }
+
+    #[test]
+    fn a_star_handles_several_in_one_segment() {
+        assert!(super::path_matches_glob("src/agent_desk_v2.rs", "src/agent_*_*.rs"));
+        assert!(!super::path_matches_glob("src/agent.rs", "src/agent_*_*.rs"));
+    }
+
+    #[test]
+    fn a_bare_star_segment_still_means_one_segment() {
+        // The `/*` branch above already covered this; it must not regress.
+        assert!(super::path_matches_glob("src/main.rs", "src/*"));
+        assert!(!super::path_matches_glob("src/deep/main.rs", "src/*"));
+    }
+
+    #[test]
+    fn a_glob_with_no_star_is_still_exact() {
+        assert!(super::path_matches_glob("src/main.rs", "src/main.rs"));
+        assert!(!super::path_matches_glob("src/main.rs", "src/main.ts"));
+        assert!(!super::path_matches_glob("src/mainx.rs", "src/main.rs"));
+    }
+
+    #[test]
+    fn a_leading_star_anchors_the_tail_only() {
+        assert!(super::path_matches_glob("test_main.rs", "*.rs"));
+        assert!(super::path_matches_glob("main.rs", "*main.rs"));
+        assert!(!super::path_matches_glob("main.rss", "*main.rs"));
+    }
+
+    /// The doc promised "`*` matches within one segment". It did not: a glob
+    /// like `src/*.rs` hit no branch and fell through to `path == glob`, so it
+    /// matched nothing. The Start card shows those paths as the permission
+    /// being granted and `check_path_allowance` then refuses every write, so a
+    /// helper appeared to run and produced nothing.
+    #[test]
+    fn a_star_matches_within_one_segment() {
+        assert!(super::path_matches_glob("src/main.rs", "src/*.rs"));
+        assert!(super::path_matches_glob("README.md", "*.md"));
+        assert!(super::path_matches_glob("src/agent_desk.rs", "src/agent_*.rs"));
+        // Still one segment only: `*` must not cross a slash.
+        assert!(!super::path_matches_glob("src/deep/main.rs", "src/*.rs"));
+        // And the wrong extension is still refused.
+        assert!(!super::path_matches_glob("src/main.ts", "src/*.rs"));
+    }
     // Placed first so it is read alongside the other authority tests.
     #[test]
     fn an_auditor_is_launched_unable_to_write() {
