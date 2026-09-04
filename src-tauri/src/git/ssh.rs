@@ -485,7 +485,14 @@ pub fn set_key_for_host(host: &str, key_path: &str, stamp: &str) -> Result<(), A
         std::fs::create_dir_all(parent)?;
     }
 
-    let original = std::fs::read_to_string(&path).unwrap_or_default();
+    // Read-modify-write over the user's own SSH config, which routinely holds
+    // host entries GitWyrm knows nothing about. Treating a failed read as an
+    // empty file would drop all of them on the next write. Absent is empty.
+    let original = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(AppError::Io(e)),
+    };
     if !original.is_empty() {
         let backup = path.with_file_name(format!("config.backup-{stamp}"));
         std::fs::write(&backup, &original)?;

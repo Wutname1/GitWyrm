@@ -380,7 +380,16 @@ pub fn write_folder_rules(profiles: &[Profile], config_dir: &Path) -> Result<(),
     }
 
     let global = crate::git::identity::global_config_path()?;
-    let existing = std::fs::read_to_string(&global).unwrap_or_default();
+    // Read-modify-write over the user's own global git config, so a failed
+    // read must never look like an empty file: `splice_managed_block("")`
+    // returns just our managed block, and writing that would replace every
+    // setting the person has -- identity, aliases, everything -- with ours.
+    // A config that does not exist yet IS empty, and that stays a real answer.
+    let existing = match std::fs::read_to_string(&global) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(AppError::Io(e)),
+    };
     let updated = splice_managed_block(&existing, &folder_rules_block(profiles, config_dir));
     if updated != existing {
         std::fs::write(&global, updated)?;

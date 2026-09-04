@@ -277,7 +277,14 @@ fn write_conf_line(path: &Path, key: &str, value: &str) -> Result<(), AppError> 
     // gpg wants forward slashes even on Windows; a backslash reads as an escape.
     let value = value.replace('\\', "/");
 
-    let existing = std::fs::read_to_string(path).unwrap_or_default();
+    // Read-modify-write over the user's own gpg.conf. A failed read must not
+    // look like an empty file, or every other setting in it would be dropped
+    // when this line is written back. Absent is genuinely empty.
+    let existing = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(AppError::Io(e)),
+    };
     let mut lines: Vec<String> = existing
         .lines()
         .filter(|line| !line.trim_start().starts_with(key))
