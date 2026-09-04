@@ -109,6 +109,39 @@ jobs:
       - name: Test
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib
 
+  # The Backend job above runs on Linux, where `#[cfg(windows)]` code is not
+  # compiled at all -- and there are ~99 Windows-gated sites, including every
+  # agent adapter, the agent transport, and the worktree file writer. Several
+  # are one arm of a cfg(unix)/cfg(windows) pair, so a signature can drift on
+  # the Windows side and every Linux run stays green. Windows is the primary
+  # shipping platform, and until now the first build of that code was at
+  # release time.
+  #
+  # Check only: bundling is what the release workflow already does, and a
+  # Windows runner is slow. This is the cheapest thing that makes the compiler
+  # look at that half of the codebase on every change.
+  rust-windows:
+    name: Backend (Windows)
+    if: github.event_name == 'pull_request'
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ci-windows
+
+      - name: Check
+        run: cargo check --manifest-path src-tauri/Cargo.toml
+
+      - name: Check tests compile
+        run: cargo test --manifest-path src-tauri/Cargo.toml --no-run
+
   # Proves every Linux package actually packages, not just that Rust compiles.
   # The retained artifact is the quickest path from a PR to the three-VM test
   # matrix: the AppImage and deb both come from the exact commit under review.
