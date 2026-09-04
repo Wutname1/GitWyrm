@@ -1043,6 +1043,45 @@ fn unlink_at(locks: &SessionLocks, root: &SessionStoreRoot, session_id: &str) ->
 #[cfg(test)]
 mod tests {
 
+    /// Every registered adapter must appear in the capability list.
+    ///
+    /// `is_enabled` ends in `.unwrap_or(false)`, so an adapter whose id is not
+    /// in `ADAPTER_CAPABILITY_FLAGS` is silently OFF: it compiles, it
+    /// registers, it detects, and it never appears to the person -- with no
+    /// error anywhere saying why. A sixth adapter added without a flag entry
+    /// would be invisible and the build would stay green.
+    ///
+    /// The two lists agree today (checked when this was written); this is
+    /// about the next one. Compared against the REAL registry rather than a
+    /// hardcoded list, so it cannot drift from what actually ships.
+    #[test]
+    fn every_registered_adapter_has_a_capability_flag() {
+        use crate::agentdesk::adapters::AdapterRegistry;
+        let registry = AdapterRegistry::with_default_adapters();
+        let flagged: std::collections::BTreeSet<&str> =
+            super::ADAPTER_CAPABILITY_FLAGS.iter().map(|(id, _)| *id).collect();
+
+        let unflagged: Vec<&str> = registry
+            .ids()
+            .into_iter()
+            .filter(|id| !flagged.contains(id))
+            .collect();
+        assert!(
+            unflagged.is_empty(),
+            "these adapters would be silently hidden with no error: {unflagged:?}"
+        );
+
+        // And the other direction: a flag naming no adapter is dead config
+        // that reads as a deliberate decision about something that is gone.
+        let registered: std::collections::BTreeSet<&str> = registry.ids().into_iter().collect();
+        let orphaned: Vec<&str> = flagged
+            .iter()
+            .copied()
+            .filter(|id| !registered.contains(id))
+            .collect();
+        assert!(orphaned.is_empty(), "these flags name no adapter: {orphaned:?}");
+    }
+
     /// A first import whose ledger note could not be saved must SAY so.
     ///
     /// `already_imported_session`'s doc says a lost ledger "degrades to
