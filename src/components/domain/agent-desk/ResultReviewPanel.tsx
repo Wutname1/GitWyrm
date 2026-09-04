@@ -41,6 +41,7 @@ import {
   runOutcomeLabel,
   sortResultsNewestFirst,
   explainDraftPullRequestRefusal,
+  explainResultListUnavailable,
 } from '@/lib/agentDeskResult'
 import { log, describeError } from '@/lib/log'
 import { cn } from '@/lib/utils'
@@ -187,6 +188,25 @@ export function ResultReviewPanel({
   if (query.isLoading) {
     return <div className="p-3 text-xs text-muted-foreground">Loading result…</div>
   }
+  // A failed read is not an absence. Every non-`found` outcome and every
+  // thrown error used to collapse into an empty list and render "No result yet
+  // for this execution." -- telling someone their agent produced nothing, on
+  // the screen where they decide whether its work lands.
+  const listUnavailable = explainResultListUnavailable(query.data, query.isError)
+  if (listUnavailable) {
+    return (
+      <div className="p-3">
+        <p className="text-xs leading-relaxed text-[var(--gw-amber)]">{listUnavailable}</p>
+        <button
+          type="button"
+          onClick={() => void query.refetch()}
+          className="mt-2 rounded border border-border px-2 py-1 text-2xs font-semibold hover:bg-panel3"
+        >
+          Try again
+        </button>
+      </div>
+    )
+  }
   if (!record) {
     return <div className="p-3 text-xs text-muted-foreground">No result yet for this execution.</div>
   }
@@ -202,8 +222,13 @@ export function ResultReviewPanel({
     try {
       await fn()
     } catch (e) {
-      log.error(`result review action failed: ${describeError(e)}`)
-      toast.error('Something went wrong. Try again.')
+      // The reason was computed for the log on the line above and dropped from
+      // the message. `withBusy` wraps Keep, Commit, Undo, Cleanup and Request
+      // revision, so five actions on the landing screen shared eight words that
+      // said nothing about which failed or why.
+      const detail = describeError(e)
+      log.error(`result review action failed: ${detail}`)
+      toast.error('Something went wrong. Try again.', { description: detail })
     } finally {
       setBusy(false)
     }
@@ -794,8 +819,9 @@ function PullRequestButton({
         compareUrl: outcome.draft.compareUrl,
       })
     } catch (e) {
-      log.error(`draft pull request failed: ${describeError(e)}`)
-      toast.error('Something went wrong preparing the pull request.')
+      const detail = describeError(e)
+      log.error(`draft pull request failed: ${detail}`)
+      toast.error('Something went wrong preparing the pull request.', { description: detail })
     } finally {
       setDrafting(false)
     }

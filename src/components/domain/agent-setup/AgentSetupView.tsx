@@ -155,7 +155,12 @@ export function AgentSetupView({ repoId, onClose }: { repoId: string | null; onC
             <RecentConfigChanges repoId={repoId} />
           </div>
         ) : (
-          <DetectedAppsTab detections={detections.data ?? []} />
+          <DetectedAppsTab
+            detections={detections.data ?? []}
+            isLoading={detections.isLoading}
+            isError={detections.isError}
+            onRetry={() => void detections.refetch()}
+          />
         )}
       </div>
 

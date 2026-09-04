@@ -41,10 +41,19 @@ describe('a failed read is never shown as an absence', () => {
   it('every component that defaults query data to empty also handles a failure', () => {
     const offenders: string[] = []
     for (const { name, source } of componentsInScope()) {
-      // `<something>.data ?? []` or `?? ''` -- a query result standing in for
+      // `<name>.data ?? []` or `?? ''` -- a query result standing in for
       // "nothing", which is what every instance of this defect looked like.
-      const swallows = /\.data\s*\?\?\s*(\[\]|'')/.test(source)
-      if (swallows && !/isError/.test(source)) offenders.push(name)
+      //
+      // Checked per QUERY, not per file. The first version asked only whether
+      // `isError` appeared anywhere in the source, so a file handling one
+      // query's failure was cleared for swallowing a different query's --
+      // which is exactly what `AgentSetupView` was doing: the inventory query
+      // guarded, the detections query not, one `isError` covering both.
+      for (const m of source.matchAll(/(\w+)\.data\s*\?\?\s*(?:\[\]|'')/g)) {
+        const query = m[1]
+        const guarded = new RegExp(`${query}\.isError`).test(source)
+        if (!guarded) offenders.push(`${name} (${query})`)
+      }
     }
     expect(offenders, 'these treat a failed read as empty data').toEqual([])
   })

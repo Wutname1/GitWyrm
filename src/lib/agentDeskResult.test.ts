@@ -10,6 +10,7 @@ import type {
   ToggleOutcome,
 } from '@/lib/bindings'
 import {
+  explainResultListUnavailable,
   describeOutcome,
   runOutcomeLabel,
   explainDraftPullRequestRefusal,
@@ -717,5 +718,17 @@ describe('describeOutcome', () => {
   })
   it('never leaves the raw kind as the whole message', () => {
     expect(describeOutcome({ kind: 'writeFailed' })).not.toBe('writeFailed')
+  })
+})
+
+describe('explainResultListUnavailable', () => {
+  it('never lets a failed read read as "the agent produced nothing"', () => {
+    expect(explainResultListUnavailable({ kind: 'sessionDamaged', reason: 'bad json' }, false)).toMatch(/unknown/i)
+    expect(explainResultListUnavailable({ kind: 'sessionUnavailable', detail: 'locked' }, false)).toMatch(/locked/)
+    expect(explainResultListUnavailable(undefined, true)).toMatch(/could not read/i)
+  })
+  it('stays silent when the list really is just empty', () => {
+    expect(explainResultListUnavailable({ kind: 'found', records: [] }, false)).toBeNull()
+    expect(explainResultListUnavailable(undefined, false)).toBeNull()
   })
 })

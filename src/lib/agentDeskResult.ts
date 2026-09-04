@@ -8,6 +8,7 @@ import type {
   KeepResultOutcome,
   ResultCheckOutcome,
   ResultChangedPath,
+  ListResultsOutcome,
   ResultOutcomeKind,
   ResultRecord,
   ResultState,
@@ -781,4 +782,35 @@ export function describeOutcome(outcome: { kind: string; reason?: string; detail
   const base = describeOutcomeKind(outcome.kind)
   const extra = outcome.reason ?? outcome.detail
   return extra ? `${base} ${extra}` : base
+}
+
+/**
+ * Why the result list could not be read, when it could not.
+ *
+ * The panel collapsed `sessionDamaged`, `sessionUnavailable`, `sessionNotFound`
+ * and every thrown error into an empty list, then rendered "No result yet for
+ * this execution." -- a confident statement that the agent produced nothing,
+ * on the screen where a person decides whether its work lands. Someone
+ * returning to a run whose sidecar file has since become unreadable was told,
+ * in plain words, that work they watched happen did not happen.
+ *
+ * `found` returns null: an empty list there genuinely means no result yet, and
+ * the plain empty state says that better than an error would.
+ */
+export function explainResultListUnavailable(
+  outcome: ListResultsOutcome | undefined,
+  isError: boolean
+): string | null {
+  if (isError) return 'GitWyrm could not read this chat to find its results.'
+  if (!outcome) return null
+  switch (outcome.kind) {
+    case 'found':
+      return null
+    case 'sessionNotFound':
+      return 'That chat is no longer there, so its results cannot be shown.'
+    case 'sessionDamaged':
+      return `This chat's saved file could not be read, so its results are unknown: ${outcome.reason}`
+    case 'sessionUnavailable':
+      return `GitWyrm could not read this chat right now, so its results are unknown: ${outcome.detail}`
+  }
 }
