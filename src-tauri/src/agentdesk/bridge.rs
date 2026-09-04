@@ -121,6 +121,17 @@ impl RunSessionLinks {
     /// Drops the sequence counter for a finished `airun` session, so a future
     /// reuse of the same session ID (should the counter type ever wrap, or in
     /// a test) starts clean rather than inheriting a stale count.
+    ///
+    /// NOT CURRENTLY REACHED, and neither is [`Self::next_sequence`]: the
+    /// `sequences` map is touched only by those two, and only from tests.
+    /// Production sequence numbers arrive on the event itself. Recorded here
+    /// rather than deleted because the pair is coherent and the counter is
+    /// the obvious home if a transport ever needs GitWyrm to number its own
+    /// events -- but a reader should not assume this map is live, and should
+    /// not "fix" its growth: nothing fills it.
+    ///
+    /// If a caller is ever added for `next_sequence`, this must be called
+    /// wherever `unlink` is, or the map really will grow one entry per run.
     pub fn forget_sequence(&self, run_session_id: &str) {
         self.sequences.lock().unwrap().remove(run_session_id);
     }
