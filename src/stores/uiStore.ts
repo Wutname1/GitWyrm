@@ -170,6 +170,8 @@ interface UiState {
    * instead of letting the tab move.
    */
   repoPickerWiggleNonce: number
+  /** Bumped whenever the repository picker should focus its search box. */
+  repoPickerSearchFocusNonce: number
   /**
    * True while the "Add a repository" tab exists. It stays open when the user
    * clicks away to a repo, so they can come back to a half-finished clone URL
@@ -326,6 +328,7 @@ export const useUiStore = create<UiState>((set) => ({
   searchMatchIndex: null,
   githubItem: null,
   repoPickerWiggleNonce: 0,
+  repoPickerSearchFocusNonce: 0,
   repoPickerOpen: false,
   stashTracks: {},
   awaitingCommitSha: null,
@@ -438,7 +441,13 @@ export const useUiStore = create<UiState>((set) => ({
     })),
   showGraph: () => set({ centerView: 'graph', diffRequest: null, fileTarget: null }),
   showRepoPicker: () =>
-    set({ centerView: 'repoPicker', repoPickerOpen: true, diffRequest: null, fileTarget: null }),
+    set((s) => ({
+      centerView: 'repoPicker',
+      repoPickerOpen: true,
+      repoPickerSearchFocusNonce: s.repoPickerSearchFocusNonce + 1,
+      diffRequest: null,
+      fileTarget: null,
+    })),
   closeRepoPicker: () =>
     set((s) => ({
       repoPickerOpen: false,

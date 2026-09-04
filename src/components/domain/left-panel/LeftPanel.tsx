@@ -28,6 +28,7 @@ import { InProgressModal } from '@/components/modals/InProgressModal'
 import { classifyError } from '@/lib/errorClass'
 import { RenameBranchDialog } from '@/components/modals/RenameBranchDialog'
 import { branchSync } from '@/lib/branchActions'
+import { publishedBranchTarget } from '@/lib/branchDelete'
 import { tutorialBranchId } from '@/lib/tutorialLessons'
 import { openWebUrl } from '@/lib/remoteWeb'
 import { BranchMenu } from '@/components/domain/branch/BranchMenu'
@@ -140,6 +141,18 @@ export function LeftPanel() {
     ? branches.data?.local.find((b) => b.name === remoteBranchToDelete.branch)
     : undefined
   const canAlsoDeleteLocal = !!remoteDeleteLocalCopy && !remoteDeleteLocalCopy.is_head
+
+  // Deleting from the local branch menu can remove its published copy too, but
+  // only when the configured upstream still exists in the fetched remote list.
+  // Never infer this from a same-named branch on an arbitrary remote.
+  const localBranchToDelete = branchToDelete
+    ? branches.data?.local.find((branch) => branch.name === branchToDelete)
+    : undefined
+  const localDeleteRemoteTarget = publishedBranchTarget(localBranchToDelete, remotes.data)
+  const [alsoDeleteRemote, setAlsoDeleteRemote] = useState(false)
+  useEffect(() => {
+    setAlsoDeleteRemote(false)
+  }, [branchToDelete])
 
   const currentBranch =
     branches.data?.local.find((b) => b.is_head)?.name ?? repo?.head_branch ?? ''
@@ -545,8 +558,41 @@ export function LeftPanel() {
             it may become hard to find.
           </>
         }
+        extra={
+          localDeleteRemoteTarget ? (
+            <label className="flex cursor-pointer items-start gap-2 text-xs text-sub">
+              <input
+                type="checkbox"
+                checked={alsoDeleteRemote}
+                onChange={(e) => setAlsoDeleteRemote(e.target.checked)}
+                className="mt-0.5 size-3.5 accent-[var(--gw-accent)]"
+              />
+              <span>
+                Also delete it from{' '}
+                <span className="text-foreground">{localDeleteRemoteTarget.remote}</span>
+                <span className="block text-2xs text-muted-foreground">
+                  It will disappear for everyone using it
+                </span>
+              </span>
+            </label>
+          ) : undefined
+        }
         confirmLabel="Delete branch"
-        onConfirm={() => branchToDelete && m.deleteBranch.mutate(branchToDelete)}
+        pending={m.deleteBranch.isPending || m.deleteRemoteBranch.isPending}
+        pendingLabel="Deleting…"
+        onConfirm={() => {
+          if (!branchToDelete) return
+          if (alsoDeleteRemote && localDeleteRemoteTarget) {
+            m.deleteRemoteBranch.mutate({
+              name: localDeleteRemoteTarget.branch,
+              remote: localDeleteRemoteTarget.remote,
+              alsoLocal: true,
+              localName: branchToDelete,
+            })
+            return
+          }
+          m.deleteBranch.mutate(branchToDelete)
+        }}
       />
 
       <ConfirmDialog

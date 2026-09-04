@@ -366,6 +366,20 @@ function AppInner() {
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [])
 
+  // Ctrl/Cmd+O opens the repository picker and puts the keyboard in its search
+  // box. Going through the store keeps the shortcut and the visible Open
+  // Repository button on exactly the same path.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return
+      if (e.key !== 'o' && e.key !== 'O') return
+      e.preventDefault()
+      useUiStore.getState().showRepoPicker()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [])
+
   // Ctrl/Cmd + Plus/Minus resizes the whole interface, Ctrl/Cmd+0 puts it back.
   // `e.key` for the plus key varies with layout and shift state ('+', '=', and
   // the numpad 'Add'), so match on the whole set.

@@ -519,7 +519,7 @@ function OpenRepositoryButton({ compact = false }: { compact?: boolean }) {
           ? "flex size-[30px] items-center justify-center rounded-[5px] border border-border bg-panel2 text-sub transition-colors hover:border-muted-foreground hover:bg-panel3 hover:text-foreground active:bg-panel active:text-foreground"
           : "flex items-center rounded-[5px] px-2 text-sub transition-colors hover:bg-panel3 hover:text-foreground active:bg-panel2 active:text-foreground"
       }
-      tooltip={pickerShowing ? "Close" : "Open or clone a repository"}
+      tooltip={pickerShowing ? "Close" : "Open or clone a repository (Ctrl+O)"}
       disabled={openRepo.isPending}
     >
       {openRepo.isPending ? (
