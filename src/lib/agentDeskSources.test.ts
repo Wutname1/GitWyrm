@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
+  commitSourceInput,
   describeSnapshotFreshness,
+  diffSourceInput,
   explainRefreshSourceOutcome,
   issueSourceInput,
   openSpecChangeSourceInput,
   openSpecTaskSourceInput,
   pullRequestSourceInput,
+  workingChangesSourceInput,
 } from './agentDeskSources'
 import type { IssueDetail, IssueSummary, PrDetail, PrSummary, SpecChange, SpecTask } from './bindings'
 
@@ -285,5 +288,46 @@ describe('explainRefreshSourceOutcome', () => {
     expect(explainRefreshSourceOutcome({ kind: 'unavailable', detail: 'locked' }).message).toMatch(/locked/)
     expect(explainRefreshSourceOutcome({ kind: 'writeFailed', detail: 'disk full' }).message).toMatch(/disk full/)
     expect(explainRefreshSourceOutcome({ kind: 'notFound' }).ok).toBe(false)
+  })
+})
+
+describe('commit, diff and working-changes sources', () => {
+  // These three variants were typed, persisted, converted by the backend and
+  // rendered by the UI with no builder anywhere -- so nothing in the app could
+  // create one, and the vision's "start a chat from a commit or a diff" named
+  // a capability no gesture could reach.
+  it('a commit carries its message, not just its id', () => {
+    const src = commitSourceInput('abc1234def', 'Fix the login redirect', 'Ada', '2 days ago')
+    expect(src.kind).toBe('commit')
+    expect(src.oid).toBe('abc1234def')
+    expect(src.title).toBe('Fix the login redirect')
+    expect(src.summary).toMatch(/by Ada/)
+    expect(src.summary).toMatch(/2 days ago/)
+  })
+
+  it('a commit with no subject still gets a readable title', () => {
+    expect(commitSourceInput('abc1234def', '', '', '').title).toBe('Commit abc1234')
+  })
+
+  it('a diff keeps the scope verbatim so it still says what it pointed at', () => {
+    const src = diffSourceInput('staged', ['a.ts', 'b.ts'], 'Staged changes')
+    expect(src.scope).toBe('staged')
+    expect(src.paths).toEqual(['a.ts', 'b.ts'])
+    expect(src.summary).toBe('2 changed files')
+  })
+
+  it('one changed file is singular', () => {
+    expect(diffSourceInput('unstaged', ['a.ts'], 'Your changes').summary).toBe('1 changed file')
+  })
+
+  it('working changes name the files, and stop naming them past a handful', () => {
+    const many = ['a', 'b', 'c', 'd', 'e', 'f', 'g']
+    const src = workingChangesSourceInput(many)
+    expect(src.title).toBe('Your 7 changed files')
+    expect(src.summary).toMatch(/and 2 more$/)
+  })
+
+  it('working changes say plainly when there are none', () => {
+    expect(workingChangesSourceInput([]).summary).toBe('Nothing is changed right now')
   })
 })

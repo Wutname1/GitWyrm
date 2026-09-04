@@ -191,3 +191,64 @@ export function explainRefreshSourceOutcome(outcome: RefreshSourceOutcome): { me
       return { message: `Could not save the refreshed copy: ${outcome.detail}`, ok: false }
   }
 }
+
+/**
+ * A chat started from one commit.
+ *
+ * The `SessionSource::Commit` variant has been typed, persisted, converted by
+ * the backend and rendered by the UI since sources shipped -- with **no
+ * builder**, so nothing in the app could ever create one. The vision names
+ * commits, diffs and failed checks among the things a chat can start from;
+ * without these functions, that sentence described a capability the type
+ * system supported and no gesture could reach.
+ *
+ * The summary is what the chat shows when the commit is no longer reachable,
+ * so it carries the message rather than only the id.
+ */
+export function commitSourceInput(
+  oid: string,
+  subject: string,
+  author: string,
+  when: string
+): Extract<SessionSourceInput, { kind: 'commit' }> {
+  const shortOid = oid.slice(0, 7)
+  return {
+    kind: 'commit',
+    oid,
+    title: subject || `Commit ${shortOid}`,
+    summary: [subject, author ? `by ${author}` : '', when].filter(Boolean).join(' — '),
+  }
+}
+
+/**
+ * A chat started from a set of changed files -- a commit's diff, or the
+ * staged/unstaged view.
+ *
+ * `scope` is the backend's own word for which diff this was, kept verbatim so
+ * a stored source still says what it pointed at after the working tree moves.
+ */
+export function diffSourceInput(
+  scope: string,
+  paths: string[],
+  label: string
+): Extract<SessionSourceInput, { kind: 'diff' }> {
+  const count = paths.length
+  return {
+    kind: 'diff',
+    scope,
+    paths,
+    title: label,
+    summary: count === 1 ? '1 changed file' : `${count} changed files`,
+  }
+}
+
+/** A chat started from whatever is uncommitted in the project right now. */
+export function workingChangesSourceInput(paths: string[]): Extract<SessionSourceInput, { kind: 'workingChanges' }> {
+  const count = paths.length
+  return {
+    kind: 'workingChanges',
+    paths,
+    title: count === 1 ? 'Your 1 changed file' : `Your ${count} changed files`,
+    summary: count === 0 ? 'Nothing is changed right now' : paths.slice(0, 5).join(', ') + (count > 5 ? `, and ${count - 5} more` : ''),
+  }
+}

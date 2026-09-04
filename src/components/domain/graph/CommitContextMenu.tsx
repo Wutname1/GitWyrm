@@ -5,6 +5,7 @@ import {
   ExternalLink,
   GitBranchPlus,
   Info,
+  Sparkles,
   Link as LinkIcon,
   LogIn,
   MoveVertical,
@@ -16,6 +17,9 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { copyToClipboard } from '@/lib/clipboard'
+import { commitSourceInput } from '@/lib/agentDeskSources'
+import { formatRelativeTime } from '@/lib/gitDisplay'
+import { useStartAgentSession } from '@/hooks/useStartAgentSession'
 import type { CommitEntry, ResetMode } from '@/lib/bindings'
 import {
   ContextMenu,
@@ -61,6 +65,7 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
   const openNewBranch = useUiStore((s) => s.openNewBranch)
   const revealShaInGraph = useUiStore((s) => s.revealShaInGraph)
   const [pending, setPending] = useState<Pending>(null)
+  const { startSession } = useStartAgentSession()
 
   // Only fetched when the reword dialog opens, so most right-clicks cost nothing.
   const detail = useCommitDetail(repo?.id ?? null, pending?.kind === 'reword' ? commit.sha : null)
@@ -124,6 +129,32 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
             <Info />
             View details
           </ContextMenuItem>
+          {/* A commit is the most self-describing thing in a repository and
+              was the only one with nothing to ask about it. The source kind
+              has been typed and stored end to end since sources shipped; this
+              is the gesture that was missing. */}
+          {repo && (
+            <ContextMenuItem
+              onSelect={() =>
+                void startSession({
+                  key: `commit:${commit.sha}`,
+                  repoId: repo.id,
+                  repoPath: repo.path,
+                  repoName: repo.name,
+                  intent: 'explain',
+                  source: commitSourceInput(
+                    commit.sha,
+                    commit.summary,
+                    commit.author_name,
+                    formatRelativeTime(commit.time)
+                  ),
+                })
+              }
+            >
+              <Sparkles />
+              Explain with AI
+            </ContextMenuItem>
+          )}
           {/* A merge has more than one parent, so each is offered by sha. The
               first parent is the branch the merge was made on, which is the one
               people usually mean by "the previous commit". */}
