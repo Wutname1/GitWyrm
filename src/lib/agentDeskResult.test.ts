@@ -14,6 +14,7 @@ import {
   changedPathStatusLabel,
   changedPathsSummaryLine,
   describeCommitDestination,
+  explainCleanupOutcome,
   failingCheckLines,
   checksSummaryLine,
   explainAutoStartOutcome,
@@ -449,5 +450,34 @@ describe('failingCheckLines', () => {
 
   it('is empty when nothing failed', () => {
     expect(failingCheckLines([check('npm test', 'passed'), check('lint', 'skipped')])).toEqual([])
+  })
+})
+
+describe('explainCleanupOutcome', () => {
+  const rec = { record: {} as never }
+
+  it('only reports removed when the space was actually reclaimed', () => {
+    expect(explainCleanupOutcome({ kind: 'removed', ...rec }).removed).toBe(true)
+    expect(explainCleanupOutcome({ kind: 'nothingToClean' }).removed).toBe(false)
+    expect(explainCleanupOutcome({ kind: 'notIntegratedOrDiscarded' }).removed).toBe(false)
+  })
+
+  it('says what is in the way rather than just refusing', () => {
+    const kept = explainCleanupOutcome({ kind: 'keptHandEdited', ...rec, modified: 2, untracked: 1 })
+    expect(kept.removed).toBe(false)
+    expect(kept.message).toMatch(/3 files/)
+    expect(kept.message).toMatch(/not accounted for/i)
+  })
+
+  it('tells the person to land or discard the work first, not that something broke', () => {
+    // The backend refuses cleanup before Commit or Undo on purpose; the copy
+    // has to read as a safeguard, not a failure.
+    expect(explainCleanupOutcome({ kind: 'notIntegratedOrDiscarded' }).message).toMatch(/so nothing is lost/i)
+  })
+
+  it('names the path when only part of it could go', () => {
+    const partial = explainCleanupOutcome({ kind: 'partiallyRemoved', path: 'C:/wt/leftover' })
+    expect(partial.message).toMatch(/C:\/wt\/leftover/)
+    expect(partial.removed).toBe(false)
   })
 })

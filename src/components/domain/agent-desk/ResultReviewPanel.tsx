@@ -25,6 +25,7 @@ import {
   changedPathStatusLabel,
   changedPathsSummaryLine,
   describeCommitDestination,
+  explainCleanupOutcome,
   failingCheckLines,
   checksSummaryLine,
   explainCommitOutcome,
@@ -234,6 +235,25 @@ export function ResultReviewPanel({
           toast.warning('Kept, but the task list could not be updated. Check it off by hand.')
         }
       }
+    })
+  }
+
+  /**
+   * Clear away the agent's own copy of the project once the work has landed
+   * or been thrown away.
+   *
+   * `canCleanup` has been computed since results shipped and nothing read it,
+   * so every run left a full checkout on disk that the app could not remove
+   * and never mentioned. Offered only after Commit or Undo, because the
+   * backend refuses before then -- and that refusal is the right one.
+   */
+  async function handleCleanup() {
+    await withBusy(async () => {
+      const outcome = unwrap(await commands.agentResultCleanupWorktree(repoId, sessionId, executionId))
+      const { message, removed } = explainCleanupOutcome(outcome)
+      if (removed) toast.success(message)
+      else toast.warning(message)
+      refresh()
     })
   }
 
@@ -609,6 +629,11 @@ export function ResultReviewPanel({
               Cancel
             </ActionButton>
           </>
+        )}
+        {availability.canCleanup && record.worktreePath && (
+          <ActionButton onClick={handleCleanup} disabled={busy} variant="ghost">
+            Clear the agent's copy
+          </ActionButton>
         )}
         {availability.canDraftPullRequest && (
           <PullRequestButton

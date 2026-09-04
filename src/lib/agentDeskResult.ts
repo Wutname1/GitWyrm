@@ -1,4 +1,5 @@
 import type {
+  CleanupWorktreeOutcome,
   CommitResultOutcome,
   CompleteOpenSpecTaskOutcome,
   EscalateToFixOutcome,
@@ -440,4 +441,46 @@ export function failingCheckLines(checks: ResultCheckOutcome[]): string[] {
   return checks
     .filter((c) => c.outcome === 'failed')
     .map((c) => (c.summary ? `${c.commandName} — ${c.summary}` : `${c.commandName} failed`))
+}
+
+/**
+ * Plain-language result of clearing away an agent's copy of the project, and
+ * whether the space was actually reclaimed.
+ *
+ * `canCleanup` has been computed since results shipped and **no component
+ * ever read it** -- the command was registered, bound, and unreachable. So
+ * every agent run left a full checkout on disk with nothing in the app able
+ * to remove it, and nothing that even said it was there.
+ */
+export function explainCleanupOutcome(outcome: CleanupWorktreeOutcome): { message: string; removed: boolean } {
+  switch (outcome.kind) {
+    case 'removed':
+      return { message: "Cleared. The agent's copy of your project is gone from disk.", removed: true }
+    case 'keptHandEdited': {
+      const total = outcome.modified + outcome.untracked
+      const noun = total === 1 ? 'file' : 'files'
+      return {
+        message: `Kept it: ${total} ${noun} in there are not accounted for. Open the folder to look before clearing it.`,
+        removed: false,
+      }
+    }
+    case 'notIntegratedOrDiscarded':
+      return { message: 'Not yet -- keep or throw away this work first, so nothing is lost.', removed: false }
+    case 'nothingToClean':
+      return { message: 'There is nothing to clear away for this run.', removed: false }
+    case 'refusedLocked':
+      return { message: `Something else is using that folder right now: ${outcome.path}`, removed: false }
+    case 'partiallyRemoved':
+      return { message: `Only part of it could be removed. What is left is at ${outcome.path}`, removed: false }
+    case 'resultNotFound':
+      return { message: 'That result could not be found. Try refreshing.', removed: false }
+    case 'sessionNotFound':
+      return { message: 'That chat could not be found.', removed: false }
+    case 'sessionDamaged':
+      return { message: `That chat's file is damaged: ${outcome.reason}`, removed: false }
+    case 'sessionUnavailable':
+      return { message: `That chat could not be read right now: ${outcome.detail}`, removed: false }
+    case 'writeFailed':
+      return { message: `Could not save the change: ${outcome.detail}`, removed: false }
+  }
 }
