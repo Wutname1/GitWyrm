@@ -1,4 +1,4 @@
-import type { AgentSession, HelperRole, ResultRecord, SessionMessage } from '@/lib/bindings'
+import type { AgentSession, CompletionCondition, HelperRole, ResultRecord, SessionMessage } from '@/lib/bindings'
 
 /**
  * Whether this chat has an agent graph worth showing.
@@ -124,4 +124,33 @@ export function allowedPathsLabel(paths: string[]): string {
 export function allowedPathLines(paths: string[], limit = 3): { lines: string[]; rest: number } {
   if (paths.length === 0) return { lines: [], rest: 0 }
   return { lines: paths.slice(0, limit), rest: Math.max(0, paths.length - limit) }
+}
+
+/**
+ * When a helper is considered finished, in words.
+ *
+ * `CompletionCondition` is on every proposed helper and reaches no component:
+ * "done when these checks pass", "done when these files have changed", "done
+ * when it reports back". The vision names a per-node completion condition as
+ * part of what an agent graph is, and the approval card -- the screen where
+ * you agree to the whole plan -- showed the job, the role and the file scope
+ * but never the finish line.
+ *
+ * A command is shown verbatim because it is the thing that will actually run;
+ * paths are counted past two rather than listed, since the file scope is
+ * already spelled out a line above.
+ */
+export function completionConditionLabel(condition: CompletionCondition): string {
+  switch (condition.kind) {
+    case 'reportsResult':
+      return 'Done when it reports back'
+    case 'checksPass':
+      return `Done when this passes: ${condition.command}`
+    case 'filesChanged': {
+      const n = condition.paths.length
+      if (n === 0) return 'Done when it has changed files'
+      if (n <= 2) return `Done when it has changed ${condition.paths.join(' and ')}`
+      return `Done when it has changed ${condition.paths[0]} and ${n - 1} more`
+    }
+  }
 }

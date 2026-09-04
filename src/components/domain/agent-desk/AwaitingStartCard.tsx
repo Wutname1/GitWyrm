@@ -7,7 +7,7 @@ import { keys, unwrap } from '@/lib/queryKeys'
 import { describeError, log } from '@/lib/log'
 import { describeOutcomeKind } from '@/lib/agentDeskResult'
 import { useOpenRepo } from '@/hooks/useRepoActions'
-import { allowedPathLines, allowedPathsLabel, helperRoleLabel } from '@/lib/agentDeskGraph'
+import { allowedPathLines, allowedPathsLabel, completionConditionLabel, helperRoleLabel } from '@/lib/agentDeskGraph'
 import {
   startFailureCardForError,
   startFailureCardForGraph,
@@ -237,6 +237,14 @@ export function AwaitingStartCard({
                   {scope.rest > 0 && <span className="block pl-2">and {scope.rest} more</span>}
                 </>
               )}
+            </span>
+            {/*
+              The finish line. Every proposed helper carries a completion
+              condition and no component read it, so the card said what each
+              one may do and never when it stops.
+            */}
+            <span className="mt-0.5 block truncate text-2xs text-sub" title={completionConditionLabel(h.completion)}>
+              {completionConditionLabel(h.completion)}
             </span>
           </li>
           )

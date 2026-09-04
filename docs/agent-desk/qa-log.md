@@ -112,4 +112,5 @@ competing sub-agents, the answer names the losing option too.
 | 104 | 2026-09-04 | What should happen after choosing to carry on an imported chat here? | You land in the chat -- being told it is continuing while staying on the import list gives you no way to reach it. |
 | 105 | 2026-09-04 | Where should the OpenSpec list's loading and failure states live? | In the shared list component, so both screens that use it benefit and a third one inherits it. |
 | 106 | 2026-09-04 | Should the "failed read shown as an absence" class keep being fixed one at a time? | No -- five instances in four passes, so it is now a test that names the offending file. |
+| 107 | 2026-09-04 | Should the Start screen say when each helper is finished, not just what it may touch? | Yes -- the plan carries a finish line for every helper and the screen where you agree to the plan never showed it. |
 

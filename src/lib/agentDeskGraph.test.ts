@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { allowedPathLines, allowedPathsLabel, canViewNodeChanges, helperRoleLabel, latestActivityLine, resultForNode, sessionHasGraph } from './agentDeskGraph'
+import { allowedPathLines, allowedPathsLabel, canViewNodeChanges, completionConditionLabel, helperRoleLabel, latestActivityLine, resultForNode, sessionHasGraph } from './agentDeskGraph'
 
 type Session = Parameters<typeof sessionHasGraph>[0]
 
@@ -144,5 +144,32 @@ describe('allowedPathLines', () => {
     // The caller says "Any file in this project" -- which is wider, not
     // narrower, so an empty line list must not read as "no files".
     expect(allowedPathLines([])).toEqual({ lines: [], rest: 0 })
+  })
+})
+
+describe('completionConditionLabel', () => {
+  it('shows the command verbatim, since that is what will run', () => {
+    expect(completionConditionLabel({ kind: 'checksPass', command: 'npm test' })).toBe(
+      'Done when this passes: npm test'
+    )
+  })
+  it('names one or two files, and counts beyond that', () => {
+    expect(completionConditionLabel({ kind: 'filesChanged', paths: ['a.ts'] })).toBe('Done when it has changed a.ts')
+    expect(completionConditionLabel({ kind: 'filesChanged', paths: ['a.ts', 'b.ts', 'c.ts'] })).toBe(
+      'Done when it has changed a.ts and 2 more'
+    )
+  })
+  it('has plain wording for the reports-back case', () => {
+    expect(completionConditionLabel({ kind: 'reportsResult' })).toBe('Done when it reports back')
+  })
+  it('names nothing internal', () => {
+    const cases: Parameters<typeof completionConditionLabel>[0][] = [
+      { kind: 'reportsResult' },
+      { kind: 'checksPass', command: 'x' },
+      { kind: 'filesChanged', paths: [] },
+    ]
+    for (const c of cases) {
+      expect(completionConditionLabel(c)).not.toMatch(/condition|kind|node|execution/i)
+    }
   })
 })
