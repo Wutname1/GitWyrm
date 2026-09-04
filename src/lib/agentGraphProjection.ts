@@ -161,7 +161,16 @@ export function nodeDotTone(
   if (label === "waiting" || label === "conflict") return "waiting";
   // A node that needs a person must never be quieter than one that is fine.
   if (label === "failed" || label === "source missing") return "attention";
-  if (label === "stopped early") return "interrupted";
+  // `stopped` and `stopped early` share a tone: both mean this agent ended
+  // before finishing its work. The difference between them (one chosen, one
+  // not) is carried by the label text beside the dot.
+  //
+  // `stopped` was missing here entirely, so it fell through to `undefined`
+  // and drew the faint neutral dot used for "not started" -- a helper the
+  // person stopped on purpose looked exactly like one that had not begun.
+  // The text table in `AgentGraphPanel` handles `stopped` deliberately; only
+  // this one, sitting beside it, was left out.
+  if (label === "stopped" || label === "stopped early") return "interrupted";
   return undefined;
 }
 

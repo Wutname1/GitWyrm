@@ -141,6 +141,29 @@ describe('nodeDotTone', () => {
     expect(nodeDotTone(helper('missingSource'))).toBe('attention')
     expect(nodeDotTone(helper('interrupted'))).toBe('interrupted')
   })
+
+  it('a helper someone stopped does not look like one that never started', () => {
+    // The text label table beside this one handles `stopped` deliberately --
+    // muted grey, because stopping is something the person chose. The dot
+    // table had no branch for it at all, so it fell through to `undefined`
+    // and rendered the same faint neutral used for "not started".
+    //
+    // So on the graph, a helper you stopped on purpose was indistinguishable
+    // from one that is merely queued -- the one surface whose whole job is
+    // showing what each agent is doing.
+    const helper = (state: ExecutionRecord['state']) => ({
+      execution: exec({ executionId: 'h1', state }),
+      isLead: false,
+      blockedOn: [],
+      waitingForSlot: false,
+    })
+    const stopped = nodeDotTone(helper('stopped'))
+    expect(stopped).toBeDefined()
+    // Not the attention tone: a deliberate stop is not a problem to fix.
+    // It shares `interrupted`'s tone, which is the "this run ended before it
+    // was done" family.
+    expect(stopped).toBe('interrupted')
+  })
 })
 
 describe('the lead review turn is not a helper', () => {
