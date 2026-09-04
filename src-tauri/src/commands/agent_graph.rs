@@ -3363,6 +3363,45 @@ pub async fn agent_session_record_conflict(
 
 #[cfg(test)]
 mod tests {
+    /// Retrying a Rename whose source is already gone must converge, not fail.
+    ///
+    /// `apply_operation` moves the source and THEN writes the recorded
+    /// content. If that second step fails it reports `Failed` with the source
+    /// already moved -- which `ApplyOperationOutcome`'s doc used to describe
+    /// as "the target path was left exactly as it stood", a wider promise than
+    /// the code keeps.
+    ///
+    /// The caller retries on the next completion event, so what matters is
+    /// that the retry reaches the same end state from the moved-source
+    /// position. It does: no source file, fall through, write the content
+    /// straight to the destination. This pins that.
+    #[test]
+    fn retrying_a_rename_after_the_source_moved_still_lands_the_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_string_lossy().into_owned();
+        // The state a half-done rename leaves: source gone, destination absent.
+        let op = crate::agentdesk::graph::FileOperation::Rename {
+            from_path: "old.txt".to_string(),
+            path: "new.txt".to_string(),
+            content: crate::agentdesk::graph::FileContent::Text {
+                bytes: b"the recorded content".to_vec(),
+                executable: crate::agentdesk::graph::FileExecutable::No,
+            },
+        };
+        assert!(!dir.path().join("old.txt").exists(), "the source is already gone");
+
+        let outcome = apply_operation(&root, &op);
+        assert!(
+            matches!(outcome, ApplyOperationOutcome::Applied),
+            "a retry from the moved-source state must succeed, got {outcome:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("new.txt")).unwrap(),
+            "the recorded content",
+            "the destination holds exactly the recorded content"
+        );
+    }
+
 
     /// Removal must never hand Start a plan `validate_graph` rejects. Fewer
     /// nodes cannot create a cycle or exceed the concurrency cap, and edges

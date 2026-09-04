@@ -146,8 +146,20 @@ pub fn write_ledger(
 /// scan; the authoritative dedup for an individual message happens against
 /// the actual `SessionMessage::import` provenance already written into the
 /// GitWyrm session (see `commands::agent_import::merge_new_messages`), so a
-/// stale or lost ledger degrades to "re-checks messages it already has,"
-/// never to "silently duplicates."
+/// stale or lost ledger degrades to "re-checks messages it already has"
+/// -- **for a session already on the ledger**.
+///
+/// A FIRST import has no such fallback. The create path
+/// (`commands::agent_import`, the `None` arm) consults only this ledger and
+/// then builds a session with a fresh id, never reading the one already on
+/// disk -- so a lost write there does duplicate the whole chat. That is why
+/// the create path appends `LEDGER_NOT_SAVED_NOTE` to the session when this
+/// ledger cannot be saved.
+///
+/// The qualification is here rather than only at the call site because this
+/// doc is where a reader learns the contract, and an unqualified "never
+/// silently duplicates" would make that mitigation look like unnecessary
+/// belt-and-braces worth deleting.
 pub fn already_imported_session<'a>(
     ledger: &'a AdapterImportLedger,
     external_session_id: &str,

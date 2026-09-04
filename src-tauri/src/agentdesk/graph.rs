@@ -593,10 +593,22 @@ impl FileOperation {
 }
 
 /// What happened when applying one [`FileOperation`] to the integration
-/// worktree. A partial write can never surface as `Applied` -- `Failed`
-/// means the target path was left exactly as it stood before this call, so a
-/// caller can safely retry without risking a truncated/mixed file (P0-D:
-/// "never report a partial operation as Finished").
+/// worktree.
+///
+/// A partial write can never surface as `Applied`: every content write goes
+/// through temp-file-then-rename, so the destination is either the old bytes
+/// or the new ones, never a mixture (P0-D: "never report a partial operation
+/// as Finished").
+///
+/// `Failed` means the DESTINATION path is unchanged, and a retry is safe.
+/// It does not mean nothing on disk moved: a `Rename` whose move succeeds and
+/// whose follow-up content write then fails reports `Failed` with
+/// `from_path` already gone (`commands::agent_graph::apply_operation`). That
+/// is still safe to retry -- the next attempt finds no source file, falls
+/// through, and writes the recorded `content` straight to the destination,
+/// which is the same end state. Stated explicitly because the doc used to
+/// claim the path "was left exactly as it stood", which is a wider promise
+/// than the code keeps and would mislead anyone adding a rollback here.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ApplyOperationOutcome {
