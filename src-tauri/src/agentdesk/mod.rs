@@ -42,8 +42,8 @@ pub use events::{AgentSessionEvent, AgentSessionEventKind};
 pub use execution_registry::{ExecutionRegistry, StopOutcome};
 #[allow(unused_imports)]
 pub use graph::{
-    detect_conflict, project_graph, schedule, validate_graph, BlockedNode, CompletionCondition,
-    GraphNodeView, GraphValidationError, HelperRole, IntegrationConflict, IntegrationState,
+    detect_conflict, schedule, validate_graph, BlockedNode, CompletionCondition,
+    GraphValidationError, HelperRole, IntegrationConflict, IntegrationState,
     JobBudget, ProposedGraph, ProposedHelperJob, ScheduleDecision, MAX_CONCURRENT_HELPERS,
 };
 #[allow(unused_imports)]

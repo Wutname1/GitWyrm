@@ -82,4 +82,7 @@ competing sub-agents, the answer names the losing option too.
 | 74 | 2026-09-04 | Should "Open client" become a working button or stop looking like one? | Stop looking like one -- no launch mechanism exists, and a label that describes where the chat lives is honest where an unimplemented action is not. |
 | 75 | 2026-09-04 | Should an undone config change disappear from the list? | No -- it stays and is marked, because the list is the record of what happened and a vanishing row reads as though it never did. |
 | 76 | 2026-09-04 | Do the pane shortcuts do nothing visible, as the critique said? | Not quite -- they do move the dock and sidebar, but they never moved the caret, so typing went to the pane you had just left. |
+| 77 | 2026-09-04 | Which of the two agent-graph projections should survive? | The TypeScript one -- the Rust copy had no caller, and its deletion leaves the scheduler itself untouched. |
+| 78 | 2026-09-04 | Does an abandoned helper really show as "queued", as one advocate claimed? | No -- it is set to failed with "Never started: it needed X to finish first", which the panel shows; the claim was wrong and checking it took minutes. |
+| 79 | 2026-09-04 | Why did a button styled with the accent colour look grey? | Because `--accent` resolves to the same hex as the border colour; the real accent is `--primary`, which the rest of the app already uses. |
 

@@ -18,7 +18,7 @@ use specta::Type;
 use tauri::{AppHandle, Manager};
 
 use crate::agentdesk::graph::{
-    self, ApplyOperationOutcome, FileContent, FileExecutable, FileOperation, GraphNodeView,
+    self, ApplyOperationOutcome, FileContent, FileExecutable, FileOperation,
     GraphValidationError, HelperRole, IntegrationConflict, ProposedGraph, ProposedHelperJob,
 };
 use crate::agentdesk::model::{
@@ -529,8 +529,9 @@ pub enum StartGraphOutcome {
     /// lead's proposal (double click, frontend retry) between this call's
     /// unlocked read and its locked write. The worktrees THIS call
     /// provisioned were cleaned up before returning, so nothing is leaked --
-    /// re-check `agent_session_graph_view` for whatever the winning call
-    /// actually started.
+    /// re-read the session for whatever the winning call actually started.
+    /// (This used to name `agent_session_graph_view`, which was deleted: it
+    /// had no caller and the panel builds its own tree from the session.)
     AlreadyStarted,
     /// Task 3.3 ("detect task/spec changes after draft and block Start until
     /// refreshed or explicitly accepted"): this lead's proposal was drafted
@@ -2939,39 +2940,7 @@ pub async fn agent_session_use_solo_instead(
 // Graph projection for the UI
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-pub enum GraphViewOutcome {
-    Found { nodes: Vec<GraphNodeView> },
-    NotFound,
-    Damaged { reason: String },
-    Unavailable { detail: String },
-}
 
-#[tauri::command]
-#[specta::specta]
-pub async fn agent_session_graph_view(
-    app: AppHandle,
-    session_id: SessionId,
-) -> Result<GraphViewOutcome, AppError> {
-    let root = resolve_root(&app)?;
-    Ok(match store::read_session(&root, &session_id) {
-        Ok(s) => {
-            // Results live in a sidecar file; a missing or unreadable one
-            // only means no node can offer View changes yet, never that the
-            // graph itself is unavailable.
-            let results = crate::agentdesk::result::read_results(&root, &session_id).unwrap_or_default();
-            GraphViewOutcome::Found {
-                nodes: graph::project_graph(&s.executions, &s.messages, &results),
-            }
-        }
-        Err(SessionLoadError::NotFound) => GraphViewOutcome::NotFound,
-        Err(SessionLoadError::Io { detail }) => GraphViewOutcome::Unavailable { detail },
-        Err(reason) => GraphViewOutcome::Damaged {
-            reason: reason.to_string(),
-        },
-    })
-}
 
 // ---------------------------------------------------------------------------
 // Conflict resolution (tasks.md 5.3, 5.4)
@@ -3809,47 +3778,6 @@ mod tests {
         assert!(matches!(outcome, ResolveConflictOutcome::NoConflict));
     }
 
-    #[test]
-    fn graph_projection_reflects_persisted_executions_with_no_separate_truth() {
-        let (_dir, root) = temp_root();
-        let locks = crate::agentdesk::SessionLocks::new();
-        seed_session(&root, "sess-1");
-        update_session_at(&locks, &root, "sess-1", |s| {
-            let mut lead = ExecutionRecord::minimal(
-                "lead".into(),
-                s.header.session_id.clone(),
-                None,
-                SessionState::Working,
-                now_rfc3339(),
-                None,
-                0,
-            );
-            lead.job_title = None;
-            s.executions.push(lead);
-            let mut helper = ExecutionRecord::minimal(
-                "h1".into(),
-                s.header.session_id.clone(),
-                Some("lead".into()),
-                SessionState::Ready,
-                now_rfc3339(),
-                None,
-                0,
-            );
-            helper.job_title = Some("Trace the crash".into());
-            helper.helper_role = Some("researcher".into());
-            s.executions.push(helper);
-        });
-
-        let session = store::read_session(&root, "sess-1").unwrap();
-        let views = graph::project_graph(&session.executions, &session.messages, &[]);
-        assert_eq!(views.len(), 2);
-        let lead_view = views.iter().find(|v| v.execution_id == "lead").unwrap();
-        assert!(lead_view.is_lead);
-        assert_eq!(lead_view.title, "Lead agent");
-        let helper_view = views.iter().find(|v| v.execution_id == "h1").unwrap();
-        assert!(!helper_view.is_lead);
-        assert_eq!(helper_view.title, "Trace the crash");
-    }
 
     /// Regression test for the concurrent-Start defect: two callers racing
     /// `start_graph_at`'s final locked write step for the SAME lead

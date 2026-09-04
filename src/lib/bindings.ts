@@ -3476,14 +3476,6 @@ async agentSessionUseSoloInstead(sessionId: string) : Promise<Result<UseSoloOutc
     else return { status: "error", error: e  as any };
 }
 },
-async agentSessionGraphView(sessionId: string) : Promise<Result<GraphViewOutcome, string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("agent_session_graph_view", { sessionId }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
 async agentSessionResolveConflict(sessionId: string, executionId: string, resolution: ConflictResolution) : Promise<Result<ResolveConflictOutcome, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("agent_session_resolve_conflict", { sessionId, executionId, resolution }) };
@@ -5537,30 +5529,6 @@ total: number | null }
 export type GithubRepoRef = { owner: string; repo: string }
 export type GithubRepository = { full_name: string; clone_url: string; html_url: string; description: string | null; private: boolean; pushed_at: string; starred: boolean }
 /**
- * One renderable node in the UI's graph tree -- built entirely from
- * [`ExecutionRecord`] rows plus the schedule decision, never from separate
- * frontend state (tasks.md 6.1: "no separate frontend graph truth").
- */
-export type GraphNodeView = { executionId: string; parentExecutionId: string | null; isLead: boolean; title: string; role: HelperRole | null; state: SessionState; dependsOn: string[]; allowedPaths: string[]; worktreePath: string | null; changedFileCount: number; outputSummary: string | null; 
-/**
- * True when this node is in `schedule()`'s `ready`/active set right now
- * -- lets the UI show "queued" vs. "waiting on X" distinctly even
- * though both map to the same underlying `Ready`/`Draft` state.
- */
-blockedOn: string[]; 
-/**
- * What this node is doing right now (tasks.md 6.2): the first line of
- * its newest tool activity or note. `None` until it has said anything.
- */
-latestActivity?: string | null; 
-/**
- * The execution id a `ResultRecord` exists under for this node (review
- * tasks.md 2.2/2.6) -- always this node's own id when present. `None`
- * until a result has been captured, so the UI can omit (not disable)
- * its View changes / output controls.
- */
-resultExecutionId?: string | null }
-/**
  * Every way a proposed graph can fail validation (tasks.md 1.2, 1.3 "fixture
  * tests for every invalid shape"). Exhaustive and typed -- never a bare
  * string -- so the UI can render a specific, actionable message per case
@@ -5594,7 +5562,6 @@ export type GraphValidationError =
  * silent all-or-nothing allowance no graph should rely on implicitly.
  */
 { kind: "missingAllowedPaths"; node_id: string }
-export type GraphViewOutcome = { kind: "found"; nodes: GraphNodeView[] } | { kind: "notFound" } | { kind: "damaged"; reason: string } | { kind: "unavailable"; detail: string }
 /**
  * What kind of work a helper does, shown in its node meta line (mockup:
  * "Luna · researcher · read-only").
@@ -8326,8 +8293,9 @@ export type StartGraphOutcome =
  * lead's proposal (double click, frontend retry) between this call's
  * unlocked read and its locked write. The worktrees THIS call
  * provisioned were cleaned up before returning, so nothing is leaked --
- * re-check `agent_session_graph_view` for whatever the winning call
- * actually started.
+ * re-read the session for whatever the winning call actually started.
+ * (This used to name `agent_session_graph_view`, which was deleted: it
+ * had no caller and the panel builds its own tree from the session.)
  */
 { kind: "alreadyStarted" } | 
 /**

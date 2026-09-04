@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
+// Vite's `?raw` import, the same route `monoMaskContract.test.ts` uses to
+// assert on a real asset's contents. `node:fs` would need @types/node,
+// which this project does not carry.
+import graphRustSource from '../../src-tauri/src/agentdesk/graph.rs?raw'
 import type { ExecutionRecord } from '@/lib/bindings'
-import { buildGraphTree, graphSummary, isNodeActive, nodeDotTone, nodeStatusLabel } from './agentGraphProjection'
+import { buildGraphTree, graphSummary, isNodeActive, MAX_CONCURRENT_HELPERS, nodeDotTone, nodeStatusLabel } from './agentGraphProjection'
 import { runIsActive } from './agentDeskResult'
 
 function exec(overrides: Partial<ExecutionRecord> & Pick<ExecutionRecord, 'executionId' | 'state'>): ExecutionRecord {
@@ -264,5 +268,18 @@ describe('graphSummary', () => {
   it('falls back to an agent count when nothing is working or waiting', () => {
     const executions = [exec({ executionId: 'a', state: 'finished' }), exec({ executionId: 'b', state: 'stopped' })]
     expect(graphSummary(executions)).toBe('2 agents')
+  })
+})
+
+describe('MAX_CONCURRENT_HELPERS', () => {
+  it('still matches the scheduler that actually enforces it', () => {
+    // This number is hand-copied from Rust because Specta exports commands and
+    // types but not bare constants. Two copies of a rule is how this codebase
+    // has been bitten before, so the copy is guarded rather than trusted: if
+    // someone changes the scheduler's limit, this fails instead of the panel
+    // quietly drawing a queue that does not match what will actually run.
+    const match = graphRustSource.match(/pub const MAX_CONCURRENT_HELPERS:\s*usize\s*=\s*(\d+)/)
+    expect(match, 'MAX_CONCURRENT_HELPERS not found in graph.rs').toBeTruthy()
+    expect(Number(match![1])).toBe(MAX_CONCURRENT_HELPERS)
   })
 })

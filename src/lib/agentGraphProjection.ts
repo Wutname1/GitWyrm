@@ -12,7 +12,17 @@
 import type { ExecutionRecord } from "@/lib/bindings";
 import { runIsActive } from "@/lib/agentDeskResult";
 
-const MAX_CONCURRENT_HELPERS = 3;
+/**
+ * How many helpers may run at once.
+ *
+ * Hand-copied from `MAX_CONCURRENT_HELPERS` in
+ * `src-tauri/src/agentdesk/graph.rs`, which is the real scheduler and the only
+ * authority on this number. Specta exports commands and types but not bare
+ * constants, so there is no generated binding to import; the test in
+ * `agentGraphProjection.test.ts` reads the Rust source and fails if the two
+ * ever disagree, which is the guard this copy needs to be safe.
+ */
+export const MAX_CONCURRENT_HELPERS = 3;
 
 /**
  * The same "is a run going" rule the composer and the transcript use.
