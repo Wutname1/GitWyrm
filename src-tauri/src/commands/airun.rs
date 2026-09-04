@@ -492,6 +492,8 @@ fn route_to_agent_desk(app: &tauri::AppHandle, event: &RunEventKind) {
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".into());
     let sequence = links.next_sequence(&event.session_id);
+    // Kept before `event` is consumed by routing, for the cleanup below.
+    let event_session_id = event.session_id.clone();
     let locks = app.state::<Arc<SessionLocks>>();
 
     match route_run_event(&root, &links, &locks, sequence, &now, event) {
@@ -540,6 +542,15 @@ fn route_to_agent_desk(app: &tauri::AppHandle, event: &RunEventKind) {
                         // idle check and wins.
                         start_queued_follow_up(app, &locks, &root, &durable.session_id, &execution_id);
                     }
+
+                    // The run is over, so its sequence counter is dead weight.
+                    // `next_sequence` above adds one entry per run session and
+                    // nothing was removing them: the map grew for the life of
+                    // the process. Keyed by the RUN session id, which is what
+                    // `next_sequence` uses -- `unlink` is keyed by execution
+                    // id, so the two are not interchangeable and cleanup could
+                    // not simply be added beside it.
+                    links.forget_sequence(&event_session_id);
                 }
             }
             let _ = app.emit(crate::agentdesk::AGENT_SESSION_EVENT, durable);

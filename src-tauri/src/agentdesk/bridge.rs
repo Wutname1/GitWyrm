@@ -122,16 +122,23 @@ impl RunSessionLinks {
     /// reuse of the same session ID (should the counter type ever wrap, or in
     /// a test) starts clean rather than inheriting a stale count.
     ///
-    /// NOT CURRENTLY REACHED, and neither is [`Self::next_sequence`]: the
-    /// `sequences` map is touched only by those two, and only from tests.
-    /// Production sequence numbers arrive on the event itself. Recorded here
-    /// rather than deleted because the pair is coherent and the counter is
-    /// the obvious home if a transport ever needs GitWyrm to number its own
-    /// events -- but a reader should not assume this map is live, and should
-    /// not "fix" its growth: nothing fills it.
+    /// This doc used to say the map was reached "only from tests", that
+    /// production sequence numbers "arrive on the event itself", and that a
+    /// reader "should not 'fix' its growth: nothing fills it". All three were
+    /// wrong, and the comment's own escape clause -- "if a caller is ever
+    /// added for `next_sequence`, this must be called" -- had already come
+    /// true: `commands::airun`'s durable routing calls `next_sequence` for
+    /// every run event in production, and nothing called this, so the map
+    /// grew one permanent entry per run session for the life of the process.
     ///
-    /// If a caller is ever added for `next_sequence`, this must be called
-    /// wherever `unlink` is, or the map really will grow one entry per run.
+    /// It is now called when a run reaches a terminal state. Note the escape
+    /// clause's own instruction was also wrong: `unlink` is keyed by
+    /// EXECUTION id and this by RUN SESSION id, so cleanup could not simply be
+    /// added beside it.
+    ///
+    /// The lesson is not about this map. A comment asserting code is dead is
+    /// a claim with a shelf life, and this one instructed the next reader not
+    /// to look.
     pub fn forget_sequence(&self, run_session_id: &str) {
         self.sequences.lock().unwrap().remove(run_session_id);
     }
