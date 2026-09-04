@@ -104,3 +104,23 @@ describe('explainDriftUnavailable', () => {
     expect(explainDriftUnavailable(undefined, false)).toBeNull()
   })
 })
+
+describe('the archived line is reachable', () => {
+  // It was not. The panel only asked for this status when the session's
+  // snapshot already said the source was unavailable -- and the backend
+  // deliberately keeps that flag false for an archived change, calling it "a
+  // normal end state, not an outage". So the one case this function was
+  // written for was the one case it was never asked about, and a chat bound
+  // to a finished change just showed "8 of 8 tasks done" with no sign the
+  // change had been archived out from under it.
+  it('says a change is finished and archived', () => {
+    const line = openSpecStatusLine({ kind: 'archived' })
+    expect(line?.text).toMatch(/archived/i)
+  })
+
+  // The property that makes asking always safe: an active change contributes
+  // no line, so enabling the query everywhere cannot add noise.
+  it('says nothing at all for a change that is still active', () => {
+    expect(openSpecStatusLine({ kind: 'active' })).toBeNull()
+  })
+})

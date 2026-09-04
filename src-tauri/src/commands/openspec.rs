@@ -698,6 +698,14 @@ pub enum SpecReturnDraft {
     SessionNotFound,
 }
 
+/// Said when the change a chat is bound to has been archived.
+///
+/// A sentinel compared by value rather than a typed error: the read it guards
+/// runs inside `spawn_blocking`, which flattens everything to `AppError`.
+/// Plain language, because this reaches the person directly.
+const CHANGE_NOT_ACTIVE: &str =
+    "This change has been archived, so there is nothing to add to it. Open the archived change if you want to read it.";
+
 /// Draft an update to a change's spec file from what a finished chat actually
 /// did. **Writes nothing.**
 ///
@@ -763,18 +771,38 @@ pub async fn openspec_draft_from_session(
     let root_for_read = root.clone();
     let change_for_read = context.change_id.clone();
     let file_for_read = context.file.clone();
-    let (current, proposal) = tauri::async_runtime::spawn_blocking(move || {
+    let (current, proposal) = match tauri::async_runtime::spawn_blocking(move || {
         let dir = openspec::openspec_dir(&root_for_read)
             .ok_or_else(|| AppError::Other("this repository has no openspec folder".to_string()))?;
-        // A file that does not exist yet drafts from empty, which is how a
-        // change with no design.md gains one.
+        // Two different absences, which `unwrap_or_default()` merged.
+        //
+        // A file that does not exist yet SHOULD draft from empty -- that is
+        // how a change with no design.md gains one, and its folder is still
+        // there. But `read_change_file` errors the same way when the change
+        // FOLDER is gone, which is what archiving does: it moves the change
+        // under `changes/archive/`. Swallowing that sent the model an empty
+        // file and asked it to write a whole new one from nothing, after the
+        // paid call had already been made.
+        if !dir.join("changes").join(&change_for_read).exists() {
+            return Err(AppError::Other(CHANGE_NOT_ACTIVE.to_string()));
+        }
         let current = write::read_change_file(&dir, &change_for_read, &file_for_read).unwrap_or_default();
         let proposal =
             write::read_change_file(&dir, &change_for_read, "proposal.md").unwrap_or_default();
         Ok::<_, AppError>((current, proposal))
     })
     .await
-    .map_err(|e| AppError::Other(e.to_string()))??;
+    .map_err(|e| AppError::Other(e.to_string()))?
+    {
+        Ok(pair) => pair,
+        // Refused, not errored: asking about a change that has since been
+        // archived is a reasonable thing to do, and saying so costs nothing.
+        // An error would surface as a failure the person cannot act on.
+        Err(e) if e.to_string() == CHANGE_NOT_ACTIVE => {
+            return Ok(SpecReturnDraft::NothingToSend { detail: CHANGE_NOT_ACTIVE.to_string() })
+        }
+        Err(e) => return Err(e),
+    };
 
     let user = edit_draft::user_prompt(&context.file, &current, &context.instruction, &proposal);
     let reply = crate::ai::complete::complete_in(

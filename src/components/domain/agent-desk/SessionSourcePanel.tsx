@@ -30,11 +30,21 @@ export function SessionSourcePanel({ session, onOpenSource }: { session: AgentSe
   const missingSource = header.state === 'missingSource'
   const isOpenSpecSource = source.kind === 'openSpecChange' || source.kind === 'openSpecTask'
 
-  // Only asked for an OpenSpec source, and only once the generic snapshot
-  // already thinks something changed -- this is the honest archived/moved/
-  // deleted breakdown behind that flag, not a second independent check that
-  // could disagree with it (tasks.md 4.5/section 7).
-  const openSpecStatus = useOpenSpecSessionStatus(session.header.sessionId, isOpenSpecSource && liveUnavailable)
+  // Asked for every OpenSpec source, not only one the snapshot already
+  // flagged.
+  //
+  // This used to gate on `liveUnavailable`, to avoid "a second independent
+  // check that could disagree". But the backend deliberately keeps that flag
+  // FALSE for an archived change -- its own comment says archiving "counts as
+  // still live for banner purposes ... a normal end state with its own next
+  // action (`agent_session_openspec_status`)". So the one case this query was
+  // written to answer was the one case it was never asked about, and the
+  // fully-worded "This change is finished and archived" line could not render.
+  //
+  // The two cannot disagree: this command reports `active` for a change the
+  // snapshot considers live, which renders nothing, so the extra call adds a
+  // line only where the snapshot had none to give.
+  const openSpecStatus = useOpenSpecSessionStatus(session.header.sessionId, isOpenSpecSource)
   const statusLine = isOpenSpecSource ? openSpecStatusLine(openSpecStatus.data) : null
 
   // How far along the change is. Asked only for an OpenSpec source, and only
