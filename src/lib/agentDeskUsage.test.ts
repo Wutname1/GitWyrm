@@ -353,3 +353,36 @@ describe('the graph and the cost card agree about a reported zero', () => {
     expect(helperLine.includes('turn')).toBe(graph!.includes('turn'))
   })
 })
+
+describe('a turn count GitWyrm measured itself is not "not reported"', () => {
+  // The backend has a helper (`provider_reported_nothing`) that answers a
+  // NEARBY question: did the provider report any figures? For a run with
+  // turns but no tokens the answer is yes-nothing-reported -- and it was
+  // once named `is_unreported`, with a doc saying the UI should render that
+  // case as "not reported".
+  //
+  // That would be wrong. `turns` is counted by GitWyrm, not asked of the
+  // provider, so it is measured. Hiding it discards a real number, which is
+  // the "unknown stays unknown, never zero" rule inverted. This pins the
+  // behaviour so wiring that helper up later cannot quietly change it.
+  it('still shows the turns when no token figures came back', () => {
+    const lines = buildAgentUsageLines({
+      sessionTokens: null,
+      sessionRequests: null,
+      sessionCostUsd: null,
+      planLimit: null,
+      planResetAt: null,
+      contextUsed: null,
+      contextSize: null,
+      activeHelperCount: null,
+      dataTimestamp: '2026-09-04T00:00:00Z',
+      agents: [
+        { executionId: 'lead', label: 'Lead agent', isLead: true, tokens: 900, inputTokens: null, outputTokens: null, turns: 2, costMicroUsd: null },
+        { executionId: 'h1', label: 'Helper', isLead: false, tokens: null, inputTokens: null, outputTokens: null, turns: 3, costMicroUsd: null },
+      ],
+    })
+    const helper = lines.find((l) => l.key === 'h1')!
+    expect(helper.parts.join(' · ')).toContain('3 turns')
+    expect(helper.parts.length).toBeGreaterThan(0)
+  })
+})

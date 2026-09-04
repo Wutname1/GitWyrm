@@ -516,9 +516,23 @@ impl ExecutionUsage {
         self.context_size = Some(size);
     }
 
-    /// True when nothing but the turn count is known -- the case the UI must
-    /// render as "not reported" rather than as a row of zeroes.
-    pub fn is_unreported(&self) -> bool {
+    /// True when the PROVIDER reported none of its figures -- no tokens, no
+    /// cost. The turn count is deliberately not consulted.
+    ///
+    /// Named `is_unreported` before, with a doc saying the UI must render
+    /// this case as "not reported". That would have been wrong, and the
+    /// frontend is right not to: `turns` is measured by GitWyrm itself (see
+    /// its own field doc, "Always known, because GitWyrm counts them itself
+    /// rather than asking the provider"), so a run with three turns and no
+    /// token figures has genuinely measured something. Calling that "not
+    /// reported" would discard a real number, which is the same rule --
+    /// unknown stays unknown, never zero -- inverted.
+    ///
+    /// Not wired: `buildAgentUsageLines` answers the display question by
+    /// building the line and checking whether anything went into it, which
+    /// also covers the turns-only case correctly. Kept because it is the
+    /// clearest statement of "the provider told us nothing".
+    pub fn provider_reported_nothing(&self) -> bool {
         self.input_tokens.is_none()
             && self.output_tokens.is_none()
             && self.cached_input_tokens.is_none()
@@ -914,7 +928,7 @@ mod tests {
         total.accumulate(&TurnUsage::default());
         assert_eq!(total.turns, 1);
         assert!(
-            total.is_unreported(),
+            total.provider_reported_nothing(),
             "a turn with no numbers must not fabricate zeroes"
         );
         assert_eq!(
@@ -932,7 +946,7 @@ mod tests {
             ..Default::default()
         });
         assert!(
-            !zero.is_unreported(),
+            !zero.provider_reported_nothing(),
             "a provider that reported 0 did report something"
         );
         assert_eq!(zero.input_tokens, Some(0));

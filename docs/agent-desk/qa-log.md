@@ -160,3 +160,5 @@ competing sub-agents, the answer names the losing option too.
 | 151 | 2026-09-04 | Was your choice of how to sort the chat list remembered? | No -- the design notes said it was saved with the rest of the workspace, and it was thrown away every time the app closed. |
 | 152 | 2026-09-04 | Could quitting straight after moving a panel lose the change? | Yes -- the save runs a fraction of a second later, and the code written to finish it before closing was never connected. |
 | 153 | 2026-09-04 | Should a side panel hide itself when Split View gets cramped? | No -- the panes already stack vertically before that point, so each chat keeps the full width and nothing needs to disappear. |
+| 154 | 2026-09-04 | Should a run that reports turns but no token counts say "not reported"? | No -- GitWyrm counts turns itself, so that is a real measurement, and hiding it would discard a true number. |
+| 155 | 2026-09-04 | Is the front of the app still turning up new problems? | Barely -- this round's critique traced six leads there and every one was correctly built, so the value has moved elsewhere. |
