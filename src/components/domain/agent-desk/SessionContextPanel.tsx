@@ -172,7 +172,18 @@ export function SessionContextPanel({ session }: { session: AgentSession }) {
       <SessionUsageCard sessionId={session.header.sessionId} />
 
       <section className="rounded-md border border-border bg-panel2">
-        <ContextRow icon={Layers3} label="Context sources" value={String(contextSourceCount)} />
+        {/*
+          Only shown once there is something to show. The only code that adds
+          an attachment is `agent_session_attach_context`, which no part of the
+          app calls, so this row read "Context sources: 0" permanently -- a
+          number presented as a measurement of something a person cannot
+          influence. The panel's own rule three screens up is that it "shows
+          what the session data actually has"; a permanent zero is the
+          opposite. The row returns by itself the moment attaching is wired up.
+        */}
+        {contextSourceCount > 0 && (
+          <ContextRow icon={Layers3} label="Context sources" value={String(contextSourceCount)} />
+        )}
         <ContextRow icon={Blocks} label="Conversation segments" value={String(session.segments.length)} />
       </section>
     </div>

@@ -99,4 +99,6 @@ competing sub-agents, the answer names the losing option too.
 | 91 | 2026-09-04 | Should a pane be allowed to show an archived chat? | Yes for one you deliberately open, but never as the automatic fallback, since landing there would undo the archiving in the user's eyes. |
 | 92 | 2026-09-04 | Is a log line enough when live updates stop arriving? | No -- the desk keeps showing stale data that looks complete, so the person has to be told on screen. |
 | 93 | 2026-09-04 | Should the transcript's position marker follow scrolling? | Yes -- it always could, the caller just never told it where the reader was, so it sat on the newest message forever. |
+| 94 | 2026-09-04 | Should a count that can only ever be zero still be shown? | No -- it reads as a measurement of something the person can influence, when nothing in the app can change it. |
+| 95 | 2026-09-04 | Should the attach-context UI be built now? | Not at the end of a pass -- the backend is complete but the UI carries real design decisions, so it is recorded as feature work. |
 

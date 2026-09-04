@@ -3,6 +3,7 @@ import type {
   StopExecutionOutcome,
   CommitResultOutcome,
   CompleteOpenSpecTaskOutcome,
+  DraftPullRequestOutcome,
   EscalateToFixOutcome,
   KeepResultOutcome,
   ResultCheckOutcome,
@@ -678,4 +679,36 @@ export function explainStopOutcome(outcome: StopExecutionOutcome): { message: st
 export function describeOutcomeKind(kind: string): string {
   const spaced = kind.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase()
   return spaced.charAt(0).toUpperCase() + spaced.slice(1)
+}
+
+/**
+ * Why a pull request could not be prepared, in words that say what to do.
+ *
+ * Six distinct refusals collapsed into one "Could not prepare a pull request
+ * for this result." Two of them are ordinary states the person can fix
+ * themselves and were the two most likely to happen: `noCommit` means the work
+ * has not been committed yet, and `noRemote` means the project has nowhere to
+ * open a request against. Being told only that something did not work leaves
+ * them re-clicking a button that will keep refusing for a reason nobody named.
+ *
+ * `drafted` is the success case and has no message; callers switch on it
+ * before asking.
+ */
+export function explainDraftPullRequestRefusal(
+  outcome: Exclude<DraftPullRequestOutcome, { kind: 'drafted' }>
+): string {
+  switch (outcome.kind) {
+    case 'noCommit':
+      return 'Commit this work first, then a pull request can be prepared from it.'
+    case 'noRemote':
+      return 'This project has no remote set up, so there is nowhere to open a pull request.'
+    case 'resultNotFound':
+      return 'That result is no longer there. It may have been undone or cleaned up.'
+    case 'sessionNotFound':
+      return 'That chat is no longer there.'
+    case 'sessionDamaged':
+      return `That chat's saved file could not be read: ${outcome.reason}`
+    case 'sessionUnavailable':
+      return `GitWyrm could not read that chat right now: ${outcome.detail}`
+  }
 }

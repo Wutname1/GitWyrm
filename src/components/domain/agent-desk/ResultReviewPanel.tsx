@@ -39,6 +39,7 @@ import {
   resultActionAvailability,
   resultStateLabel,
   sortResultsNewestFirst,
+  explainDraftPullRequestRefusal,
 } from '@/lib/agentDeskResult'
 import { log, describeError } from '@/lib/log'
 import { cn } from '@/lib/utils'
@@ -763,7 +764,12 @@ function PullRequestButton({
     try {
       const outcome = unwrap(await commands.agentResultDraftPullRequest(sessionId, executionId))
       if (outcome.kind !== 'drafted') {
-        toast.error('Could not prepare a pull request for this result.')
+        // Say which refusal it was. Six of them collapsed into one message,
+        // including "you have not committed yet" and "this project has no
+        // remote" -- both things the person can fix, and neither named.
+        toast.error('Could not prepare a pull request.', {
+          description: explainDraftPullRequestRefusal(outcome),
+        })
         return
       }
       if (!outcome.draft.compareUrl) {

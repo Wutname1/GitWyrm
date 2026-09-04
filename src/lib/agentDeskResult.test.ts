@@ -10,6 +10,7 @@ import type {
   ToggleOutcome,
 } from '@/lib/bindings'
 import {
+  explainDraftPullRequestRefusal,
   canEscalateToFix,
   changedPathStatusLabel,
   changedPathsSummaryLine,
@@ -648,6 +649,31 @@ describe('describeOutcomeKind', () => {
   it('never returns the raw camelCase token', () => {
     for (const kind of ['providerReconnect', 'sessionNotFound', 'cleanupNeeded']) {
       expect(describeOutcomeKind(kind)).not.toBe(kind)
+    }
+  })
+})
+
+describe('explainDraftPullRequestRefusal', () => {
+  it('tells you to commit first rather than just failing', () => {
+    // Six refusals used to read as one generic "could not prepare" message,
+    // including the two a person can act on themselves.
+    expect(explainDraftPullRequestRefusal({ kind: 'noCommit' })).toMatch(/commit this work first/i)
+  })
+  it('says when there is nowhere to open a request', () => {
+    expect(explainDraftPullRequestRefusal({ kind: 'noRemote' })).toMatch(/no remote/i)
+  })
+  it('passes through the reason a damaged chat gives', () => {
+    expect(explainDraftPullRequestRefusal({ kind: 'sessionDamaged', reason: 'bad json' })).toMatch(/bad json/)
+  })
+  it('names no internal terms', () => {
+    const kinds = [
+      { kind: 'noCommit' },
+      { kind: 'noRemote' },
+      { kind: 'resultNotFound' },
+      { kind: 'sessionNotFound' },
+    ] as const
+    for (const k of kinds) {
+      expect(explainDraftPullRequestRefusal(k)).not.toMatch(/outcome|session_id|executionId|worktree/i)
     }
   })
 })
