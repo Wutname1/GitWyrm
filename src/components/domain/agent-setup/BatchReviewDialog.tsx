@@ -63,12 +63,16 @@ export function BatchReviewDialog({
     async function buildPlans() {
       const { candidates, skipped: skippedEntries } = partitionBatchCandidates(entries)
       const built: RedactedCopyPlan[] = []
+      // Counted so a total failure can be told apart from an empty selection.
+      let failures = 0
+      let attempted = 0
       for (const { entry, destinations } of candidates) {
         // An item with every destination unticked is not an error and not a
         // skip: the person deliberately left it out, so it simply has no
         // plan this time round.
         const selected = chosen[entry.itemId] ?? destinations
         if (selected.length === 0) continue
+        attempted += 1
         try {
           const outcome = await preview.mutateAsync({ repoId, itemId: entry.itemId, destinations: selected })
           if (outcome.kind === 'ready' && outcome.plan.destinations.length > 0) {
