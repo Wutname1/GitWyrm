@@ -6142,7 +6142,18 @@ beforeHash: string | null; afterHash: string;
  * Path to the byte-identical backup of the pre-write content, under app
  * data. Absent when `before_hash` is `None` (nothing to back up).
  */
-backupPath: string | null; appliedAt: string; undone: boolean }
+backupPath: string | null; appliedAt: string; undone: boolean; 
+/**
+ * For a SKILL (folder) write: what the destination folder hashed to right
+ * after the copy, so undo can refuse when the folder has changed since.
+ * 
+ * A folder receipt carries an empty `after_hash` -- that emptiness is how
+ * `undo_at` recognises one -- so there was nothing for the folder path to
+ * compare against, and it deleted the destination outright. `#[serde(default)]`
+ * so receipts written before this field existed still read back: undo then
+ * behaves as it did rather than refusing every historical receipt.
+ */
+afterDigest?: string | null }
 /**
  * Reconciles result records at startup: worktrees whose folder is gone are
  * flagged rather than silently dropped (task 5.3: "without deleting

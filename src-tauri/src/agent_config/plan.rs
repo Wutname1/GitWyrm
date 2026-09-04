@@ -189,6 +189,9 @@ pub fn apply_write(
     };
 
     let receipt = OperationReceipt {
+        // Single-file writes gate undo on `after_hash`; the folder digest is
+        // for skills, which take a different path entirely.
+        after_digest: None,
         operation_id: operation_id.to_string(),
         plan_id: plan_id.to_string(),
         client: client_key.to_string(),
@@ -570,6 +573,7 @@ mod tests {
         fs::create_dir_all(backup_path.parent().unwrap()).unwrap();
         fs::write(&backup_path, original).unwrap();
         let receipt = OperationReceipt {
+            after_digest: None,
             operation_id: "op-x".into(),
             plan_id: "plan-1".into(),
             client: "claude-code".into(),

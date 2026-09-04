@@ -495,7 +495,9 @@ fn apply_skill_destination(
     // the person applied anyway; the old folder is still backed up first.
     match skill_write::apply_skill_copy(&copy_plan, &write_root.backups_dir(), true) {
         Ok(copied) => {
+            let after_digest = copied.after_digest.clone();
             let receipt = crate::agent_config::model::OperationReceipt {
+                after_digest,
                 operation_id: operation_id.to_string(),
                 plan_id: plan.plan_id.clone(),
                 client: destination.client.key().to_string(),
@@ -687,6 +689,9 @@ fn undo_skill_at(
         destination_dir: receipt.destination_path.clone(),
         backup_dir: receipt.backup_path.clone(),
         files_written: 0,
+        // The whole point: without this the undo has nothing to compare the
+        // folder against and deletes it regardless of what it now contains.
+        after_digest: receipt.after_digest.clone(),
     };
     if let Err(e) = skill_write::undo_skill_copy(&copy_receipt) {
         return UndoOutcome::RestoreFailed { detail: e.plain() };

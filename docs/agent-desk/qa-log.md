@@ -126,4 +126,5 @@ competing sub-agents, the answer names the losing option too.
 | 118 | 2026-09-04 | Did a file pattern like `src/*.rs` actually let an assistant write there? | No -- the matcher had no case for a star inside a segment, so it matched nothing and every write was refused after the person had already approved it. |
 | 119 | 2026-09-04 | Was the guard against "failed read shown as absence" actually working? | No -- it asked whether the file handled any failure, so one guarded query excused an unguarded one; it now checks each query by name. |
 | 120 | 2026-09-04 | Why did a failed settings copy show two different messages? | An error handler written for undo had been pasted into the copy hook, so it described putting a change back while the copy's own message said it could not be copied. |
+| 121 | 2026-09-04 | Did undoing a copied skill respect edits you had made to it? | No -- it deleted the folder outright, because the marker that identifies a folder receipt was the same empty field the safety check would have compared against. |
 

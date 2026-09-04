@@ -73,6 +73,9 @@ pub enum SkillCopyError {
     /// The destination already has a skill by this name and the caller did
     /// not ask to replace it.
     DestinationExists { path: String },
+    /// The destination folder changed after the copy, so undoing would throw
+    /// away whatever it changed into. Refused rather than restored.
+    DestinationChanged { path: String },
     /// A write, backup or directory creation failed.
     WriteFailed { path: String, detail: String },
     /// A file inside the skill named a path that would land outside the
@@ -90,6 +93,10 @@ impl SkillCopyError {
             }
             SkillCopyError::ReadFailed { detail, .. } => {
                 format!("That skill could not be read: {detail}")
+            }
+            SkillCopyError::DestinationChanged { .. } => {
+                "That skill has been changed since GitWyrm copied it, so it was left alone.                  Putting it back would have thrown away those changes."
+                    .into()
             }
             SkillCopyError::SourceChanged { .. } => {
                 "That skill changed while you were looking at it, so nothing was copied. Try again."
@@ -236,6 +243,14 @@ pub struct SkillCopyReceipt {
     /// `None` means the folder did not exist, and undo removes it.
     pub backup_dir: Option<String>,
     pub files_written: usize,
+    /// What the destination folder hashed to immediately after this copy.
+    ///
+    /// Undo compares against it and refuses when it no longer matches, which
+    /// is the folder equivalent of the single-file path's `after_hash` check.
+    /// `None` on a receipt written before this existed, or reconstructed
+    /// without it -- undo then behaves as it always did rather than refusing
+    /// every historical receipt.
+    pub after_digest: Option<String>,
 }
 
 /// Copies the skill, after re-checking that the source still matches the plan.
@@ -307,7 +322,36 @@ pub fn apply_skill_copy(
         destination_dir: plan.destination_dir.to_string_lossy().into_owned(),
         backup_dir,
         files_written: written,
+        // Best effort: a digest that cannot be computed leaves undo behaving
+        // as before rather than refusing a copy that succeeded.
+        after_digest: folder_digest(&plan.destination_dir).ok(),
     })
+}
+
+/// A single hash standing for a whole skill folder's contents.
+///
+/// `undo_skill_copy` used to `remove_dir_all` the destination with no check at
+/// all, while the single-file undo verifies `after_hash` first and refuses when
+/// the destination changed. A folder receipt carries an empty `after_hash` --
+/// that emptiness is the marker used to route to the folder path -- so there
+/// was nothing to compare against and the doc's promise ("restoring
+/// byte-identical prior content unless the destination changed since the
+/// write") was true for files and false for skills. Editing a copied skill and
+/// then clicking Undo destroyed the edit.
+///
+/// Built from the per-file hashes `read_skill_tree` already computes, over a
+/// `BTreeMap`, so the same contents always produce the same digest regardless
+/// of directory-read order. Paths are included, so a renamed file changes it.
+pub fn folder_digest(dir: &Path) -> Result<String, SkillCopyError> {
+    let tree = read_skill_tree(dir)?;
+    let mut joined = String::new();
+    for (rel, file) in &tree.files {
+        joined.push_str(rel);
+        joined.push('\0');
+        joined.push_str(&file.hash);
+        joined.push('\n');
+    }
+    Ok(hash_bytes(joined.as_bytes()))
 }
 
 /// Puts back whatever the copy replaced.
@@ -316,6 +360,25 @@ pub fn apply_skill_copy(
 /// removes what was copied rather than leaving an empty skill behind.
 pub fn undo_skill_copy(receipt: &SkillCopyReceipt) -> Result<(), SkillCopyError> {
     let destination = PathBuf::from(&receipt.destination_dir);
+    // Refuse if the folder changed after the copy. This used to delete the
+    // destination outright with no check, so a skill the person edited after
+    // copying it was destroyed by Undo -- while the single-file path refuses
+    // in exactly that case, which is what made the shared doc read as covering
+    // both.
+    if let Some(expected) = &receipt.after_digest {
+        if destination.is_dir() {
+            match folder_digest(&destination) {
+                Ok(actual) if &actual != expected => {
+                    return Err(SkillCopyError::DestinationChanged {
+                        path: receipt.destination_dir.clone(),
+                    })
+                }
+                // A digest that cannot be read is not evidence of a change;
+                // the copy_tree below will surface any real failure.
+                _ => {}
+            }
+        }
+    }
     if destination.is_dir() {
         std::fs::remove_dir_all(&destination).map_err(|e| SkillCopyError::WriteFailed {
             path: receipt.destination_dir.clone(),
@@ -371,6 +434,74 @@ fn short_stamp() -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// Undo used to `remove_dir_all` the destination with no check, so a skill
+    /// the person edited after copying was destroyed by it -- while the
+    /// single-file path refuses in exactly that case, which is what made the
+    /// shared doc read as covering both.
+    #[test]
+    fn undo_refuses_when_the_skill_folder_was_edited_after_the_copy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("dest");
+        write(&dest, "SKILL.md", "as copied");
+
+        let receipt = SkillCopyReceipt {
+            destination_dir: dest.to_string_lossy().into_owned(),
+            backup_dir: None,
+            files_written: 1,
+            after_digest: Some(folder_digest(&dest).unwrap()),
+        };
+
+        // The person edits the copied skill.
+        write(&dest, "SKILL.md", "my own edit");
+
+        let err = undo_skill_copy(&receipt).expect_err("must refuse");
+        assert!(matches!(err, SkillCopyError::DestinationChanged { .. }));
+        // And the edit survives.
+        assert_eq!(fs::read_to_string(dest.join("SKILL.md")).unwrap(), "my own edit");
+    }
+
+    #[test]
+    fn undo_still_works_when_the_folder_is_untouched() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("dest");
+        write(&dest, "SKILL.md", "as copied");
+        let receipt = SkillCopyReceipt {
+            destination_dir: dest.to_string_lossy().into_owned(),
+            backup_dir: None,
+            files_written: 1,
+            after_digest: Some(folder_digest(&dest).unwrap()),
+        };
+        undo_skill_copy(&receipt).expect("unchanged folder undoes cleanly");
+        assert!(!dest.exists(), "the copy is removed when nothing changed");
+    }
+
+    /// A receipt written before the digest existed must still undo, rather
+    /// than refusing every historical operation.
+    #[test]
+    fn undo_without_a_digest_behaves_as_it_always_did() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("dest");
+        write(&dest, "SKILL.md", "whatever");
+        let receipt = SkillCopyReceipt {
+            destination_dir: dest.to_string_lossy().into_owned(),
+            backup_dir: None,
+            files_written: 1,
+            after_digest: None,
+        };
+        undo_skill_copy(&receipt).expect("no digest means no refusal");
+        assert!(!dest.exists());
+    }
+
+    #[test]
+    fn the_digest_notices_a_renamed_file_not_just_changed_bytes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let a = tmp.path().join("a");
+        write(&a, "SKILL.md", "same body");
+        let first = folder_digest(&a).unwrap();
+        fs::rename(a.join("SKILL.md"), a.join("OTHER.md")).unwrap();
+        assert_ne!(folder_digest(&a).unwrap(), first, "paths are part of the digest");
+    }
     use super::*;
     use std::fs;
 

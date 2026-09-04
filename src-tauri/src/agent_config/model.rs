@@ -561,6 +561,16 @@ pub struct OperationReceipt {
     pub backup_path: Option<String>,
     pub applied_at: String,
     pub undone: bool,
+    /// For a SKILL (folder) write: what the destination folder hashed to right
+    /// after the copy, so undo can refuse when the folder has changed since.
+    ///
+    /// A folder receipt carries an empty `after_hash` -- that emptiness is how
+    /// `undo_at` recognises one -- so there was nothing for the folder path to
+    /// compare against, and it deleted the destination outright. `#[serde(default)]`
+    /// so receipts written before this field existed still read back: undo then
+    /// behaves as it did rather than refusing every historical receipt.
+    #[serde(default)]
+    pub after_digest: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
