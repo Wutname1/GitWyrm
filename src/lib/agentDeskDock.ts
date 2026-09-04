@@ -176,14 +176,25 @@ export function shouldHideButtonLabels(mode: ResponsiveMode): boolean {
 
 /**
  * True when the conversation column is too narrow to keep a right-side dock
- * without making a chat unusable (tasks.md 7.10, spec "Split View remains
- * usable when space shrinks"). The dock is NOT closed when this happens --
- * the caller collapses it visually and leaves the per-pane icon button as
- * the way back to the same content.
+ * without making a chat unusable.
  *
- * Complements `isRightDockSafeAtWidth` (which gates on the whole window):
- * this one also accounts for how much the dock itself is asking for and for
- * two chat minimums while split.
+ * NOT WIRED, and deliberately so -- kept because it is the clearest statement
+ * of the rule, and because a future layout could need it.
+ *
+ * Its original doc claimed it protected "Split View remains usable when space
+ * shrinks". It does not, because nothing calls it, and that requirement is
+ * already met by two other mechanisms:
+ *
+ *  - `clampDockSizePx` reserves a chat minimum out of the window width, and
+ *    `AgentDeskView` re-applies it on every window resize.
+ *  - `resolveResponsiveMode` measures the PANE CONTAINER, which already
+ *    excludes the dock. So a right dock that squeezes the panes below the
+ *    compact breakpoint makes `resolveSplitPresentation` stack them
+ *    vertically, each taking the full remaining width.
+ *
+ * That second point is why the "two chat minimums" case this function handles
+ * cannot arise: two conversations only share horizontal space in `wide` mode,
+ * and squeezing them stops being wide before it stops being usable.
  */
 export function shouldAutoHideRightDock(input: {
   containerWidthPx: number

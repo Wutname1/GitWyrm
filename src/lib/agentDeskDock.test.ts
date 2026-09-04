@@ -253,3 +253,29 @@ describe('ALL_DOCK_KINDS', () => {
     expect(ALL_DOCK_KINDS).toContain('usage')
   })
 })
+
+describe('Split View stays usable when a dock squeezes it', () => {
+  // The requirement `shouldAutoHideRightDock` claimed to protect. It does not,
+  // because nothing calls it -- this is what actually protects it, so this is
+  // what must not regress.
+  //
+  // `resolveResponsiveMode` is measured on the PANE CONTAINER, which already
+  // excludes the dock. So the interesting question is not "is the window
+  // wide" but "what is left after the dock".
+  it('stacks the two chats rather than shrinking both below the minimum', () => {
+    // 1200px window, a 500px right dock: 700px left for the panes.
+    const leftForPanes = 1200 - 500
+    const mode = resolveResponsiveMode(leftForPanes)
+    expect(mode).toBe('compact')
+    // Stacked, so each chat gets the full 700px rather than 350px each.
+    expect(resolveSplitPresentation(true, mode)).toBe('stacked')
+  })
+
+  it('only puts two chats side by side when there is room for both', () => {
+    const mode = resolveResponsiveMode(1000)
+    expect(mode).toBe('wide')
+    expect(resolveSplitPresentation(true, mode)).toBe('side-by-side')
+    // 1000px across two panes clears the 360px minimum each.
+    expect(1000 / 2).toBeGreaterThan(360)
+  })
+})

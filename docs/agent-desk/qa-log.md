@@ -157,3 +157,6 @@ competing sub-agents, the answer names the losing option too.
 | 148 | 2026-09-04 | Does helper work reach your own files without you deciding? | No -- it merges into the chat's own scratch copy automatically, and only a deliberate Keep or Commit touches your checkout. |
 | 149 | 2026-09-04 | Could your edits to a pull request description be silently thrown away? | Yes -- the box let you type and then ignored it, while telling you the words were for pasting somewhere it never put them. |
 | 150 | 2026-09-04 | Had 29 passes actually looked at every part of this screen? | No -- ten components had never been named by any pass, and the one real bug this round was in one of them. |
+| 151 | 2026-09-04 | Was your choice of how to sort the chat list remembered? | No -- the design notes said it was saved with the rest of the workspace, and it was thrown away every time the app closed. |
+| 152 | 2026-09-04 | Could quitting straight after moving a panel lose the change? | Yes -- the save runs a fraction of a second later, and the code written to finish it before closing was never connected. |
+| 153 | 2026-09-04 | Should a side panel hide itself when Split View gets cramped? | No -- the panes already stack vertically before that point, so each chat keeps the full width and nothing needs to disappear. |
