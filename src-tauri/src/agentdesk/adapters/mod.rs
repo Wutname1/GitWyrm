@@ -334,11 +334,23 @@ pub fn read_foreign_file_to_string(path: &Path) -> Result<String, AdapterError> 
             ),
         });
     }
-    let mut buf = String::new();
-    file.read_to_string(&mut buf).map_err(|e| AdapterError::Io {
+    // Read bytes, then convert lossily. Strict `read_to_string` fails the
+    // WHOLE file for one invalid byte, and that is not how the rest of this
+    // behaves: the listing path reads the same file line by line and skips a
+    // bad one, so a conversation could list with a title and a message count
+    // and then refuse to open, losing every other message in it -- including
+    // the ones the list had just shown.
+    //
+    // A torn multi-byte character at the end of a file another program is
+    // still writing produces exactly that, and so does a pasted fragment in
+    // another encoding. Replacing the unreadable bytes keeps every message
+    // that IS readable, which is the outcome the person wanted; refusing the
+    // file keeps none of them.
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).map_err(|e| AdapterError::Io {
         detail: e.to_string(),
     })?;
-    Ok(buf)
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 // -- 1.2: registry, independent timeouts, failure isolation --
@@ -489,6 +501,44 @@ fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
+
+    /// One unreadable byte must not discard a whole conversation.
+    ///
+    /// Strict reading failed the entire file, while the listing path -- which
+    /// reads the same file line by line -- skipped the bad line and carried
+    /// on. So a conversation listed with a title and a message count and then
+    /// refused to open, losing every message in it including the ones the
+    /// list had just shown. A file another program is still writing produces
+    /// exactly this, by way of a half-written character at the end.
+    #[test]
+    fn one_unreadable_byte_does_not_discard_the_readable_messages() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("session.jsonl");
+        let mut bytes = b"first line
+".to_vec();
+        bytes.push(0xFF); // not valid UTF-8 in any position
+        bytes.extend_from_slice(b"
+last line
+");
+        std::fs::write(&path, &bytes).unwrap();
+
+        let text = read_foreign_file_to_string(&path).expect("a bad byte is not a failed read");
+        assert!(text.contains("first line"), "{text}");
+        assert!(text.contains("last line"), "the rest of the file was lost: {text}");
+    }
+
+    /// An ordinary file is unchanged by reading it this way.
+    #[test]
+    fn a_valid_file_reads_back_exactly() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("plain.jsonl");
+        let original = "one
+two
+three
+";
+        std::fs::write(&path, original).unwrap();
+        assert_eq!(read_foreign_file_to_string(&path).unwrap(), original);
+    }
 
     struct AlwaysDetects;
     impl AgentClientAdapter for AlwaysDetects {
