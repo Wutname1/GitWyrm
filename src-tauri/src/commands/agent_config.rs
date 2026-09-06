@@ -274,6 +274,17 @@ fn skill_copy_preview(client: ClientId, source_item: &RawItem, repo_root: Option
         .or_else(|| dirs.first());
 
     let Some((skills_root, _scope)) = chosen else {
+        // Two different reasons land here and they are not the same fact.
+        // GitWyrm only knows where Claude Code keeps skills, so for every
+        // other client this is a limit of GitWyrm, not a statement about
+        // what that client can do. Saying "it does not keep skills" asserts
+        // something about another product that GitWyrm has not checked and
+        // that may simply be untrue.
+        let message = if home.is_none() {
+            "GitWyrm could not find your home folder, so it does not know where to copy this.".to_string()
+        } else {
+            format!("GitWyrm cannot copy skills to {} yet.", client.label())
+        };
         return DestinationPreview {
             client,
             destination_path: String::new(),
@@ -282,7 +293,7 @@ fn skill_copy_preview(client: ClientId, source_item: &RawItem, repo_root: Option
             redacted_diff_summary: Vec::new(),
             warnings: vec![PlanWarning {
                 kind: WarningKind::ClientNotDetected,
-                message: format!("{} does not keep skills, so there is nowhere to copy this.", client.label()),
+                message,
             }],
             write_supported: false,
         };
@@ -856,6 +867,32 @@ mod tests {
             secret_fields: crate::agent_config::redact::find_secret_fields(&extra),
             extra,
             content_hash: "h".into(),
+        }
+    }
+
+    /// GitWyrm only knows where Claude Code keeps skills. For every other
+    /// client the honest answer is that GitWyrm cannot do it yet -- not that
+    /// the client has no skills, which is a claim about another product that
+    /// GitWyrm has never checked and which may be false.
+    #[test]
+    fn a_client_without_skill_support_blames_gitwyrm_not_the_client() {
+        let mut item = sample_item(ClientId::ClaudeCode, "demo");
+        item.kind = ItemKind::Skill;
+
+        for client in ClientId::ALL {
+            if crate::agent_config::registry::spec(client).can_read_kind(ItemKind::Skill) {
+                continue;
+            }
+            let preview = skill_copy_preview(client, &item, None);
+            let message = &preview.warnings[0].message;
+            assert!(
+                message.contains("GitWyrm cannot copy skills"),
+                "{client:?} should say GitWyrm cannot do it yet, said: {message}"
+            );
+            assert!(
+                !message.contains("does not keep skills"),
+                "{client:?} must not assert what another product does: {message}"
+            );
         }
     }
 
