@@ -222,10 +222,23 @@ pub fn skill_dirs(home: &Path, repo_root: Option<&Path>, client: super::model::C
                 out.push((root.join(".claude").join("skills"), ConfigScope::Repo));
             }
         }
-        // Unreachable while Claude Code is the only row declaring `Skill`.
-        // Kept exhaustive so adding that kind to another row fails to compile
-        // here rather than silently returning nothing.
-        ClientId::Codex | ClientId::OpenCode | ClientId::VsCodeCopilot => {}
+        // OpenCode reads `~/.config/opencode/skills` and, for work scoped to
+        // one project, `<repo>/.opencode/skills`. Note the personal path sits
+        // under `.config/opencode` while the project one is a bare
+        // `.opencode` -- that asymmetry is OpenCode's own, not a mistake here.
+        ClientId::OpenCode => {
+            out.push((
+                home.join(".config").join("opencode").join("skills"),
+                ConfigScope::Personal,
+            ));
+            if let Some(root) = repo_root {
+                out.push((root.join(".opencode").join("skills"), ConfigScope::Repo));
+            }
+        }
+        // Unreachable while these rows do not declare `Skill`. Kept
+        // exhaustive so adding that kind to another row fails to compile here
+        // rather than silently returning nothing.
+        ClientId::Codex | ClientId::VsCodeCopilot => {}
     }
     out
 }
@@ -233,6 +246,45 @@ pub fn skill_dirs(home: &Path, repo_root: Option<&Path>, client: super::model::C
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// OpenCode's skill folders, taken from its own loader rather than
+    /// guessed: personal under `.config/opencode`, project under a bare
+    /// `.opencode`. The asymmetry is OpenCode's own.
+    #[test]
+    fn opencode_skills_live_where_opencode_looks_for_them() {
+        use super::super::model::{ClientId, ConfigScope};
+        let home = Path::new("C:/Users/me");
+        let repo = Path::new("C:/code/widgets");
+        let dirs = skill_dirs(home, Some(repo), ClientId::OpenCode);
+
+        assert_eq!(
+            dirs,
+            vec![
+                (home.join(".config").join("opencode").join("skills"), ConfigScope::Personal),
+                (repo.join(".opencode").join("skills"), ConfigScope::Repo),
+            ]
+        );
+    }
+
+    /// Every client the registry says has skills must say where they are.
+    /// A row declaring `Skill` with no folders here would scan nothing and
+    /// report the person has none, which is the "absent looks like empty"
+    /// failure this project keeps finding.
+    #[test]
+    fn every_client_that_has_skills_says_where_they_are() {
+        use super::super::model::{ClientId, ItemKind};
+        for client in ClientId::ALL {
+            let declares = super::super::registry::spec(client).can_read_kind(ItemKind::Skill);
+            let dirs = skill_dirs(Path::new("C:/Users/me"), None, client);
+            assert_eq!(
+                declares,
+                !dirs.is_empty(),
+                "{client:?} declares skills={declares} but returned {} folders",
+                dirs.len()
+            );
+        }
+    }
+
     use crate::agent_config::model::{ClientId, ConfigScope};
 
     fn location_for(path: &Path) -> ConfigLocation {

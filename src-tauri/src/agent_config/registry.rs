@@ -212,7 +212,12 @@ pub const CLIENTS: &[ClientSpec] = &[
             &[".opencode", "opencode.json"],
             &[".opencode", "opencode.jsonc"],
         ],
-        readable_kinds: &[ItemKind::McpConnector],
+        // Skills sit beside the connectors: OpenCode keeps them in
+        // `~/.config/opencode/skills` and `<repo>/.opencode/skills`, one
+        // folder per skill with a `SKILL.md` inside -- the same shape
+        // `skills::read_skills_at` already reads for Claude. Taken from
+        // OpenCode's own skill loader rather than guessed at.
+        readable_kinds: &[ItemKind::McpConnector, ItemKind::Skill],
         writer: Some(WriterKind::JsonMcpMap { key: "mcp" }),
         empty_document: "{}\n",
         // OpenChamber is a web interface over OpenCode: it reads these same
