@@ -388,12 +388,64 @@ fn read_workspace_folder(hash_dir: &Path) -> Option<String> {
     Some(file_uri_to_path(folder_uri))
 }
 
-/// `file:///c%3A/code/foo` -> `C:/code/foo`. Minimal, handles the Windows
-/// drive-letter percent-encoding actually observed; does not attempt general
-/// URI decoding since workspace folder URIs are always local file paths.
+/// `file:///c%3A/code/foo` -> `c:/code/foo`, `file:///home/me/x` ->
+/// `/home/me/x`.
+///
+/// This used to replace only `%3A`, on the reasoning that the drive-letter
+/// colon was the encoding actually observed. Two things were wrong with
+/// that. Any other escape survived into the path, so a workspace folder
+/// with a space -- `My Documents`, and every folder like it -- came out as
+/// `my%20project` and could never match a project GitWyrm had open; the
+/// person was told GitWyrm could not find a folder they were looking at.
+/// And `file:///` was stripped whole, which eats the leading slash of a
+/// POSIX path, so every macOS and Linux workspace resolved to a relative
+/// path that matched nothing.
+///
+/// Decoding is done here rather than by pulling in a URI crate: the input is
+/// always a local file path written by one program, and percent-decoding is
+/// a few lines.
 fn file_uri_to_path(uri: &str) -> String {
-    let without_scheme = uri.strip_prefix("file:///").unwrap_or(uri);
-    without_scheme.replace("%3A", ":").replace("%3a", ":")
+    // Keep the root slash on POSIX (`file:///home/x` -> `/home/x`) while
+    // dropping it before a Windows drive letter (`file:///c:/x` -> `c:/x`).
+    let rest = uri.strip_prefix("file://").unwrap_or(uri);
+    let decoded = percent_decode(rest);
+    match decoded.strip_prefix('/') {
+        // `/c:/code/x` is a Windows path wearing a URI's leading slash.
+        Some(after) if looks_like_windows_drive(after) => after.to_string(),
+        _ => decoded,
+    }
+}
+
+/// True for `c:/...` or `C:\...` -- a drive letter, a colon, a separator.
+fn looks_like_windows_drive(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'/' || b[2] == b'\\')
+}
+
+/// Turn `%20` and friends back into their characters.
+///
+/// An escape that is not two hex digits is left exactly as written rather
+/// than dropped: a literal `%` in a folder name is legal, and mangling it
+/// would be the same class of mistake as not decoding at all.
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hex = &s[i + 1..i + 3];
+            if let Ok(byte) = u8::from_str_radix(hex, 16) {
+                out.push(byte);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    // A folder name is text; if the decoded bytes are not valid UTF-8 the
+    // original is closer to right than a lossy replacement would be.
+    String::from_utf8(out).unwrap_or_else(|_| s.to_string())
 }
 
 fn millis_to_rfc3339(millis: Option<i64>) -> String {
@@ -490,6 +542,39 @@ mod tests {
         let client = adapter.detect().unwrap().unwrap();
         let sessions = adapter.list_sessions(&client).unwrap();
         assert_eq!(sessions.len(), 1000);
+    }
+
+    /// Workspace folder URIs are percent-encoded, and only the drive-letter
+    /// colon used to be decoded. A folder with a space -- `My Documents`,
+    /// and every folder like it -- arrived as `my%20project`, which cannot
+    /// match a project GitWyrm has open: the person was told GitWyrm could
+    /// not find a folder they were looking at.
+    ///
+    /// Stripping `file:///` whole also ate the leading slash of a POSIX
+    /// path, so every macOS and Linux workspace resolved to a relative path
+    /// that matched nothing.
+    #[test]
+    fn a_workspace_path_survives_being_written_as_a_uri() {
+        assert_eq!(file_uri_to_path("file:///c%3A/code/widgets"), "c:/code/widgets");
+        assert_eq!(file_uri_to_path("file:///c%3A/code/my%20project"), "c:/code/my project");
+        assert_eq!(file_uri_to_path("file:///home/me/x"), "/home/me/x");
+        assert_eq!(file_uri_to_path("file:///Users/me/my%20project"), "/Users/me/my project");
+    }
+
+    /// A non-ASCII folder name decodes from its UTF-8 bytes.
+    #[test]
+    fn a_folder_name_outside_ascii_decodes() {
+        let cafe = format!("c:/code/caf{}", '\u{e9}');
+        assert_eq!(file_uri_to_path("file:///c%3A/code/caf%C3%A9"), cafe);
+    }
+
+    /// A stray `%` in a folder name is legal and must survive unchanged --
+    /// mangling it would be the same mistake as not decoding at all.
+    #[test]
+    fn an_escape_that_is_not_an_escape_is_left_alone() {
+        assert_eq!(file_uri_to_path("file:///c%3A/code/100%25"), "c:/code/100%");
+        assert_eq!(file_uri_to_path("file:///c%3A/code/a%zz"), "c:/code/a%zz");
+        assert_eq!(file_uri_to_path("file:///c%3A/code/ends%"), "c:/code/ends%");
     }
 
     #[test]
