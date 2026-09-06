@@ -67,6 +67,7 @@ import {
 import { Markdown } from "@/components/ui/markdown";
 import {
   commands,
+  type GitProgressPayload,
   type GithubRepository,
   type RepositoryStarter,
 } from "@/lib/bindings";
@@ -94,11 +95,6 @@ import {
   type SavedTabGroup,
 } from "@/stores/workspaceStore";
 import { CodeFoldersSetting } from "@/components/domain/settings/CodeFoldersSetting";
-
-interface GitProgressPayload {
-  operation: string;
-  line: string;
-}
 
 type Route = "open" | "clone" | "new";
 type ProjectPathStatus = "idle" | "checking" | "available" | "exists" | "error";

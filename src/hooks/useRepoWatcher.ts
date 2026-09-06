@@ -1,16 +1,13 @@
 import { useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { listen } from '@tauri-apps/api/event'
+import type { RepoChangedPayload } from '@/lib/bindings'
 import {
   invalidateOpenspec,
   isGitOperationInFlight,
   keys,
   trimLogToFirstPage,
 } from '@/lib/queryKeys'
-
-interface RepoChangedPayload {
-  repo_id: string
-}
 
 /**
  * Invalidates git queries when the backend watcher reports external changes.

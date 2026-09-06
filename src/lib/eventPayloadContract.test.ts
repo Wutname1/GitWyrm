@@ -24,15 +24,22 @@ import { fileURLToPath } from 'node:url'
  * declared locally rather than imported from `bindings` is that same
  * unguarded state, so it fails here with the fix spelled out.
  *
- * **Scope.** Agent Desk only, and it is clean: all four of its listeners now
- * take the generated type. Pointing the same check at the rest of the app
- * finds six more (repo watching, updater progress, settings sync, AI commit
- * and conflict progress, the repo picker's git progress). Those are real
- * instances of the same risk -- `useRepoWatcher`'s payload even spells its
- * field `repo_id` with nothing checking it -- but each belongs to a surface
- * this change does not touch, and a check that fails on work nobody is doing
- * gets switched off rather than obeyed. Add a directory to `ROOTS` as each
- * one is cleared.
+ * **Scope.** Agent Desk, plus repo watching and git progress. Three cases
+ * outside `ROOTS` are still hand-written and are left that way deliberately:
+ *
+ * - `useUpdater`'s `UpdateProgress` **cannot** be generated. Its byte counts
+ *   are `u64`, and specta refuses to export a 64-bit integer because it
+ *   cannot know the deserializer handles one -- registering it makes
+ *   `export_bindings` fail outright, which was confirmed by trying it.
+ *   Widening that type is an updater decision.
+ * - `AiResolveProgress` and `AiCommitProgressPayload` derive `Serialize` but
+ *   not `specta::Type`, so there is nothing to import yet. Adding the derive
+ *   is a small change to those surfaces, not to this one.
+ * - `settingsSync`'s payload has no Rust counterpart at all -- it is emitted
+ *   by one window and read by another, both on this side -- so there is
+ *   nothing for it to drift from.
+ *
+ * Add a path to `ROOTS` as each is cleared.
  */
 
 /**
@@ -41,9 +48,12 @@ import { fileURLToPath } from 'node:url'
 const ROOTS = [
   'components/domain/agent-desk',
   'components/domain/agent-setup',
+  'components/modals/RepoPickerModal.tsx',
   'hooks/useAgentDeskSourceListener.ts',
   'hooks/useAgentResultDiff.ts',
   'hooks/useAgentSessions.ts',
+  'hooks/useLocalGitProgress.ts',
+  'hooks/useRepoWatcher.ts',
   'views/AgentDeskView.tsx',
 ]
 
