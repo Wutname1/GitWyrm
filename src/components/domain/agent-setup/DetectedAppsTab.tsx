@@ -76,8 +76,11 @@ export function DetectedAppsTab({
               {/* Some apps read another app's settings rather than keeping
                   their own, so they get no row. Naming them here stops
                   someone looking for their own app by name from deciding
-                  GitWyrm has never heard of it. */}
-              {d.alsoUsedBy.length > 0 && ` · also used by ${d.alsoUsedBy.join(', ')}`}
+                  GitWyrm has never heard of it.
+                  Only worth saying about settings that are actually here --
+                  "not found on this machine, also used by OpenChamber"
+                  invites the reader to wonder which of the two is missing. */}
+              {d.present && d.alsoUsedBy.length > 0 && ` · also used by ${d.alsoUsedBy.join(', ')}`}
             </span>
           </div>
           <span className="text-2xs text-muted-foreground">
