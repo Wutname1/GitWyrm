@@ -174,14 +174,3 @@ mod tests {
         );
     }
 }
-
-#[cfg(test)]
-mod audit_probe2 {
-    use super::*;
-    #[test]
-    fn probe_percent_encoded_path_fails_to_resolve() {
-        let repos = vec![KnownRepo{repo_id:"1".into(), repo_name:"my project".into(), repo_path:"C:/code/my project".into()}];
-        println!("{:?}", resolve_project_path(Some("c:/code/my%20project"), &repos));
-        println!("posix: {:?}", resolve_project_path(Some("home/me/x"), &vec![KnownRepo{repo_id:"2".into(),repo_name:"x".into(),repo_path:"/home/me/x".into()}]));
-    }
-}
