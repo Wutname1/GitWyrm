@@ -720,6 +720,11 @@ const CHANGE_NOT_ACTIVE: &str =
 /// the same one a hand-typed instruction uses. So there is one drafting
 /// prompt, one write path (`openspec_write_file`, after the person saves),
 /// and no way for an agent to reach a spec file on its own.
+/// `execution_id` names which execution's result is being reported on. The
+/// review panel is rendered once per execution, so it has to travel: this
+/// command used to pick a record itself (the last one in the file), which
+/// meant a person reviewing one helper's work could draft a spec update
+/// built from a different helper's.
 #[tauri::command]
 #[specta::specta]
 pub async fn openspec_draft_from_session(
@@ -727,6 +732,7 @@ pub async fn openspec_draft_from_session(
     manager: State<'_, RepoManager>,
     repo_id: String,
     session_id: String,
+    execution_id: String,
     target: crate::agentdesk::spec_return::SpecReturnTarget,
     provider: String,
     model: String,
@@ -756,9 +762,7 @@ pub async fn openspec_draft_from_session(
         Err(e) => return Err(AppError::Other(e.to_string())),
     };
 
-    // The newest result is the one that describes the work as it stands.
-    let latest = results.last();
-    let context = match build_return_context(&session, latest, target) {
+    let context = match build_return_context(&session, &results, &execution_id, target) {
         Ok(c) => c,
         Err(refusal) => {
             return Ok(SpecReturnDraft::NothingToSend {

@@ -134,9 +134,13 @@ export function ResultReviewPanel({
     setReturning(true)
     try {
       const outcome = unwrap(
+        // The execution travels with the request. Without it the backend
+        // picked a record itself -- the last one in the file -- so reviewing
+        // one helper's work could draft a spec update from another helper's.
         await commands.openspecDraftFromSession(
           repoId,
           sessionId,
+          executionId,
           target.id,
           specAi.provider,
           specAi.model

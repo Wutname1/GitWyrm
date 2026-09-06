@@ -828,6 +828,78 @@ fn refusal_note(refusal: &crate::agentdesk::policy::ToolRefusal) -> String {
 mod tests {
     use super::*;
 
+    /// Reproduces the real Stop sequence: the working turn consumes one
+    /// cancel, then the auditor waits on the SAME handle and a second Stop
+    /// must reach it.
+    ///
+    /// `notify_one` stores at most one permit and hands it to the next
+    /// waiter, so the question is whether the second `cancel()` is still
+    /// there for the auditor once the first has been taken.
+    #[tokio::test]
+    async fn a_second_stop_reaches_a_later_waiter_on_the_same_handle() {
+        let cancel = CancelHandle::new();
+
+        // The working turn's loop takes the first cancel.
+        cancel.cancel();
+        cancel.cancelled().await;
+
+        // Stop pressed again while the auditor is the one waiting.
+        cancel.cancel();
+        tokio::time::timeout(std::time::Duration::from_millis(500), cancel.cancelled())
+            .await
+            .expect("a second Stop must reach the check that runs after the turn");
+    }
+
+    /// The multi-waiter shape: `notify_one` wakes exactly one waiter, so if
+    /// the working turn and the check were ever waiting at the SAME time, one
+    /// cancel would reach only one of them.
+    ///
+    /// They are not concurrent -- `audit_finished_work` is awaited after the
+    /// turn's loop has ended (`run_task`) -- and this pins that, because the
+    /// day they overlap a single Stop would silently reach only one.
+    #[tokio::test]
+    async fn one_stop_wakes_only_one_of_two_waiters() {
+        let cancel = CancelHandle::new();
+        let a = cancel.clone();
+        let b = cancel.clone();
+
+        let first = tokio::spawn(async move { a.cancelled().await });
+        let second = tokio::spawn(async move { b.cancelled().await });
+        tokio::task::yield_now().await;
+
+        cancel.cancel();
+
+        let woke_first = tokio::time::timeout(std::time::Duration::from_millis(200), first)
+            .await
+            .is_ok();
+        let woke_second = tokio::time::timeout(std::time::Duration::from_millis(200), second)
+            .await
+            .is_ok();
+        assert!(
+            woke_first ^ woke_second,
+            "one cancel must wake exactly one waiter -- if both phases ever wait at once,              a single Stop reaches only one of them"
+        );
+    }
+
+    /// The harder shape: Stop pressed only ONCE, during the working turn,
+    /// and the auditor starts afterwards. The permit is already spent, so
+    /// nothing should be waiting for the auditor -- this pins what actually
+    /// happens rather than what the comment claims.
+    #[tokio::test]
+    async fn one_stop_during_the_turn_does_not_also_stop_the_later_check() {
+        let cancel = CancelHandle::new();
+        cancel.cancel();
+        cancel.cancelled().await;
+
+        let reached = tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            cancel.cancelled(),
+        )
+        .await
+        .is_ok();
+        assert!(!reached, "one cancel must not be delivered twice");
+    }
+
     /// The acceptance test the plan calls for: a real agent told to cut a
     /// corner, a spec that asked for more, and the auditor in between.
     /// Costs a little Codex quota and needs a signed-in `codex`. Run by hand:

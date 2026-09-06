@@ -81,6 +81,17 @@ pub enum ReturnRefusal {
     StillWorking,
     /// It finished without changing anything, so there is nothing to report.
     NothingChanged,
+    /// The work was thrown away with Undo, so it proved nothing the spec
+    /// should be told about.
+    ///
+    /// The button that starts this is already meant to be unavailable for a
+    /// discarded result -- but that rule was only ever enforced in the
+    /// window, against a record chosen by the panel, while the backend acted
+    /// on a different one. A rule about what may reach the spec has to hold
+    /// where the spec is reached.
+    WasThrownAway,
+    /// The result has not been accepted yet, so it is still under review.
+    StillBeingReviewed,
 }
 
 impl ReturnRefusal {
@@ -93,6 +104,12 @@ impl ReturnRefusal {
             }
             ReturnRefusal::StillWorking => {
                 "Wait for the work to finish, then send what it found back to the spec."
+            }
+            ReturnRefusal::WasThrownAway => {
+                "This work was undone, so there is nothing to tell the spec about it."
+            }
+            ReturnRefusal::StillBeingReviewed => {
+                "Keep this work first, then tell the spec what it found."
             }
             ReturnRefusal::NothingChanged => {
                 "This work did not change any files, so there is nothing to tell the spec."
@@ -118,9 +135,23 @@ pub struct ReturnContext {
 /// summarise itself again: the paths come from the result record and the
 /// account of the work comes from what the agent already said. A model that
 /// exaggerated what it did cannot make the file list say so.
+///
+/// **It reports on one execution, named.** The caller used to pick a record
+/// itself -- the last one in the file -- and hand it over, with no way for
+/// this function to know whether that was the execution the person was
+/// actually looking at. In a session with a lead and helpers, the review
+/// panel is rendered per execution, so reviewing one helper's three files
+/// and pressing the button drafted a spec update from a different helper's
+/// work. It looked plausible, because it was real work from the same
+/// session -- just the wrong slice of it. The file list being honest about
+/// what a model did is worth nothing if it is the wrong model's list.
+///
+/// `results` is the whole set and `execution_id` names the one under review,
+/// so the choice cannot be made anywhere else.
 pub fn build_return_context(
     session: &AgentSession,
-    result: Option<&ResultRecord>,
+    results: &[ResultRecord],
+    execution_id: &str,
     target: SpecReturnTarget,
 ) -> Result<ReturnContext, ReturnRefusal> {
     let change_id = match &session.header.source {
@@ -129,7 +160,16 @@ pub fn build_return_context(
         _ => return Err(ReturnRefusal::NotFromASpec),
     };
 
-    let result = result.ok_or(ReturnRefusal::StillWorking)?;
+    let result = super::result::find_result(results, execution_id).ok_or(ReturnRefusal::StillWorking)?;
+
+    // The spec is the project's source of truth and a mistake there outlives
+    // the session, so only work the person actually accepted may reach it.
+    match result.state {
+        super::result::ResultState::Kept | super::result::ResultState::Committed => {}
+        super::result::ResultState::Discarded => return Err(ReturnRefusal::WasThrownAway),
+        _ => return Err(ReturnRefusal::StillBeingReviewed),
+    }
+
     if result.changed_paths.is_empty() {
         return Err(ReturnRefusal::NothingChanged);
     }
@@ -153,7 +193,7 @@ pub fn build_return_context(
         instruction.push('\n');
     }
 
-    if let Some(said) = closing_account(session) {
+    if let Some(said) = closing_account(session, execution_id) {
         instruction.push_str("\nWhat it said about the work:\n");
         instruction.push_str(&said);
         instruction.push('\n');
@@ -179,13 +219,20 @@ that is not listed here, and do not claim something is done if the account does 
 /// Tool rows, approvals and thought summaries are skipped: they say what it
 /// touched, which the file list already covers honestly, and none of them is
 /// the agent explaining itself.
-fn closing_account(session: &AgentSession) -> Option<String> {
+///
+/// Scoped to the execution being reported on. Unscoped, a session with a
+/// lead and helpers could pair one execution's file list with another's
+/// prose under "What it said about the work" -- two true halves assembled
+/// into an account that never happened, in text the person is invited to
+/// save into the spec.
+fn closing_account(session: &AgentSession, execution_id: &str) -> Option<String> {
     let text = session
         .messages
         .iter()
         .rev()
         .find(|m| {
             m.role == MessageRole::Assistant
+                && m.execution_id.as_deref() == Some(execution_id)
                 && matches!(m.kind, MessageKind::Assistant | MessageKind::Result)
                 && !m.plain_content.trim().is_empty()
         })
@@ -252,13 +299,19 @@ mod tests {
         })
     }
 
+    /// A result the person has accepted, which is the only kind that may
+    /// reach the spec.
     fn result_with(paths: &[&str]) -> ResultRecord {
+        result_for("exec-1", ResultState::Kept, paths)
+    }
+
+    fn result_for(execution_id: &str, state: ResultState, paths: &[&str]) -> ResultRecord {
         ResultRecord {
-            execution_id: "exec-1".into(),
+            execution_id: execution_id.into(),
             outcome: ResultOutcomeKind::Finished,
-            state: ResultState::Reviewing,
-            worktree_path: Some("C:/wt/exec-1".into()),
-            branch: Some("agent-desk/exec-1".into()),
+            state,
+            worktree_path: Some(format!("C:/wt/{execution_id}")),
+            branch: Some(format!("agent-desk/{execution_id}")),
             base_oid: None,
             head_oid: None,
             changed_paths: paths
@@ -301,7 +354,7 @@ mod tests {
             repo_id: "repo-1".into(),
         });
         assert_eq!(
-            build_return_context(&s, Some(&result_with(&["a.rs"])), SpecReturnTarget::Tasks),
+            build_return_context(&s, &[result_with(&["a.rs"])], "exec-1", SpecReturnTarget::Tasks),
             Err(ReturnRefusal::NotFromASpec)
         );
     }
@@ -310,17 +363,99 @@ mod tests {
     fn work_that_has_not_finished_or_changed_nothing_is_refused_separately() {
         let s = task_session();
         assert_eq!(
-            build_return_context(&s, None, SpecReturnTarget::Tasks),
+            build_return_context(&s, &[], "exec-1", SpecReturnTarget::Tasks),
             Err(ReturnRefusal::StillWorking),
             "no result yet means the work is not settled"
         );
         assert_eq!(
-            build_return_context(&s, Some(&result_with(&[])), SpecReturnTarget::Tasks),
+            build_return_context(&s, &[result_with(&[])], "exec-1", SpecReturnTarget::Tasks),
             Err(ReturnRefusal::NothingChanged)
         );
         // Each refusal says what would change it, rather than just "no".
         assert!(ReturnRefusal::StillWorking.plain().contains("Wait for the work"));
         assert!(ReturnRefusal::NothingChanged.plain().contains("did not change any files"));
+    }
+
+    fn assistant_from(text: &str, execution_id: &str) -> SessionMessage {
+        let mut m = assistant(text, MessageKind::Assistant);
+        m.message_id = format!("m-{execution_id}-{text:.8}");
+        m.execution_id = Some(execution_id.into());
+        m
+    }
+
+    /// The defect this signature exists to prevent. A session with a lead and
+    /// two helpers has one review panel per execution, so the person can be
+    /// looking at helper A while the caller hands over whichever record
+    /// happens to sit last in the file. The drafted spec update then names
+    /// files they never saw -- plausible, because it is real work from the
+    /// same session, just the wrong slice of it.
+    #[test]
+    fn the_draft_reports_on_the_execution_being_reviewed_not_the_last_one() {
+        let s = task_session();
+        let records = vec![
+            result_for("helper-a", ResultState::Kept, &["src/parser.rs"]),
+            result_for("helper-c", ResultState::Kept, &["src/unrelated.rs"]),
+        ];
+
+        let ctx = build_return_context(&s, &records, "helper-a", SpecReturnTarget::Tasks)
+            .expect("the reviewed helper's result can report back");
+
+        assert!(ctx.instruction.contains("src/parser.rs"), "{}", ctx.instruction);
+        assert!(
+            !ctx.instruction.contains("src/unrelated.rs"),
+            "another execution's files reached the spec: {}",
+            ctx.instruction
+        );
+    }
+
+    /// Work the person threw away with Undo must never reach the spec. The
+    /// rule existed only in the window, checked against a record the panel
+    /// chose, while the backend acted on a different one -- so it was a rule
+    /// about the spec that did not hold where the spec is reached.
+    #[test]
+    fn work_that_was_undone_cannot_be_told_to_the_spec() {
+        let s = task_session();
+        let records = vec![result_for("exec-1", ResultState::Discarded, &["src/parser.rs"])];
+
+        assert_eq!(
+            build_return_context(&s, &records, "exec-1", SpecReturnTarget::Tasks),
+            Err(ReturnRefusal::WasThrownAway)
+        );
+    }
+
+    /// Nor may work still under review: "Finished does not mean accepted".
+    #[test]
+    fn work_still_under_review_cannot_be_told_to_the_spec() {
+        let s = task_session();
+        for state in [ResultState::Reviewing, ResultState::RevisionRequested] {
+            let records = vec![result_for("exec-1", state, &["src/parser.rs"])];
+            assert_eq!(
+                build_return_context(&s, &records, "exec-1", SpecReturnTarget::Tasks),
+                Err(ReturnRefusal::StillBeingReviewed),
+                "{state:?} is not an accepted result"
+            );
+        }
+    }
+
+    /// The file list and the account of the work have to come from the same
+    /// execution. Unscoped, one execution's files were presented under
+    /// another's prose -- two true halves assembled into an account that
+    /// never happened, in text the person is invited to save into the spec.
+    #[test]
+    fn the_account_comes_from_the_same_execution_as_the_files() {
+        let mut s = task_session();
+        s.messages.push(assistant_from("Helper A rewrote the parser.", "helper-a"));
+        s.messages.push(assistant_from("Helper C tidied the docs.", "helper-c"));
+
+        let records = vec![result_for("helper-a", ResultState::Kept, &["src/parser.rs"])];
+        let ctx = build_return_context(&s, &records, "helper-a", SpecReturnTarget::Tasks).unwrap();
+
+        assert!(ctx.instruction.contains("Helper A rewrote the parser"), "{}", ctx.instruction);
+        assert!(
+            !ctx.instruction.contains("Helper C"),
+            "another execution's words were presented as this one's: {}",
+            ctx.instruction
+        );
     }
 
     #[test]
@@ -333,7 +468,8 @@ mod tests {
         ));
         let ctx = build_return_context(
             &s,
-            Some(&result_with(&["src/parser.rs", "src/parser.test.rs"])),
+            &[result_with(&["src/parser.rs", "src/parser.test.rs"])],
+            "exec-1",
             SpecReturnTarget::Tasks,
         )
         .expect("a finished spec task can report back");
@@ -360,7 +496,7 @@ mod tests {
             (SpecReturnTarget::Proposal, "proposal.md", "Update the proposal"),
             (SpecReturnTarget::Design, "design.md", "decisions this work forced"),
         ] {
-            let ctx = build_return_context(&s, Some(&r), target).expect("built");
+            let ctx = build_return_context(&s, std::slice::from_ref(&r), "exec-1", target).expect("built");
             assert_eq!(ctx.file, file);
             assert!(ctx.instruction.contains(needle), "{target:?}: {}", ctx.instruction);
         }
@@ -372,7 +508,7 @@ mod tests {
         s.messages
             .push(assistant(&"x".repeat(9_000), MessageKind::Assistant));
         let ctx =
-            build_return_context(&s, Some(&result_with(&["a.rs"])), SpecReturnTarget::Tasks).unwrap();
+            build_return_context(&s, &[result_with(&["a.rs"])], "exec-1", SpecReturnTarget::Tasks).unwrap();
         assert!(ctx.instruction.contains("(cut short)"));
         assert!(ctx.instruction.chars().count() < 6_000);
     }
@@ -386,7 +522,7 @@ mod tests {
             snapshot: snapshot(),
         });
         let ctx =
-            build_return_context(&s, Some(&result_with(&["a.rs"])), SpecReturnTarget::Proposal).unwrap();
+            build_return_context(&s, &[result_with(&["a.rs"])], "exec-1", SpecReturnTarget::Proposal).unwrap();
         assert_eq!(ctx.change_id, "add-the-thing");
         assert!(ctx.instruction.contains("- a.rs"));
     }

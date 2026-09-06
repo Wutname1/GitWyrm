@@ -444,10 +444,15 @@ async openspecDraftEdit(repoId: string, changeId: string, file: string, instruct
  * the same one a hand-typed instruction uses. So there is one drafting
  * prompt, one write path (`openspec_write_file`, after the person saves),
  * and no way for an agent to reach a spec file on its own.
+ * `execution_id` names which execution's result is being reported on. The
+ * review panel is rendered once per execution, so it has to travel: this
+ * command used to pick a record itself (the last one in the file), which
+ * meant a person reviewing one helper's work could draft a spec update
+ * built from a different helper's.
  */
-async openspecDraftFromSession(repoId: string, sessionId: string, target: SpecReturnTarget, provider: string, model: string) : Promise<Result<SpecReturnDraft, string>> {
+async openspecDraftFromSession(repoId: string, sessionId: string, executionId: string, target: SpecReturnTarget, provider: string, model: string) : Promise<Result<SpecReturnDraft, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("openspec_draft_from_session", { repoId, sessionId, target, provider, model }) };
+    return { status: "ok", data: await TAURI_INVOKE("openspec_draft_from_session", { repoId, sessionId, executionId, target, provider, model }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
