@@ -576,6 +576,32 @@ fn write_ledger_logged(
 ///
 /// Logging alone did not reach the person. This does, in the one place they
 /// are certain to look.
+/// What the adapters substitute when an external conversation records no
+/// date of its own.
+///
+/// It is a sentinel, not a reading. Copied onto a session header it becomes
+/// the age shown in the sidebar, where it renders as "56y" -- a confident,
+/// absurd measurement of something GitWyrm was never told.
+///
+/// Guarded here rather than by making every adapter's `updated_at` optional:
+/// that is roughly seventeen substitution sites across four adapters plus
+/// every sort, and this is the one boundary where the value stops being an
+/// adapter's internal placeholder and becomes text a person reads.
+const NO_RECORDED_DATE: &str = "1970-01-01T00:00:00Z";
+
+/// The date to show for an imported conversation.
+///
+/// When the original recorded one, that is the honest answer. When it did
+/// not, the honest answer is when GitWyrm imported it -- a time GitWyrm
+/// genuinely measured -- rather than a year nobody was there for.
+fn imported_session_updated_at(external: &str, imported_at: &str) -> String {
+    if external == NO_RECORDED_DATE {
+        imported_at.to_string()
+    } else {
+        external.to_string()
+    }
+}
+
 const LEDGER_NOT_SAVED_NOTE: &str =
     "This chat was brought in, but GitWyrm could not save its note that it had. If you import this same chat again, you will get a second copy of it rather than an update to this one.";
 
@@ -660,7 +686,7 @@ fn build_imported_session(
             .first()
             .map(|m| m.timestamp.clone())
             .unwrap_or_else(|| imported_at.to_string()),
-        updated_at: detail.summary.updated_at.clone(),
+        updated_at: imported_session_updated_at(&detail.summary.updated_at, &imported_at.to_string()),
         unread: true,
         changed_file_count: 0,
         active_execution_id: None,
@@ -774,7 +800,8 @@ fn append_imported_messages(
     }
 
     if new_count > 0 {
-        session.header.updated_at = detail.summary.updated_at.clone();
+        session.header.updated_at =
+            imported_session_updated_at(&detail.summary.updated_at, &imported_at.to_string());
         session.header.unread = true;
     }
     let _ = record; // anchor already folded into the id-set dedup above.
@@ -1054,7 +1081,32 @@ mod tests {
     /// The two lists agree today (checked when this was written); this is
     /// about the next one. Compared against the REAL registry rather than a
     /// hardcoded list, so it cannot drift from what actually ships.
+    /// A conversation whose original recorded no date must not be shown with
+    /// a fabricated one.
+    ///
+    /// The adapters substitute a 1970 sentinel when a file records nothing.
+    /// Copied onto the session header it becomes the age in the sidebar,
+    /// which renders it as "56y" -- a confident measurement of something
+    /// GitWyrm was never told. When GitWyrm has no date from the original,
+    /// the one honest date it does have is when it imported the thing.
     #[test]
+    fn a_conversation_with_no_recorded_date_is_dated_when_it_was_imported() {
+        assert_eq!(
+            imported_session_updated_at(NO_RECORDED_DATE, "2026-09-09T12:00:00Z"),
+            "2026-09-09T12:00:00Z"
+        );
+    }
+
+    /// A date the original really did record is used exactly as found.
+    #[test]
+    fn a_recorded_date_is_kept_as_it_was_found() {
+        assert_eq!(
+            imported_session_updated_at("2026-01-05T08:30:00Z", "2026-09-09T12:00:00Z"),
+            "2026-01-05T08:30:00Z"
+        );
+    }
+
+   #[test]
     fn every_registered_adapter_has_a_capability_flag() {
         use crate::agentdesk::adapters::AdapterRegistry;
         let registry = AdapterRegistry::with_default_adapters();
