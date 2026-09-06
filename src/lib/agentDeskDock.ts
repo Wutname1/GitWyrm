@@ -98,6 +98,30 @@ export function resolveDrop(input: {
 }
 
 /**
+ * Where a *pin* may land, as opposed to where an existing panel may move.
+ *
+ * `resolveDrop` rejects when there is no dock yet, which is right for a move
+ * and wrong for a pin: pinning the first panel is exactly the case where
+ * there is nothing pinned. The two paths still have to agree about width,
+ * though -- pinning right below the safe width leaves the panel rendered as
+ * a popover, so a pin that reported success there claimed something the
+ * person could not see.
+ *
+ * Both pin entry points (the pane popover's Pin, and the toolbar's Move
+ * menu) go through this, so neither can acquire a width rule the other
+ * lacks.
+ */
+export function resolvePin(input: {
+  targetZone: DockZone
+  rightZoneUnavailable: boolean
+}): DropOutcome {
+  if (input.targetZone === 'right' && input.rightZoneUnavailable) {
+    return { status: 'reject', reason: 'The window is too narrow for a panel on the right.' }
+  }
+  return { status: 'accept', zone: input.targetZone }
+}
+
+/**
  * Which session the dock's contents must show (tasks.md 7.2/7.9).
  *
  * Always the *active* pane's session, never a remembered one: V1 does not

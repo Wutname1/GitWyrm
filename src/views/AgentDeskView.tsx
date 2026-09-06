@@ -20,12 +20,12 @@ import { OpenSpecEmbeddedDetail } from '@/components/domain/agent-desk/OpenSpecE
 import { useAgentSession, useAgentSessionExistence, useAgentSessionHeaders } from '@/hooks/useAgentSessions'
 import { useOrphanResultReconciliation } from '@/hooks/useOrphanResultReconciliation'
 import { useContainerWidth } from '@/hooks/useContainerWidth'
-import { dockKindLabel, resolveDrop, resolveResponsiveMode, resolveSplitPresentation, shouldHideButtonLabels, zoneLabel } from '@/lib/agentDeskDock'
+import { dockKindLabel, resolveDrop, resolvePin, resolveResponsiveMode, resolveSplitPresentation, shouldHideButtonLabels, zoneLabel } from '@/lib/agentDeskDock'
 import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
 import { cn } from '@/lib/utils'
 import { resolveAgentDeskShellState } from '@/views/agentDeskViewState'
 import { otherPane, resolvePaneTarget, type PaneId } from '@/lib/agentDeskPaneTargeting'
-import { isRightDockSafeAtWidth, resolveDockVisibility, zoneToPlacement, type DockZone } from '@/lib/agentDeskDockPlacement'
+import { isRightDockSafeAtWidth, resolveDockVisibility, zoneToPlacement, placementToZone, type DockZone } from '@/lib/agentDeskDockPlacement'
 import type { DockKind } from '@/lib/agentWorkspaceLayout'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 
@@ -611,6 +611,18 @@ export function AgentDeskView() {
 
   const onPin = (pane: PaneId, kind: DockKind, edge: 'left' | 'right' | 'bottom') => {
     if (pane !== layout.activePane) setActivePane(pane)
+    // The same width decision the toolbar's pin makes. This path used to skip
+    // it and toast "pinned" unconditionally, so below the safe width it
+    // reported success for a panel that fell back to a popover and never
+    // appeared -- an action with no visible result.
+    const outcome = resolvePin({
+      targetZone: placementToZone(edge),
+      rightZoneUnavailable: !isRightDockSafeAtWidth(windowWidth),
+    })
+    if (outcome.status === 'reject') {
+      toast.info(outcome.reason)
+      return
+    }
     const replaced = layout.dock && layout.dock.kind !== kind ? layout.dock.kind : null
     openDock(kind, edge)
     // Only one panel can be pinned, so pinning a second one removes the first.

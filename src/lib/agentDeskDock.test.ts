@@ -8,6 +8,7 @@ import {ALL_DOCK_KINDS, ALL_DOCK_ZONES,
   dockKindLabel,
   maxDockSizeFor,
   resolveDrop,
+  resolvePin,
   resolveResponsiveMode,
   resolveSplitPresentation,
   shouldAutoHideRightDock,
@@ -277,5 +278,48 @@ describe('Split View stays usable when a dock squeezes it', () => {
     expect(resolveSplitPresentation(true, mode)).toBe('side-by-side')
     // 1000px across two panes clears the 360px minimum each.
     expect(1000 / 2).toBeGreaterThan(360)
+  })
+})
+
+/**
+ * Pinning and moving must agree about width. The pane popover's Pin used to
+ * skip the width check the toolbar's Move menu applies, so below the safe
+ * width it reported "pinned" for a panel that fell straight back to a
+ * popover and never appeared -- an action with no visible result.
+ */
+describe('resolvePin', () => {
+  it('refuses a right pin the window is too narrow to show, with a reason', () => {
+    const outcome = resolvePin({ targetZone: 'right', rightZoneUnavailable: true })
+    expect(outcome.status).toBe('reject')
+    if (outcome.status === 'reject') {
+      expect(outcome.reason).toContain('too narrow')
+    }
+  })
+
+  it('accepts a right pin once there is room', () => {
+    expect(resolvePin({ targetZone: 'right', rightZoneUnavailable: false })).toEqual({
+      status: 'accept',
+      zone: 'right',
+    })
+  })
+
+  /** Only the right edge competes with the conversation for width. */
+  it('accepts the other edges regardless of width', () => {
+    for (const zone of ['bottom', 'left-above', 'left-below'] as const) {
+      expect(resolvePin({ targetZone: zone, rightZoneUnavailable: true })).toEqual({
+        status: 'accept',
+        zone,
+      })
+    }
+  })
+
+  /**
+   * Pinning the first panel is exactly the case where nothing is pinned yet,
+   * so `resolvePin` must not inherit `resolveDrop`'s "there is no pinned
+   * panel to move" rejection.
+   */
+  it('pins the first panel even though nothing is pinned yet', () => {
+    expect(resolvePin({ targetZone: 'right', rightZoneUnavailable: false }).status).toBe('accept')
+    expect(resolveDrop({ targetZone: 'right', dock: null, rightZoneUnavailable: false }).status).toBe('reject')
   })
 })
