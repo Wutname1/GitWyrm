@@ -1142,8 +1142,32 @@ pub async fn delete_remote_branch(
             &["push", "--progress", "--delete", &remote, &refspec],
         )?;
 
-        // The push succeeded, so the branch is gone from the server. Dropping the
-        // tracking ref is bookkeeping: report success even if it is already absent.
+        // A zero exit is not proof the branch is gone. git's own refusals do exit
+        // non-zero, but a push routed through a wrapper, proxy or credential
+        // helper that swallows the child's status reports success having deleted
+        // nothing -- and the user is told three branches went away while they are
+        // all still on the server. Ask the remote directly instead of believing
+        // the exit code. Same rule the spec archive follows: verify the thing
+        // actually happened.
+        let still_there = run_streaming(
+            &app,
+            &repo_id,
+            Some(&path),
+            "ls-remote",
+            &["ls-remote", "--heads", &remote, &refspec],
+        )
+        .map(|out| !out.trim().is_empty());
+        // Only a definite "still listed" is a failure. If the check itself could
+        // not run, the push's own result stands rather than turning a working
+        // delete into a scary message.
+        if still_there.unwrap_or(false) {
+            return Err(AppError::Other(format!(
+                "{name} is still on {remote}. The delete reported success but the branch is still there."
+            )));
+        }
+
+        // Confirmed gone from the server. Dropping the tracking ref is
+        // bookkeeping: report success even if it is already absent.
         let repo = open.repo.lock().unwrap();
         if let Ok(mut branch) = repo.find_branch(&format!("{remote}/{name}"), BranchType::Remote) {
             let _ = branch.delete();

@@ -61,6 +61,15 @@ const RULES: Rule[] = [
     message: 'Nothing to stash -- your working tree is already clean.',
   },
   {
+    // The delete push exited clean but the branch is still listed on the remote.
+    // Rare, and always the host's or a wrapper's doing rather than a local
+    // problem -- but the user must not be told it worked when it did not.
+    match: (r) => r.includes('the delete reported success but the branch is still there'),
+    severity: 'warning',
+    message:
+      "The remote still has that branch, even though it accepted the request. Try again, or remove it on the website.",
+  },
+  {
     // Our own guard before anything that rewrites the working tree (merge,
     // cherry-pick, revert, branch switch, checkout, history rewrite). The tail
     // names the operation and varies, so match the stable opening. Without a

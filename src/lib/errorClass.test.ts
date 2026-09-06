@@ -155,3 +155,18 @@ describe('an operation refused because the working tree is dirty', () => {
     expect(message).not.toMatch(/working tree/i)
   })
 })
+
+describe('a remote delete that reported success but changed nothing', () => {
+  const RAW =
+    'feature-x is still on origin. The delete reported success but the branch is still there.'
+
+  it('tells the user the branch survived, without git jargon', () => {
+    const { message } = classifyError(new Error(RAW))
+    expect(message).toMatch(/still has that branch/i)
+    expect(message).not.toMatch(/refs\//)
+  })
+
+  it('is a warning: the host accepted it, so there is nothing local to fix', () => {
+    expect(classifyError(new Error(RAW)).severity).toBe('warning')
+  })
+})
