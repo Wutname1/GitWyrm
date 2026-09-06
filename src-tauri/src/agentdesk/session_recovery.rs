@@ -118,7 +118,21 @@ pub fn reconcile_executions(
         if !is_live_process_state(execution.state) {
             continue;
         }
-        if execution.conflict.is_some() {
+        // A lead holding a `proposed_graph` waits on a person exactly as a
+        // conflict does: the plan was proposed, the turn that produced it
+        // ended, and the process deregistered -- so it looks orphaned while
+        // being nothing of the sort. `recover_orphaned_executions` has always
+        // skipped both; this path skipped only the conflict, so opening a
+        // chat with a plan awaiting Start silently voided it.
+        //
+        // It voided it invisibly, which is the worst shape: the graph panel
+        // finds that lead by `proposed_graph` alone, so Start/Revise/Use solo
+        // still render -- but `Interrupted` is terminal (`graph::is_terminal`),
+        // so Start does nothing. A control that is visibly offered and cannot
+        // work is the Rule #1 failure, and losing a plan the person was about
+        // to approve is the "nothing lands automatically" promise breaking in
+        // the direction that costs work.
+        if execution.conflict.is_some() || execution.proposed_graph.is_some() {
             continue;
         }
         if is_live(&execution.execution_id) {
@@ -694,6 +708,84 @@ mod tests {
         assert_eq!(s.executions[0].state, SessionState::NeedsInput);
         assert_eq!(s.executions[1].state, SessionState::NeedsInput);
         assert_eq!(s.header.state, SessionState::NeedsInput);
+    }
+
+    /// The counterpart the test above never had. Both recovery paths decide
+    /// the same question -- "is this waiting on a person or on a process that
+    /// is gone?" -- and only one of them was pinned, which is exactly where
+    /// they drifted: the lazy path skipped a conflict but not a proposal, so
+    /// merely opening a chat whose plan was awaiting Start voided that plan.
+    ///
+    /// It voided it invisibly. The graph panel finds the awaiting lead by
+    /// `proposed_graph` alone, so Start still appears, while `Interrupted` is
+    /// terminal and Start does nothing.
+    #[test]
+    fn opening_a_chat_does_not_void_a_plan_waiting_on_start() {
+        let mut conflicted = helper("helper-1", SessionState::NeedsInput, Some("C:/wt/helper-1"));
+        conflicted.conflict = Some(crate::agentdesk::graph::IntegrationConflict {
+            path: "src/greet.rs".into(),
+            conflicting_with: "lead".into(),
+            base_text: "base".into(),
+            helper_text: "helper".into(),
+            integrated_text: "lead".into(),
+        });
+        let mut proposal = execution("lead", SessionState::NeedsInput);
+        proposal.proposed_graph = Some(crate::agentdesk::graph::ProposedGraph {
+            lead_summary: "Split the work".into(),
+            helpers: Vec::new(),
+            proposed_at: NOW.into(),
+        });
+        let mut executions = vec![proposal, conflicted];
+
+        let changed = reconcile_executions(&mut executions, never_live);
+
+        assert_eq!(changed, 0, "neither is orphaned -- both wait on a person");
+        assert_eq!(executions[0].state, SessionState::NeedsInput);
+        assert_eq!(executions[1].state, SessionState::NeedsInput);
+    }
+
+    /// The two paths must agree about what counts as waiting on a person, or
+    /// one of them loses work the other protects. Checked by running both
+    /// over the same records rather than by reading the two functions and
+    /// hoping -- which is how the divergence above survived 46 reviews.
+    #[test]
+    fn both_recovery_paths_protect_the_same_human_waits() {
+        for make in [
+            |e: &mut ExecutionRecord| {
+                e.conflict = Some(crate::agentdesk::graph::IntegrationConflict {
+                    path: "src/greet.rs".into(),
+                    conflicting_with: "lead".into(),
+                    base_text: "base".into(),
+                    helper_text: "helper".into(),
+                    integrated_text: "lead".into(),
+                });
+            },
+            |e: &mut ExecutionRecord| {
+                e.proposed_graph = Some(crate::agentdesk::graph::ProposedGraph {
+                    lead_summary: "Split the work".into(),
+                    helpers: Vec::new(),
+                    proposed_at: NOW.into(),
+                });
+            },
+        ] {
+            let mut lazy = execution("lead", SessionState::NeedsInput);
+            make(&mut lazy);
+            let mut lazy_list = vec![lazy];
+            assert_eq!(
+                reconcile_executions(&mut lazy_list, never_live),
+                0,
+                "the lazy path changed a record that waits on a person"
+            );
+
+            let mut swept = execution("lead", SessionState::NeedsInput);
+            make(&mut swept);
+            let mut s = session_with(vec![swept]);
+            s.header.state = SessionState::NeedsInput;
+            assert!(
+                recover_orphaned_executions(&mut s, NOW, never_live, |_| Some(1)).is_empty(),
+                "the startup sweep recovered a record that waits on a person"
+            );
+        }
     }
 
     #[test]
