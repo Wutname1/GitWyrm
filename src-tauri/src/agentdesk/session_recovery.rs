@@ -37,17 +37,23 @@ pub fn is_live_process_state(state: SessionState) -> bool {
 
 /// Plain-language reason a non-expert can read for why a session ended up in
 /// [`SessionState::Interrupted`]. Not sent over the wire today -- the
-/// frontend owns this exact copy itself (`ConversationPane.tsx`, right next
-/// to the equally-frontend-owned "Getting ready…"/"Working…" strings for
-/// `Preparing`/`Working`), the same way every other `SessionState` is a bare
-/// tag with no backend-supplied display text. This constant exists so the
-/// wording has one canonical home in the backend for anyone changing
-/// `reconcile_header`'s behavior to check against, and is asserted against
-/// literally in this module's own tests
-/// (`the_interrupted_reason_is_plain_language_with_no_jargon`) so a drift
-/// between the two copies -- Rust doc comment vs. `ConversationPane.tsx`'s
-/// JSX -- has a place to be caught on the backend side, even though nothing
-/// automatically keeps the TypeScript string in sync.
+/// frontend owns this exact copy itself, the same way every other
+/// `SessionState` is a bare tag with no backend-supplied display text.
+///
+/// **Where the frontend copy lives: `src/lib/agentDeskResult.ts`**, in
+/// `runStoppedBadlyLabel`. This comment used to say `ConversationPane.tsx`,
+/// which is where it was *before* being pulled into shared code because the
+/// same sentence had been hand-written three times. That component now only
+/// calls `runStoppedBadlyLabel(state)`, so anyone following the old pointer
+/// found no string, and would reasonably conclude this constant was dead --
+/// defeating the one job the comment exists to do.
+///
+/// The constant exists so the wording has one canonical home in the backend
+/// for anyone changing `reconcile_header`'s behavior, and is asserted
+/// literally in this module's tests
+/// (`the_interrupted_reason_is_plain_language_with_no_jargon`) so drift has a
+/// place to be caught on the backend side. Nothing automatically keeps the
+/// TypeScript string in sync -- the two are checked by a person reading both.
 pub const INTERRUPTED_REASON: &str = "This chat stopped when the app closed.";
 
 /// What happened to one header when reconciliation ran. `Unchanged` is the

@@ -1632,11 +1632,41 @@ pub(crate) fn recover_orphaned_executions_at(
 /// first, flip the same records to `Interrupted`, and this sweep would then
 /// find nothing to recover while the helper's worktree stayed on disk.
 ///
-/// Only sessions whose header is still in a live-process state are read in
-/// full: the header mirrors the lead's state, and a helper only runs while
-/// its lead does, so a session that reads `Finished`/`Failed`/`Stopped` in
-/// the index has no execution this sweep would touch. That keeps the
-/// startup cost to one index load plus a session read per stuck session.
+/// A session is read in full when its header is still in a live-process
+/// state, **or** when it ever started an agent graph.
+///
+/// The header alone used to be the whole filter, justified by "a helper only
+/// runs while its lead does". That is not true. `stop_execution_at` with
+/// `StopScope::One` stops exactly one execution and then sets the header to
+/// `Stopped` regardless, so stopping a lead while three helpers are working
+/// leaves a terminal header above running helpers -- and
+/// `advance_graph_after_helper_completion` finishes the header the same way.
+/// Kill the app there and the sweep skipped the session entirely: those
+/// helpers' worktrees, holding real uncommitted work, were never inspected,
+/// never got a result, and never got a note. The lazy path does not save
+/// them either -- by design it never looks at a worktree -- so the work sat
+/// on disk with no route to Keep or discard. That is precisely the case this
+/// sweep exists for.
+///
+/// `graph_started_at` is the cheap index-side signal for "this session can
+/// have helpers": it is set once, when a graph is actually accepted and
+/// started (`agent_graph.rs`), and never cleared. Sessions that never ran a
+/// graph and whose header is terminal are still skipped, so the common case
+/// costs one index load and nothing more.
+/// Whether the startup sweep needs to open one session in full.
+///
+/// Split out from the loop so the selection rule is testable on its own: the
+/// loop needs an `AppHandle`, a store root and a lock registry, so every
+/// existing test called `recover_orphaned_executions_at` directly and this
+/// filter -- the part that decides whether recovery happens at all -- was
+/// never exercised by anything. That is where it went wrong.
+pub(crate) fn startup_sweep_should_read(
+    header_state: crate::agentdesk::model::SessionState,
+    ever_started_a_graph: bool,
+) -> bool {
+    crate::agentdesk::session_recovery::is_live_process_state(header_state) || ever_started_a_graph
+}
+
 pub(crate) fn recover_orphaned_executions_on_startup(app: &AppHandle) {
     use tauri::Manager;
 
@@ -1656,7 +1686,7 @@ pub(crate) fn recover_orphaned_executions_on_startup(app: &AppHandle) {
     for header in loaded
         .headers
         .iter()
-        .filter(|h| crate::agentdesk::session_recovery::is_live_process_state(h.state))
+        .filter(|h| startup_sweep_should_read(h.state, h.graph_started_at.is_some()))
     {
         let session_id = header.session_id.clone();
         let recovered = recover_orphaned_executions_at(&locks, &root, &session_id, |execution_id| {
@@ -1732,6 +1762,37 @@ mod tests {
             .filter(|m| m.role == crate::agentdesk::model::MessageRole::System)
             .map(|m| m.plain_content.clone())
             .collect()
+    }
+
+    /// The selection rule nothing was testing. Every other startup test
+    /// calls `recover_orphaned_executions_at` directly, so the filter that
+    /// decides whether a session is opened at all was never exercised -- and
+    /// it was wrong: it trusted "a helper only runs while its lead does",
+    /// which `StopScope::One` breaks by stopping one execution and marking
+    /// the header `Stopped` while siblings keep working.
+    #[test]
+    fn the_startup_sweep_still_opens_a_finished_session_that_ran_a_graph() {
+        use crate::agentdesk::model::SessionState;
+
+        // The case that was skipped: helpers may be stuck underneath.
+        for terminal in [SessionState::Stopped, SessionState::Finished, SessionState::Failed] {
+            assert!(
+                startup_sweep_should_read(terminal, true),
+                "{terminal:?} with a graph must still be opened -- its helpers can outlive it"
+            );
+        }
+
+        // Unchanged: a session that never ran a graph and is finished has
+        // nothing this sweep would touch, so it stays cheap.
+        for terminal in [SessionState::Stopped, SessionState::Finished, SessionState::Failed] {
+            assert!(!startup_sweep_should_read(terminal, false));
+        }
+
+        // And a live header is read whether or not a graph ever ran.
+        for live in [SessionState::Working, SessionState::Preparing, SessionState::NeedsInput] {
+            assert!(startup_sweep_should_read(live, false));
+            assert!(startup_sweep_should_read(live, true));
+        }
     }
 
     #[test]
