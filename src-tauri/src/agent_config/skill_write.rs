@@ -76,6 +76,10 @@ pub enum SkillCopyError {
     /// The destination already has a skill by this name and the caller did
     /// not ask to replace it.
     DestinationExists { path: String },
+    /// GitWyrm could not fingerprint the folder when it copied it, so it
+    /// cannot tell an untouched skill from one edited since. Refused rather
+    /// than deleted on an assumption.
+    VerificationUnavailable { path: String },
     /// The destination folder changed after the copy, so undoing would throw
     /// away whatever it changed into. Refused rather than restored.
     DestinationChanged { path: String },
@@ -96,6 +100,10 @@ impl SkillCopyError {
             }
             SkillCopyError::ReadFailed { detail, .. } => {
                 format!("That skill could not be read: {detail}")
+            }
+            SkillCopyError::VerificationUnavailable { .. } => {
+                "GitWyrm could not check whether that skill has changed since it was copied, so it                  was left alone. Delete it yourself if you want it gone."
+                    .into()
             }
             SkillCopyError::DestinationChanged { .. } => {
                 "That skill has been changed since GitWyrm copied it, so it was left alone.                  Putting it back would have thrown away those changes."
@@ -339,7 +347,29 @@ pub fn apply_skill_copy(
         files_written: written,
         // Best effort: a digest that cannot be computed leaves undo behaving
         // as before rather than refusing a copy that succeeded.
-        after_digest: folder_digest(&plan.destination_dir).ok(),
+        //
+        // That is safe only because of what sits above. The destination was
+        // emptied (`remove_dir_all`) and then written from `tree` -- the same
+        // tree `read_skill_tree` just passed through the file-count and size
+        // caps. So the folder being digested here is a fresh copy of a source
+        // that has already cleared those limits, and cannot trip them itself.
+        //
+        // If replacement ever becomes a merge instead of a delete-then-write,
+        // the destination could grow past a cap, `folder_digest` would start
+        // failing, and undo would silently stop checking whether the person
+        // edited the skill -- with nothing failing to say so.
+        // `a_replace_empties_the_destination_before_writing` guards that.
+        //
+        // The caps are not the only way to fail, though. This reads the
+        // folder GitWyrm has just written, and a file the destination app
+        // opens in that moment is a plain read failure -- the same lock this
+        // file already calls ordinary on Windows a few lines above. That is
+        // recorded rather than discarded: undo can then say it could not
+        // check, instead of deleting the folder as if it had.
+        after_digest: Some(
+            folder_digest(&plan.destination_dir)
+                .unwrap_or_else(|_| DIGEST_UNAVAILABLE.to_string()),
+        ),
     })
 }
 
@@ -361,6 +391,21 @@ fn roll_back(destination: &Path, backup: Option<&str>) {
         let _ = write_tree(&tree, destination);
     }
 }
+
+/// Recorded in place of a fingerprint when one could not be taken.
+///
+/// `None` on a receipt already means "written before fingerprints existed",
+/// and undo is deliberately permissive for those -- refusing every historical
+/// receipt would be worse. So a failure to fingerprint cannot also be `None`
+/// without inheriting that permission: it would silently mean "delete this
+/// folder without checking", which is the opposite of what not knowing
+/// should buy.
+///
+/// A real digest is a hex hash, so this cannot collide with one. Kept as a
+/// value rather than a third variant on the type because that type is
+/// persisted in receipts and crosses to the frontend: the distinction that
+/// matters is entirely inside this module.
+pub const DIGEST_UNAVAILABLE: &str = "unavailable";
 
 /// A single hash standing for a whole skill folder's contents.
 ///
@@ -400,6 +445,15 @@ pub fn undo_skill_copy(receipt: &SkillCopyReceipt) -> Result<(), SkillCopyError>
     // in exactly that case, which is what made the shared doc read as covering
     // both.
     if let Some(expected) = &receipt.after_digest {
+        // GitWyrm could not fingerprint this folder when it copied it, so it
+        // has no way to tell an untouched skill from one the person has since
+        // edited. Deleting it would be spending a measurement that was never
+        // taken; the folder is left alone and the person is told why.
+        if expected == DIGEST_UNAVAILABLE && destination.is_dir() {
+            return Err(SkillCopyError::VerificationUnavailable {
+                path: receipt.destination_dir.clone(),
+            });
+        }
         if destination.is_dir() {
             match folder_digest(&destination) {
                 Ok(actual) if &actual != expected => {
@@ -951,6 +1005,100 @@ Body
             read_skill_tree(&dir),
             Err(SkillCopyError::ReadFailed { .. })
         ));
+    }
+
+    /// Replacing empties the destination before writing.
+    ///
+    /// The undo edit-check depends on this. `after_digest` is computed with
+    /// `.ok()`, so a digest that cannot be produced silently disables that
+    /// check -- and the only reason it can always be produced is that the
+    /// destination is a fresh copy of a source that just cleared the file
+    /// and size caps.
+    ///
+    /// Turn replacement into a merge and that stops being true: the folder
+    /// could grow past a cap, the digest would start failing, and undo would
+    /// quietly stop noticing edits. Nothing else would fail. This does.
+    #[test]
+    fn a_replace_empties_the_destination_before_writing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = skill(tmp.path(), "demo");
+        let dest = tmp.path().join("dest").join("demo");
+        write(&dest, "SKILL.md", "mine
+");
+        write(&dest, "leftover.md", "only in the old one
+");
+        let backups = tmp.path().join("backups");
+        fs::create_dir_all(&backups).unwrap();
+
+        let plan = plan_skill_copy(&src, &dest).unwrap();
+        let receipt = apply_skill_copy(&plan, &backups, true).unwrap();
+
+        // Nothing of the old folder survives alongside the new one.
+        assert!(!dest.join("leftover.md").exists(), "the destination was merged, not replaced");
+
+        // And so the digest is always computable, which is what undo relies on.
+        assert!(
+            receipt.after_digest.is_some(),
+            "a copy that succeeded must always produce a fingerprint to undo against"
+        );
+    }
+
+    /// A copy that could not be fingerprinted must not be deleted as if it
+    /// had been.
+    ///
+    /// The fingerprint is taken by reading the folder GitWyrm has just
+    /// written, and a file the destination app opens in that moment is a
+    /// plain read failure -- the same lock this module already calls ordinary
+    /// on Windows. That used to be discarded into the same `None` that means
+    /// "this receipt predates fingerprints", which undo treats permissively,
+    /// so not knowing bought permission to delete.
+    #[test]
+    fn a_copy_that_could_not_be_fingerprinted_is_not_undone_blindly() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("dest");
+        write(&dest, "SKILL.md", "as copied");
+        let receipt = SkillCopyReceipt {
+            destination_dir: dest.to_string_lossy().into_owned(),
+            backup_dir: None,
+            files_written: 1,
+            after_digest: Some(DIGEST_UNAVAILABLE.to_string()),
+        };
+
+        assert!(matches!(
+            undo_skill_copy(&receipt),
+            Err(SkillCopyError::VerificationUnavailable { .. })
+        ));
+        // The folder is left exactly as it was.
+        assert_eq!(fs::read_to_string(dest.join("SKILL.md")).unwrap(), "as copied");
+    }
+
+    /// And the person is told what happened in words they can act on.
+    #[test]
+    fn the_unverifiable_refusal_says_what_to_do_about_it() {
+        let message = SkillCopyError::VerificationUnavailable { path: "x".into() }.plain();
+        assert!(message.contains("could not check"), "{message}");
+        assert!(message.contains("Delete it yourself"), "{message}");
+        for jargon in ["digest", "fingerprint", "hash", "receipt"] {
+            assert!(!message.to_lowercase().contains(jargon), "jargon in: {message}");
+        }
+    }
+
+    /// A successful copy still records a real fingerprint, so the ordinary
+    /// path is unaffected -- the refusal above must not become the norm.
+    #[test]
+    fn an_ordinary_copy_still_records_a_real_fingerprint() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = skill(tmp.path(), "demo");
+        let dest = tmp.path().join("dest").join("demo");
+        let backups = tmp.path().join("backups");
+        fs::create_dir_all(&backups).unwrap();
+
+        let plan = plan_skill_copy(&src, &dest).unwrap();
+        let receipt = apply_skill_copy(&plan, &backups, false).unwrap();
+
+        let digest = receipt.after_digest.clone().expect("a copy records one");
+        assert_ne!(digest, DIGEST_UNAVAILABLE);
+        undo_skill_copy(&receipt).expect("an unedited copy undoes cleanly");
     }
 
     #[test]
