@@ -170,7 +170,14 @@ impl AgentClientAdapter for ClaudeCodeAdapter {
         external_session_id: &str,
     ) -> Result<ExternalSessionDetail, AdapterError> {
         let projects_dir = Self::projects_dir(client);
-        let path = find_session_file(&projects_dir, external_session_id).ok_or_else(|| {
+        let matches = find_session_files(&projects_dir, external_session_id);
+        if matches.len() > 1 {
+            return Err(AdapterError::AmbiguousSession {
+                external_session_id: external_session_id.into(),
+                matches: matches.len() as u32,
+            });
+        }
+        let path = matches.into_iter().next().ok_or_else(|| {
             AdapterError::SessionNotFound {
                 external_session_id: external_session_id.into(),
             }
@@ -405,17 +412,32 @@ fn read_representative_version(home: &Path) -> Option<String> {
     None
 }
 
-fn find_session_file(projects_dir: &Path, external_session_id: &str) -> Option<PathBuf> {
-    let entries = std::fs::read_dir(projects_dir).ok()?;
-    for project_entry in entries.flatten() {
-        let candidate = project_entry
-            .path()
-            .join(format!("{external_session_id}.jsonl"));
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
+/// Every project folder holding a transcript with this id.
+///
+/// More than one is possible: Claude Code keeps one folder per project and
+/// the id is only as unique as whatever wrote it. Restoring a backup or
+/// copying a project folder produces two.
+///
+/// Collecting rather than returning the first is the same choice
+/// `vscode_copilot` makes, and for the same reason -- taking the first
+/// returned a real transcript that was simply not the one asked for, which
+/// nothing downstream could detect because the answer looked entirely
+/// valid. Claude Code's ids are UUIDs so a collision is far less likely
+/// than VS Code's, but "less likely" is not a reason for the two adapters
+/// to behave differently when it happens.
+fn find_session_files(projects_dir: &Path, external_session_id: &str) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(projects_dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .map(|project_entry| {
+            project_entry
+                .path()
+                .join(format!("{external_session_id}.jsonl"))
+        })
+        .filter(|candidate| candidate.is_file())
+        .collect()
 }
 
 #[cfg(test)]
@@ -467,6 +489,27 @@ mod tests {
         let listed = adapter.list_sessions(&client).unwrap();
         let row = listed.iter().find(|s| s.external_session_id == "moved-1").expect("listed");
         assert_eq!(row.updated_at, "2026-01-05T00:00:01Z");
+    }
+
+    /// Two transcripts sharing an id must not resolve to one of them.
+    ///
+    /// Claude Code's ids are UUIDs, so this is far less likely than the same
+    /// case in VS Code -- but "less likely" is not a reason for the two
+    /// adapters to behave differently when it happens, and taking the first
+    /// match returns a real transcript that is simply not the one asked for.
+    #[test]
+    fn two_transcripts_sharing_an_id_are_refused_rather_than_guessed() {
+        let dir = fixtures::claude_code::duplicate_id_fixture();
+        let adapter = ClaudeCodeAdapter::at(dir.path().to_path_buf());
+        let client = adapter.detect().unwrap().expect("fixture is supported");
+
+        match adapter.read_session(&client, "dup") {
+            Err(AdapterError::AmbiguousSession { external_session_id, matches }) => {
+                assert_eq!(external_session_id, "dup");
+                assert_eq!(matches, 2);
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        }
     }
 
     #[test]

@@ -86,6 +86,27 @@ pub fn moved_directory_fixture() -> TempDir {
     dir
 }
 
+/// The same transcript id under two project folders.
+///
+/// Claude Code keeps one folder per project; restoring a backup or copying a
+/// project folder reproduces an id under both.
+pub fn duplicate_id_fixture() -> TempDir {
+    let dir = TempDir::new().unwrap();
+    let session_id = "dup";
+    for (folder, cwd, text) in [
+        ("C--code-first", "C:/code/first", "in the first project"),
+        ("C--code-second", "C:/code/second", "in the second project"),
+    ] {
+        write_session(
+            dir.path(),
+            folder,
+            session_id,
+            &[user_line(session_id, cwd, "2.1.215", text, "2026-01-01T00:00:01Z")],
+        );
+    }
+    dir
+}
+
 pub fn unsupported_version_fixture() -> TempDir {
     let dir = TempDir::new().unwrap();
     let session_id = "00000000-0000-0000-0000-000000000099";
