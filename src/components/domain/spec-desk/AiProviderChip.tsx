@@ -17,19 +17,43 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { TooltipHint } from '@/components/ui/tooltip'
+import { aiChipNoun, aiChipOffDescription, aiChipScopeNote, type AiChipScope } from '@/lib/aiChipScope'
 
 /**
- * Which AI the Desk would use, and the switch for it, in the titlebar.
+ * Which AI writes for you, and the switch for it, in the titlebar.
  *
- * The single trust anchor for every AI action in this window: whatever the rail
- * offers, this says who would do it. It is deliberately always present -- a
- * missing chip would leave "is an AI involved here?" unanswered.
+ * It is deliberately always present -- a missing chip would leave "is an AI
+ * involved here?" unanswered.
  *
  * It is also the control. With one provider set up a click turns the AI off and
  * on; with several it opens a picker. Turning off never touches credentials, so
  * it is a switch rather than a way to lose a sign-in.
+ *
+ * **Scope.** This is the one global setting behind everything GitWyrm writes
+ * for you: commit messages, spec drafts, conflict help, and Agent Desk's own
+ * "send this result back to the spec" (`ResultReviewPanel`, which runs on
+ * exactly this provider). It is NOT what an Agent Desk chat sends to -- each
+ * chat picks its own backend beside its message box, and nothing on that path
+ * reads this switch.
+ *
+ * That distinction has to be visible, not merely true. This chip used to
+ * describe itself as the trust anchor for every AI action in the window,
+ * while a chat beneath it could be running on a different provider entirely,
+ * or running at all with the chip reading "off". `scope="writing"` is what
+ * Agent Desk passes to say which of the two questions this answers.
  */
-export function AiProviderChip({ repoId }: { repoId: string | null }) {
+export function AiProviderChip({
+  repoId,
+  scope = 'all',
+}: {
+  repoId: string | null
+  /**
+   * `all` -- this window has one AI and the chip speaks for it (Spec Desk).
+   * `writing` -- this window also has per-chat AI, so the chip names only
+   * what GitWyrm writes for you and says so.
+   */
+  scope?: AiChipScope
+}) {
   const ai = useSpecAi()
   const run = useAiRun(repoId)
   const aiEnabled = useWorkspaceStore((s) => s.aiEnabled)
@@ -44,27 +68,38 @@ export function AiProviderChip({ repoId }: { repoId: string | null }) {
   // provider the click is the whole interaction.
   const multi = ai.providers.length > 1
 
+  // In a window that also has per-chat AI, the chip has to say which of the
+  // two it means -- otherwise it reads as the answer to "what will my chat
+  // send to?", which it is not.
+  const writingScoped = scope === 'writing'
+  const noun = aiChipNoun(scope)
+  // Appended to every tooltip in this window, so the boundary is stated
+  // wherever someone stops to ask what the chip governs.
+  const scopeNote = aiChipScopeNote(scope)
+
   if (ai.providers.length === 0) {
     return (
-      <TooltipHint label="No AI is set up. Click to add one.">
+      <TooltipHint label={`No AI is set up for writing. Click to add one.${scopeNote}`}>
         <ChipButton
           state={ai.state}
-          label="AI · not set up"
+          label={`${noun} · not set up`}
           onClick={() => void openAiSettings()}
         />
       </TooltipHint>
     )
   }
 
-  const label = finishing ? 'AI · finishing run' : chipLabel(ai, aiEnabled)
+  const label = finishing
+    ? `${noun} · finishing run`
+    : chipLabel(ai, aiEnabled, noun)
 
   if (!multi) {
     return (
       <TooltipHint
         label={
           aiEnabled
-            ? `Runs use ${ai.provider}. Click to turn the AI off.`
-            : `${ai.providerShort} stays set up. Click to turn the AI back on.`
+            ? `${writingScoped ? 'GitWyrm writes commit messages, spec drafts and conflict help with' : 'Runs use'} ${ai.provider}. Click to turn it off.${scopeNote}`
+            : `${ai.providerShort} stays set up. Click to turn it back on.${scopeNote}`
         }
       >
         <ChipButton
@@ -74,14 +109,14 @@ export function AiProviderChip({ repoId }: { repoId: string | null }) {
             const next = !aiEnabled
             setAiEnabled(next)
             if (next) {
-              toast.success(`AI is on. ${ai.providerShort} is ready.`)
+              toast.success(`${noun} is on. ${ai.providerShort} is ready.`)
             } else if (isActive(run.state)) {
               toast.info('AI is off. The run in progress will finish.', {
                 description: `Stop it from the run console if you want it to end now. ${ai.providerShort} stays signed in.`,
               })
             } else {
-              toast.info('AI is off.', {
-                description: `${ai.providerShort} stays signed in. Copying handoffs still works.`,
+              toast.info(`${noun} is off.`, {
+                description: aiChipOffDescription(scope, ai.providerShort),
               })
             }
           }}
@@ -95,28 +130,28 @@ export function AiProviderChip({ repoId }: { repoId: string | null }) {
   // the trigger's click handler never reaches it and the menu stops opening.
   return (
     <DropdownMenu>
-      <TooltipHint label="Choose which AI to use, or turn it off.">
+      <TooltipHint
+        label={`Choose which AI writes for you, or turn it off.${scopeNote}`}
+      >
         <DropdownMenuTrigger asChild>
           <ChipButton state={ai.state} label={label} />
         </DropdownMenuTrigger>
       </TooltipHint>
       <DropdownMenuContent align="end" className="w-64">
-        <ProviderItems />
+        <ProviderItems writingScoped={writingScoped} />
         <DropdownMenuSeparator />
         <DropdownMenuItem
           onSelect={() => {
             setAiEnabled(false)
             toast.info(
-              isActive(run.state) ? 'AI is off. The run in progress will finish.' : 'AI is off.',
-              {
-                description: 'Your providers stay signed in. Copying handoffs still works.',
-              }
+              isActive(run.state) ? `${noun} is off. The run in progress will finish.` : `${noun} is off.`,
+              { description: aiChipOffDescription(scope, ai.providerShort) }
             )
           }}
           disabled={!aiEnabled}
         >
           <Power />
-          Turn AI off
+          {`Turn ${noun.toLowerCase()} off`}
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={() => void openAiSettings()}>
           <Settings2 />
@@ -134,7 +169,7 @@ export function AiProviderChip({ repoId }: { repoId: string | null }) {
  * statement of intent than the off switch it overrides, and leaving it off after
  * an explicit pick would read as the click being ignored.
  */
-function ProviderItems() {
+function ProviderItems({ writingScoped }: { writingScoped: boolean }) {
   const ai = useSpecAi()
   const catalog = useAiCatalog()
   const aiProvider = useWorkspaceStore((s) => s.aiProvider)
@@ -151,7 +186,9 @@ function ProviderItems() {
 
   return (
     <>
-      <DropdownMenuLabel className="text-2xs text-sub">Use this AI</DropdownMenuLabel>
+      <DropdownMenuLabel className="text-2xs text-sub">
+        {writingScoped ? 'Use this for writing help' : 'Use this AI'}
+      </DropdownMenuLabel>
       {named.map((p) => {
         const current = aiEnabled && p.id === aiProvider
         return (
@@ -178,11 +215,15 @@ function ProviderItems() {
   )
 }
 
-function chipLabel(ai: ReturnType<typeof useSpecAi>, enabled: boolean): string {
-  if (!enabled) return 'AI · off'
+function chipLabel(
+  ai: ReturnType<typeof useSpecAi>,
+  enabled: boolean,
+  noun: string
+): string {
+  if (!enabled) return `${noun} · off`
   if (ai.state === 'reconnect') return `${ai.providerShort} · reconnect`
   if (ai.state === 'ready') return `${ai.provider}${ai.model ? ` · ${ai.model}` : ''}`
-  return ai.provider || 'AI · not set up'
+  return ai.provider || `${noun} · not set up`
 }
 
 interface ChipButtonProps extends ComponentPropsWithoutRef<'button'> {

@@ -73,7 +73,7 @@ export function AgentDeskTitleBar({
         <Button size="sm" variant="secondary" onClick={onNewChat} disabled={!repoId}>
           New chat
         </Button>
-        <AiProviderChip repoId={repoId} />
+        <AiProviderChip repoId={repoId} scope="writing" />
         <div className="flex h-full items-stretch">
           <WindowControls />
         </div>
