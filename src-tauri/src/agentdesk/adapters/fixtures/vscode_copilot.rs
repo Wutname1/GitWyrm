@@ -64,6 +64,30 @@ pub fn no_sessions_fixture() -> TempDir {
     dir
 }
 
+/// The same session id under two workspace folders.
+///
+/// VS Code keeps one folder per workspace and does not promise ids are
+/// unique across them; a restored backup, a synced profile or a cloned
+/// machine reproduces one.
+pub fn duplicate_id_fixture() -> TempDir {
+    let dir = TempDir::new().unwrap();
+    write_session_file(
+        &dir,
+        "hash0001",
+        "dup",
+        &session_json("dup", "In the first project", 1_700_000_000_000),
+        true,
+    );
+    write_session_file(
+        &dir,
+        "hash0002",
+        "dup",
+        &session_json("dup", "In the second project", 1_700_000_009_000),
+        true,
+    );
+    dir
+}
+
 pub fn corrupt_session_fixture() -> TempDir {
     let dir = TempDir::new().unwrap();
     write_session_file(&dir, "hash0001", "corrupt", "{ not valid json", false);

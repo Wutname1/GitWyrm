@@ -190,6 +190,14 @@ export function explainImportOutcome(
       return { message: `${client} is not on this computer any more.`, ok: false }
     case 'sessionNotFound':
       return { message: `${client} no longer has that chat.`, ok: false }
+    // Not a damaged file, and saying so would send someone hunting for a
+    // fault that is not there. The other tool reused one id across two of
+    // its own folders, which a restored backup or a synced profile can do.
+    case 'ambiguousSession':
+      return {
+        message: `${client} has two saved chats with the same name for GitWyrm, so it cannot tell which one you meant.`,
+        ok: false,
+      }
     case 'corruptSession':
       return { message: `That chat's file could not be read: ${outcome.detail}`, ok: false }
     case 'writeFailed':
@@ -234,6 +242,8 @@ function explainAdapterError(error: AdapterError): string {
       return `One of that tool's saved chats could not be read: ${error.detail}`
     case 'sessionNotFound':
       return 'That chat is no longer in the other tool.'
+    case 'ambiguousSession':
+      return 'That tool has two saved chats GitWyrm cannot tell apart, so it did not guess.'
     case 'timedOut':
       return 'That tool took too long to answer. It may be busy.'
     case 'io':

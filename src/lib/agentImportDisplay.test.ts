@@ -210,6 +210,27 @@ describe('adapterDisplayName', () => {
 })
 
 describe('explainImportOutcome', () => {
+  /**
+   * Two saved chats sharing one id is not a damaged file. Saying "could not
+   * be read" would send someone hunting for a fault that is not there --
+   * the other tool simply reused an id across two of its own folders, which
+   * a restored backup or a synced profile can do.
+   */
+  it('does not call two chats with the same id a damaged file', () => {
+    const { message, ok } = explainImportOutcome({ kind: 'ambiguousSession' }, 'Fix login', 'vs-code-copilot')
+    expect(ok).toBe(false)
+    expect(message).not.toMatch(/could not be read|corrupt|damaged/i)
+    expect(message).toMatch(/cannot tell which one/i)
+  })
+
+  /** Rule #2: read by someone who does not know what any of this is called. */
+  it('explains it without naming anything internal', () => {
+    const { message } = explainImportOutcome({ kind: 'ambiguousSession' }, 'Fix login', 'vs-code-copilot')
+    for (const word of ['session', 'adapter', 'id ', 'workspace hash', 'JSON']) {
+      expect(message.toLowerCase()).not.toContain(word.toLowerCase())
+    }
+  })
+
   const session = {} as never
 
   it('distinguishes a refresh that brought something from one that brought nothing', () => {

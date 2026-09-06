@@ -3947,7 +3947,24 @@ export type AcceptStaleOpenSpecContextOutcome =
  * Why an adapter could not do what was asked. Every variant here is a real,
  * distinguishable next action -- never a bare string the UI has to sniff.
  */
-export type AdapterError = { kind: "clientNotDetected" } | { kind: "unsupportedVersion"; found: string; supportedRange: string } | { kind: "missingPath"; path: string } | { kind: "corruptSession"; detail: string } | { kind: "sessionNotFound"; externalSessionId: string } | { kind: "timedOut"; millis: number } | { kind: "io"; detail: string }
+export type AdapterError = { kind: "clientNotDetected" } | { kind: "unsupportedVersion"; found: string; supportedRange: string } | { kind: "missingPath"; path: string } | { kind: "corruptSession"; detail: string } | { kind: "sessionNotFound"; externalSessionId: string } | 
+/**
+ * More than one saved conversation carries this id, so which one was
+ * meant cannot be worked out.
+ * 
+ * Ids are only promised unique by the client that wrote them, and some
+ * do not manage it: VS Code keeps one folder per workspace, and a
+ * restored backup, a synced settings profile or a cloned machine can
+ * reproduce the same id under two of them. Picking the first match
+ * returned a real conversation that was simply not the one asked for,
+ * which nothing downstream could detect.
+ * 
+ * Refusing is not a fix -- those conversations become unimportable
+ * rather than wrongly importable -- but it is honest, and it is the
+ * half that can be done without changing the id, which is a key already
+ * written to disk for everything imported so far.
+ */
+{ kind: "ambiguousSession"; externalSessionId: string; matches: number } | { kind: "timedOut"; millis: number } | { kind: "io"; detail: string }
 /**
  * One adapter's row for the detected-clients UI (task 4.1): identity,
  * whether its capability flag is on, and its detection outcome. Detection
@@ -5747,7 +5764,17 @@ export type ImportSessionOutcome =
  * The session had already been imported before; only messages newer
  * than the ledger's dedup anchor (task 2.3) were appended, if any.
  */
-{ kind: "refreshed"; session: AgentSession; newMessageCount: number } | { kind: "adapterDisabled" } | { kind: "clientNotDetected" } | { kind: "sessionNotFound" } | { kind: "corruptSession"; detail: string } | { kind: "writeFailed"; detail: string }
+{ kind: "refreshed"; session: AgentSession; newMessageCount: number } | { kind: "adapterDisabled" } | { kind: "clientNotDetected" } | { kind: "sessionNotFound" } | 
+/**
+ * More than one saved conversation in the other tool carries this id,
+ * so GitWyrm cannot tell which was meant.
+ * 
+ * Separate from `CorruptSession`: nothing is damaged. The other tool
+ * simply reused an id across two of its own folders, which a restored
+ * backup or a synced profile can do. Calling that corruption would send
+ * someone looking for a broken file that is not broken.
+ */
+{ kind: "ambiguousSession" } | { kind: "corruptSession"; detail: string } | { kind: "writeFailed"; detail: string }
 /**
  * What happened when an install was attempted.
  * 

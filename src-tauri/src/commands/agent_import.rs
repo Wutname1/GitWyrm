@@ -336,6 +336,14 @@ pub enum ImportSessionOutcome {
     AdapterDisabled,
     ClientNotDetected,
     SessionNotFound,
+    /// More than one saved conversation in the other tool carries this id,
+    /// so GitWyrm cannot tell which was meant.
+    ///
+    /// Separate from `CorruptSession`: nothing is damaged. The other tool
+    /// simply reused an id across two of its own folders, which a restored
+    /// backup or a synced profile can do. Calling that corruption would send
+    /// someone looking for a broken file that is not broken.
+    AmbiguousSession,
     CorruptSession {
         detail: String,
     },
@@ -385,6 +393,7 @@ fn import_session_at(
     let detail = match adapter.read_session(&detected, external_session_id) {
         Ok(d) => d,
         Err(AdapterError::SessionNotFound { .. }) => return ImportSessionOutcome::SessionNotFound,
+        Err(AdapterError::AmbiguousSession { .. }) => return ImportSessionOutcome::AmbiguousSession,
         Err(AdapterError::CorruptSession { detail }) => {
             return ImportSessionOutcome::CorruptSession { detail }
         }

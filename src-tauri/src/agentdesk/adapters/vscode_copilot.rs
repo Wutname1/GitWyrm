@@ -222,15 +222,33 @@ impl AgentClientAdapter for VsCodeCopilotAdapter {
         external_session_id: &str,
     ) -> Result<ExternalSessionDetail, AdapterError> {
         let workspace_storage = Self::workspace_storage_dir(client);
-        let (path, workspace_hash_dir) = find_all_session_files(&workspace_storage)
+        // Every match, not the first. VS Code keeps one folder per workspace
+        // and does not promise ids are unique across them -- a restored
+        // backup, a synced profile or a cloned machine reproduces the same id
+        // under two folders. Taking the first returned a real conversation
+        // that was simply not the one asked for, and the listing showed both
+        // rows as separate conversations, so clicking either opened the same
+        // one with the other's name on it. Nothing downstream could tell.
+        let matches: Vec<_> = find_all_session_files(&workspace_storage)
             .into_iter()
-            .find(|(p, _)| {
+            .filter(|(p, _)| {
                 file_stem(p) == external_session_id
                     || session_id_in_file(p).as_deref() == Some(external_session_id)
             })
-            .ok_or_else(|| AdapterError::SessionNotFound {
+            .collect();
+        if matches.len() > 1 {
+            return Err(AdapterError::AmbiguousSession {
                 external_session_id: external_session_id.into(),
-            })?;
+                matches: matches.len() as u32,
+            });
+        }
+        let (path, workspace_hash_dir) =
+            matches
+                .into_iter()
+                .next()
+                .ok_or_else(|| AdapterError::SessionNotFound {
+                    external_session_id: external_session_id.into(),
+                })?;
 
         let contents = read_foreign_file_to_string(&path)?;
         let parsed: ChatSessionFile = serde_json::from_str(&contents).map_err(|e| {
@@ -660,6 +678,42 @@ mod tests {
             model_id: None,
         }];
         assert_eq!(count_messages(&empty_reply), 1);
+    }
+
+    /// Two conversations sharing an id must not resolve to one of them.
+    ///
+    /// The listing shows both as separate rows, with different projects, so
+    /// picking the first match returned a real conversation that was simply
+    /// not the one clicked -- and nothing downstream could tell, because the
+    /// answer looked entirely valid. Refusing does not rescue those two
+    /// conversations, but it stops GitWyrm quietly opening the wrong one.
+    #[test]
+    fn two_conversations_sharing_an_id_are_refused_rather_than_guessed() {
+        let dir = fixtures::vscode_copilot::duplicate_id_fixture();
+        let adapter = VsCodeCopilotAdapter::at(dir.path().to_path_buf());
+        let client = adapter.detect().unwrap().expect("fixture is supported");
+
+        // Both are offered, because both genuinely exist.
+        let listed = adapter.list_sessions(&client).unwrap();
+        assert_eq!(listed.iter().filter(|s| s.external_session_id == "dup").count(), 2);
+
+        match adapter.read_session(&client, "dup") {
+            Err(AdapterError::AmbiguousSession { external_session_id, matches }) => {
+                assert_eq!(external_session_id, "dup");
+                assert_eq!(matches, 2);
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+    }
+
+    /// One conversation with that id still opens exactly as before.
+    #[test]
+    fn a_single_match_is_unaffected_by_the_ambiguity_check() {
+        let dir = fixtures::vscode_copilot::supported_fixture();
+        let adapter = VsCodeCopilotAdapter::at(dir.path().to_path_buf());
+        let client = adapter.detect().unwrap().expect("fixture is supported");
+        let detail = adapter.read_session(&client, "session-fixture-0001").unwrap();
+        assert!(!detail.messages.is_empty());
     }
 
     #[test]

@@ -143,6 +143,26 @@ pub enum AdapterError {
     #[error("session {external_session_id} was not found")]
     #[serde(rename_all = "camelCase")]
     SessionNotFound { external_session_id: String },
+    /// More than one saved conversation carries this id, so which one was
+    /// meant cannot be worked out.
+    ///
+    /// Ids are only promised unique by the client that wrote them, and some
+    /// do not manage it: VS Code keeps one folder per workspace, and a
+    /// restored backup, a synced settings profile or a cloned machine can
+    /// reproduce the same id under two of them. Picking the first match
+    /// returned a real conversation that was simply not the one asked for,
+    /// which nothing downstream could detect.
+    ///
+    /// Refusing is not a fix -- those conversations become unimportable
+    /// rather than wrongly importable -- but it is honest, and it is the
+    /// half that can be done without changing the id, which is a key already
+    /// written to disk for everything imported so far.
+    #[error("more than one saved conversation has the id {external_session_id}")]
+    #[serde(rename_all = "camelCase")]
+    AmbiguousSession {
+        external_session_id: String,
+        matches: u32,
+    },
     #[error("reading timed out after {millis}ms")]
     TimedOut { millis: u32 },
     #[error("could not read: {detail}")]
