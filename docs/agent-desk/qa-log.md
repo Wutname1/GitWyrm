@@ -229,3 +229,9 @@ competing sub-agents, the answer names the losing option too.
 | 220 | 2026-09-09 | Did folders on Mac and Linux match at all? | No -- their leading slash was being stripped, so every one of them became a relative path that matched nothing. |
 | 221 | 2026-09-09 | Should a sub-agent asked not to edit files be trusted to leave the tree clean? | No -- one left throwaway tests behind and they were swept into a commit, so staged paths must be named rather than added wholesale. |
 | 222 | 2026-09-09 | Did anything catch that mistake? | Yes -- the repository's own rule that no import code may write files failed immediately, which is what that rule is for. |
+| 223 | 2026-09-10 | Was the message count shown before opening an imported conversation real? | No -- it doubled the number of turns, but a turn makes one to three messages, so it was wrong in both directions. |
+| 224 | 2026-09-10 | Should the count be recalculated separately from the messages themselves? | No -- checking found the two would still disagree on an edge case, so both now share one piece of counting. |
+| 225 | 2026-09-10 | Should one unreadable byte refuse a whole conversation? | No -- the listing already survives a bad line, so refusing to open lost every message including the ones just shown. |
+| 226 | 2026-09-10 | Should a conversation with no date of its own be given an optional date? | No -- that is seventeen places across four adapters and improves nothing until the display changes too, which both arguments agreed on. |
+| 227 | 2026-09-10 | Where does a made-up date actually become visible? | At one boundary, where it is copied onto a chat and shown as an age, so that is the single place it is now stopped. |
+| 228 | 2026-09-10 | What did a conversation with no recorded date look like? | It read "56y" in the chat list -- a confident measurement of something GitWyrm was never told. |
