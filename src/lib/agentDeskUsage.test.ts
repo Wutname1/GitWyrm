@@ -104,19 +104,17 @@ describe('buildUsageRows', () => {
       sessionTokens: { value: 31000, source: 'measured' },
       sessionRequests: { value: 7, source: 'measured' },
     }
-    const rows = buildUsageRows(usage)
-    expect(rows).toHaveLength(1)
-    expect(rows[0].label).toBe('Current session')
-    expect(rows[0].value).toContain('31k tokens')
-    expect(rows[0].value).toContain('7 turns')
-    expect(rows[0].isEstimate).toBe(false)
+    const row = buildUsageRows(usage).find((r) => r.key === 'session')!
+    expect(row.label).toBe('Current session')
+    expect(row.value).toContain('31k tokens')
+    expect(row.value).toContain('7 turns')
+    expect(row.isEstimate).toBe(false)
   })
 
   it('shows tokens alone when requests are not measured', () => {
     const usage: SessionUsage = { ...EMPTY, sessionTokens: { value: 1200, source: 'measured' } }
-    const rows = buildUsageRows(usage)
-    expect(rows).toHaveLength(1)
-    expect(rows[0].value).toBe('1.2k tokens')
+    const row = buildUsageRows(usage).find((r) => r.key === 'session')!
+    expect(row.value).toBe('1.2k tokens')
   })
 
   it('marks a row as an estimate when its source is estimated', () => {
@@ -124,10 +122,9 @@ describe('buildUsageRows', () => {
       ...EMPTY,
       sessionCostUsd: { value: 0.42, source: 'estimated' },
     }
-    const rows = buildUsageRows(usage)
-    expect(rows).toHaveLength(1)
-    expect(rows[0].isEstimate).toBe(true)
-    expect(rows[0].value).toBe('$0.42')
+    const row = buildUsageRows(usage).find((r) => r.key === 'cost')!
+    expect(row.isEstimate).toBe(true)
+    expect(row.value).toBe('$0.42')
   })
 
   it('does not mark a measured or provider-reported row as an estimate', () => {
@@ -225,11 +222,45 @@ describe('buildUsageRows', () => {
     expect(buildUsageRows(usage)).toEqual([])
   })
 
+  /**
+   * No AI tool GitWyrm talks to reports a plan allowance today, so the row
+   * used to be omitted entirely -- answering "how much have I got left?"
+   * with silence, which reads as "nothing to say" rather than "GitWyrm
+   * cannot see this".
+   */
+  it('says the allowance is not reported rather than leaving it out', () => {
+    const usage: SessionUsage = { ...EMPTY, sessionTokens: { value: 1200, source: 'measured' } }
+    const row = buildUsageRows(usage).find((r) => r.key === 'planLimit')!
+    expect(row.value).toBe('not reported')
+    // Not an estimate: GitWyrm is not guessing, it simply was not told.
+    expect(row.isEstimate).toBe(false)
+  })
+
+  it('shows the real allowance instead of the not-reported line when one arrives', () => {
+    const usage: SessionUsage = {
+      ...EMPTY,
+      sessionTokens: { value: 1200, source: 'measured' },
+      planLimit: { value: 2409, source: 'providerReported' },
+    }
+    const rows = buildUsageRows(usage).filter((r) => r.key === 'planLimit')
+    expect(rows).toHaveLength(1)
+    expect(rows[0].value).toBe('2,409')
+  })
+
+  /**
+   * A chat whose only row is "0 helpers active" has not run yet. Answering
+   * a question nobody has asked there is clutter, and the card's own empty
+   * state already covers a chat with nothing to show.
+   */
+  it('stays quiet about the allowance on a chat with no figures yet', () => {
+    const usage: SessionUsage = { ...EMPTY, activeHelperCount: 0 }
+    expect(buildUsageRows(usage).some((r) => r.key === 'planLimit')).toBe(false)
+  })
+
   it('formats the reset date without inventing a time-of-day claim', () => {
     const usage: SessionUsage = { ...EMPTY, planResetAt: '2026-09-01T00:00:00Z' }
-    const rows = buildUsageRows(usage)
-    expect(rows).toHaveLength(1)
-    expect(rows[0].label).toBe('Resets')
+    const row = buildUsageRows(usage).find((r) => r.key === 'resets')!
+    expect(row.label).toBe('Resets')
   })
 })
 

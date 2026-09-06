@@ -111,8 +111,11 @@ export function buildUsageRows(usage: SessionUsage): UsageRow[] {
     const remaining = Math.max(0, usage.planLimit.value)
     rows.push({
       key: 'planLimit',
-      label: 'Premium interactions',
-      value: `${formatCount(remaining)} left`,
+      // "Premium interactions" was one AI tool's own billing term and
+      // appeared nowhere else in the product. Someone who has never read
+      // that tool's pricing page cannot tell what it counts.
+      label: 'Allowance left',
+      value: formatCount(remaining),
       isEstimate: isEstimate(usage.planLimit),
     })
   }
@@ -134,6 +137,31 @@ export function buildUsageRows(usage: SessionUsage): UsageRow[] {
       value: Number.isNaN(t)
         ? usage.planResetAt
         : new Date(t).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }),
+      isEstimate: false,
+    })
+  }
+
+  // "How much of my allowance is left" is the question someone running a lot
+  // of agent work actually has, and no AI tool GitWyrm talks to reports it
+  // today. Omitting the row answered that question with silence, which reads
+  // as "there is nothing to say" rather than "GitWyrm cannot see this" --
+  // and silence is exactly what the unknown-stays-unknown rule exists to
+  // prevent.
+  //
+  // Only worth saying beside figures that were actually reported. A chat
+  // whose only row is "0 helpers active" has not run yet, and answering a
+  // question nobody has asked there is clutter rather than honesty -- the
+  // card's own empty state already covers a chat with nothing to show.
+  //
+  // Keyed off the rows built above rather than the raw fields, so a figure
+  // that was reported but produced no row (a context reading against a zero
+  // window, say) cannot drag this one onto an otherwise empty card.
+  const hasReportedFigures = rows.some((r) => r.key !== 'helpers')
+  if (!usage.planLimit && hasReportedFigures) {
+    rows.push({
+      key: 'planLimit',
+      label: 'Allowance left',
+      value: 'not reported',
       isEstimate: false,
     })
   }
