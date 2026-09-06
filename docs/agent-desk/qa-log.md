@@ -215,3 +215,10 @@ competing sub-agents, the answer names the losing option too.
 | 206 | 2026-09-07 | Was "this chat stopped when the app closed" always true? | No -- a run that failed on its own said the same thing, sending people to restart when the answer was in the agent's last words. |
 | 207 | 2026-09-07 | Does stopping the lead agent really stop its helpers? | No -- the chat is marked stopped while helpers keep working, so the assumption behind the startup tidy-up was false and their work was stranded. |
 | 208 | 2026-09-07 | Was the rule choosing which chats get tidied up ever tested? | No -- every test called the tidy-up directly and skipped the rule, which is how the wrong assumption survived. |
+| 209 | 2026-09-08 | Did "Tell the spec" report on the work you were looking at? | No -- with several agents it used whichever result sat last in the file, so reviewing one helper could write a spec update describing another's work. |
+| 210 | 2026-09-08 | Could work you undid still be written into the spec? | Yes -- the rule against it lived only in the window and was checked against a different result than the one used. |
+| 211 | 2026-09-08 | Should a rule about what may reach the spec be enforced in the window? | No -- it has to hold where the spec is actually reached, or it is a rule about nothing. |
+| 212 | 2026-09-08 | Was the agent's account of its work taken from the same agent as the file list? | No -- it took whichever agent spoke last, so two true halves could be presented as one story that never happened. |
+| 213 | 2026-09-08 | Is Stop ignored during the check that runs after an agent finishes? | No -- a review argued it was, but written as a test the stop is kept and the check receives it. |
+| 214 | 2026-09-08 | Should a disproved finding still leave something behind? | Yes -- the reasoning was believable and nothing was checking it, so the tests stay and pin the part that really is fragile. |
+| 215 | 2026-09-08 | Is a run only ever reported finished once? | No -- two places report it, and they cannot both happen today only by accident, so the safe behaviour is now pinned rather than claimed. |
