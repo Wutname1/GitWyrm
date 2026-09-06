@@ -123,7 +123,8 @@ impl SkillCopyError {
 ///
 /// A skill is documentation plus a few helpers. These bounds exist so a
 /// mistaken folder (a repository checked out inside a skills directory, say)
-/// is refused quickly instead of read into memory.
+/// is refused quickly instead of read into memory -- which means the size
+/// has to come from the directory entry, before the file is opened.
 const MAX_FILES: usize = 200;
 const MAX_TOTAL_BYTES: u64 = 8 * 1024 * 1024;
 
@@ -166,17 +167,27 @@ fn collect(
             continue;
         }
         let rel = relative_key(root, &path)?;
-        let bytes = std::fs::read(&path).map_err(|e| SkillCopyError::ReadFailed {
-            path: path.to_string_lossy().into_owned(),
-            detail: e.to_string(),
-        })?;
-        *total += bytes.len() as u64;
-        if out.len() >= MAX_FILES || *total > MAX_TOTAL_BYTES {
+        // Size is taken from the directory entry, BEFORE the file is read.
+        // This used to read the whole file into memory and only then compare
+        // against the cap, so a repository checked out inside a skills
+        // folder -- exactly the case the cap is documented to catch -- was
+        // pulled into memory a file at a time before being refused.
+        //
+        // The count check is unchanged and was already right: `out.len()` is
+        // how many are stored, so `>= MAX_FILES` refuses the one that would
+        // make it MAX_FILES + 1. Written as `+ 1 >` because that is what it
+        // means; a review read the original as off by one, and it is not.
+        *total += meta.len();
+        if out.len() + 1 > MAX_FILES || *total > MAX_TOTAL_BYTES {
             return Err(SkillCopyError::ReadFailed {
                 path: root.to_string_lossy().into_owned(),
                 detail: "this folder holds far more than a skill should".into(),
             });
         }
+        let bytes = std::fs::read(&path).map_err(|e| SkillCopyError::ReadFailed {
+            path: path.to_string_lossy().into_owned(),
+            detail: e.to_string(),
+        })?;
         let hash = hash_bytes(&bytes);
         out.insert(rel, SkillFile { bytes, hash });
     }
@@ -886,6 +897,60 @@ Body
         roll_back(&dest, None);
 
         assert!(!dest.exists());
+    }
+
+    /// The file cap is the cap. It used to compare the count BEFORE storing
+    /// the current file, so one more than the limit was accepted.
+    #[test]
+    fn a_folder_one_file_over_the_limit_is_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("toomany");
+        for i in 0..=MAX_FILES {
+            write(&dir, &format!("f{i}.md"), "x
+");
+        }
+        assert!(matches!(
+            read_skill_tree(&dir),
+            Err(SkillCopyError::ReadFailed { .. })
+        ));
+    }
+
+    /// Exactly the limit is fine -- a cap that refuses what it allows would
+    /// be its own defect.
+    #[test]
+    fn a_folder_exactly_at_the_limit_is_read() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("exact");
+        for i in 0..MAX_FILES {
+            write(&dir, &format!("f{i}.md"), "x
+");
+        }
+        assert_eq!(read_skill_tree(&dir).unwrap().files.len(), MAX_FILES);
+    }
+
+    /// A file bigger than the whole budget is refused.
+    ///
+    /// This pins the refusal, not the reason for it: the fix that matters is
+    /// that the size now comes from the directory entry so the file is never
+    /// read into memory first, and no unit test can see that -- it would
+    /// pass either way. Stated here so nobody later reads this as proof of
+    /// the memory behaviour.
+    #[test]
+    fn one_oversized_file_is_refused_by_its_recorded_size() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("big");
+        fs::create_dir_all(&dir).unwrap();
+        let big = dir.join("huge.bin");
+        let file = fs::File::create(&big).unwrap();
+        // Sparse where the filesystem supports it: the recorded length is
+        // over the cap while almost nothing is actually written.
+        file.set_len(MAX_TOTAL_BYTES + 1).unwrap();
+        drop(file);
+
+        assert!(matches!(
+            read_skill_tree(&dir),
+            Err(SkillCopyError::ReadFailed { .. })
+        ));
     }
 
     #[test]
