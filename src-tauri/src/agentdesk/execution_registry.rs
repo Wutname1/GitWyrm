@@ -102,12 +102,19 @@ impl ExecutionRegistry {
     }
 
     /// Removes an execution's registration and wakes anyone waiting on
-    /// [`Self::wait_for_stop`]. Called exactly once, from the spawned task's
-    /// own completion path (mirroring how `gate_answers()` is torn down
-    /// today), regardless of whether it ended by finishing, failing, or
-    /// being stopped -- an execution that is no longer running must not stay
-    /// reachable for a future Stop to (harmlessly, but confusingly) "succeed"
-    /// against.
+    /// [`Self::wait_for_stop`], regardless of whether it ended by finishing,
+    /// failing, or being stopped -- an execution that is no longer running
+    /// must not stay reachable for a future Stop to (harmlessly, but
+    /// confusingly) "succeed" against.
+    ///
+    /// **Idempotent, not called-once.** This used to claim it ran exactly
+    /// once, from the spawned task's own completion path. There are two call
+    /// sites: that one, and the watchdog that fires when the task panics
+    /// (`commands::agent_desk`). They are mutually exclusive today -- a
+    /// panic skips the first -- but nothing enforces that, and a task that is
+    /// cancelled rather than panicking would reach both. Calling it twice is
+    /// safe: the second call removes nothing and wakes nobody, which is
+    /// pinned by a test rather than left as a claim.
     pub fn complete(&self, session_id: &SessionId, execution_id: &ExecutionId) {
         let removed = self
             .inner
@@ -438,6 +445,32 @@ mod tests {
     /// Calling `stop()` more than once for the same execution (a duplicate
     /// Stop click landing while the first is still being processed) must
     /// stay a harmless no-op-ish repeat, never a panic or a double-complete.
+    #[tokio::test]
+    async fn finishing_the_same_execution_twice_is_harmless() {
+        // Two call sites reach `complete`: the spawned task's own end, and
+        // the watchdog that fires when that task panics. They are mutually
+        // exclusive today and nothing enforces it, so the safe behaviour is
+        // pinned here rather than asserted in a comment.
+        let registry = ExecutionRegistry::new();
+        let (session_id, execution_id) = ids("double-complete");
+        registry.register(session_id.clone(), execution_id.clone(), CancelHandle::new());
+
+        registry.complete(&session_id, &execution_id);
+        assert!(!registry.is_live(&session_id, &execution_id));
+
+        // The second call must not panic, resurrect the entry, or report
+        // anything different.
+        registry.complete(&session_id, &execution_id);
+        assert!(!registry.is_live(&session_id, &execution_id));
+
+        // And a Stop afterwards says plainly that there is nothing running,
+        // rather than succeeding against a ghost.
+        assert!(matches!(
+            registry.stop(&session_id, &execution_id),
+            StopOutcome::NotLive
+        ));
+    }
+
     #[tokio::test]
     async fn stopping_the_same_execution_twice_is_harmless() {
         let registry = ExecutionRegistry::new();
