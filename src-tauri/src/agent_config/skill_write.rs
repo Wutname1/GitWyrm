@@ -21,6 +21,9 @@
 //!   rather than writing a mixture of two versions.
 //! - **Undo restores exactly what was there**, including "there was nothing
 //!   here", which removes the copied folder rather than leaving an empty one.
+//!   Where an exact restore is not possible -- a symlink in the folder about
+//!   to be replaced, which cannot be copied faithfully -- the replacement is
+//!   refused up front rather than performed and half-restored later.
 //! - **Nothing escapes the destination root.** A skill folder is only ever
 //!   written inside the client's own skills directory.
 
@@ -397,20 +400,34 @@ pub fn undo_skill_copy(receipt: &SkillCopyReceipt) -> Result<(), SkillCopyError>
             }
         }
     }
+    // Read the backup BEFORE deleting anything. This used to delete the
+    // destination first and only then read the backup, so a backup that had
+    // gone missing -- cleared app data, a hand-deleted folder, a file
+    // quarantined by antivirus -- destroyed the copy and restored nothing,
+    // leaving neither version. And it said "That skill's folder is not there
+    // any more", which reads as "nothing happened".
+    let restore = match &receipt.backup_dir {
+        Some(backup) => Some(read_skill_tree(Path::new(backup))?),
+        None => None,
+    };
+
     if destination.is_dir() {
         std::fs::remove_dir_all(&destination).map_err(|e| SkillCopyError::WriteFailed {
             path: receipt.destination_dir.clone(),
             detail: e.to_string(),
         })?;
     }
-    let Some(backup) = &receipt.backup_dir else {
+    let Some(tree) = restore else {
         return Ok(());
     };
-    copy_tree(Path::new(backup), &destination)
+    write_tree(&tree, &destination)
 }
 
-fn copy_tree(from: &Path, to: &Path) -> Result<(), SkillCopyError> {
-    let tree = read_skill_tree(from)?;
+/// Write an already-read tree into `to`.
+///
+/// Split out of `copy_tree` so the restore can read its backup first and
+/// only then touch the destination -- the read is the part that can fail.
+fn write_tree(tree: &SkillTree, to: &Path) -> Result<(), SkillCopyError> {
     for (rel, file) in &tree.files {
         let target = safe_join(to, rel)?;
         if let Some(parent) = target.parent() {
@@ -427,7 +444,61 @@ fn copy_tree(from: &Path, to: &Path) -> Result<(), SkillCopyError> {
     Ok(())
 }
 
+/// Copy a folder GitWyrm is about to destroy, or put one back.
+///
+/// Deliberately NOT the same policy as reading a source skill.
+/// `read_skill_tree` skips symlinks and refuses a folder over the size caps
+/// -- correct for a folder the person chose to copy, and wrong for one they
+/// did not. Backing up with those rules silently omitted anything it would
+/// not copy, and the caller then deleted the original anyway: a symlink in
+/// someone's existing skill vanished, and Undo restored a folder that was
+/// not what had been there. The module promises "Undo restores exactly what
+/// was there", and this is the function that has to make that true.
+///
+/// So anything that cannot be copied faithfully is refused here rather than
+/// dropped. Refusing costs the person one copy; dropping costs them a file
+/// they never agreed to lose.
+fn copy_tree(from: &Path, to: &Path) -> Result<(), SkillCopyError> {
+    if let Some(unfaithful) = first_uncopyable(from)? {
+        return Err(SkillCopyError::WriteFailed {
+            path: unfaithful,
+            detail: "GitWyrm cannot copy this exactly, so it did not replace the folder".into(),
+        });
+    }
+    let tree = read_skill_tree(from)?;
+    write_tree(&tree, to)
+}
+
 /// Joins a relative key under `root`, refusing anything that would escape it.
+/// The first thing in `dir` that [`read_skill_tree`] would not carry across
+/// faithfully, if there is one.
+///
+/// Only symlinks today: the size caps already surface as a refusal from
+/// `read_skill_tree` itself, while a symlink is skipped in silence, which is
+/// the case that loses data without saying so.
+fn first_uncopyable(dir: &Path) -> Result<Option<String>, SkillCopyError> {
+    let entries = std::fs::read_dir(dir).map_err(|e| SkillCopyError::ReadFailed {
+        path: dir.to_string_lossy().into_owned(),
+        detail: e.to_string(),
+    })?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let meta = entry.metadata().map_err(|e| SkillCopyError::ReadFailed {
+            path: path.to_string_lossy().into_owned(),
+            detail: e.to_string(),
+        })?;
+        if meta.is_symlink() {
+            return Ok(Some(path.to_string_lossy().into_owned()));
+        }
+        if meta.is_dir() {
+            if let Some(found) = first_uncopyable(&path)? {
+                return Ok(Some(found));
+            }
+        }
+    }
+    Ok(None)
+}
+
 fn safe_join(root: &Path, rel: &str) -> Result<PathBuf, SkillCopyError> {
     let mut out = root.to_path_buf();
     for part in rel.split('/') {
@@ -641,6 +712,84 @@ mod tests {
         undo_skill_copy(&receipt).unwrap();
         assert_eq!(fs::read_to_string(dest.join("SKILL.md")).unwrap(), "mine\n");
         assert_eq!(fs::read_to_string(dest.join("notes.md")).unwrap(), "my notes\n");
+    }
+
+    /// A folder GitWyrm cannot copy faithfully must not be replaced.
+    ///
+    /// The backup was made with the same rules used to READ a skill, which
+    /// skip symlinks -- correct for a folder the person chose to copy, wrong
+    /// for one they did not. The backup reported success having quietly left
+    /// the link out, the original was deleted anyway, and Undo restored a
+    /// folder that was not what had been there.
+    ///
+    /// Creating a symlink needs privilege on Windows, which a test run does
+    /// not reliably have, so the check itself is tested directly here and
+    /// the end-to-end refusal is tested below only where a link can be made.
+    /// A test that silently skips is a test that has never caught anything.
+    #[test]
+    fn a_plain_folder_has_nothing_that_cannot_be_copied() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = skill(tmp.path(), "demo");
+        write(&dir, "references/api.md", "ref
+");
+        assert_eq!(first_uncopyable(&dir).unwrap(), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_folder_holding_a_link_is_reported_as_uncopyable() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = skill(tmp.path(), "demo");
+        let target = tmp.path().join("elsewhere.md");
+        fs::write(&target, "linked
+").unwrap();
+        if std::os::windows::fs::symlink_file(&target, dir.join("linked.md")).is_err() {
+            // No privilege for symlinks in this session; the direct check
+            // above still ran, and the refusal path is exercised wherever a
+            // link can actually be created.
+            return;
+        }
+        assert!(first_uncopyable(&dir).unwrap().is_some());
+
+        // And end to end: the folder it refused to back up is untouched.
+        let src = skill(tmp.path(), "source");
+        let backups = tmp.path().join("backups");
+        fs::create_dir_all(&backups).unwrap();
+        let plan = plan_skill_copy(&src, &dir).unwrap();
+        assert!(matches!(
+            apply_skill_copy(&plan, &backups, true),
+            Err(SkillCopyError::WriteFailed { .. })
+        ));
+        assert!(dir.join("linked.md").exists());
+    }
+
+    /// Undo must not destroy the copy when it cannot restore the original.
+    ///
+    /// It deleted the destination first and read the backup afterwards, so a
+    /// backup that had gone -- cleared app data, a hand-deleted folder, a
+    /// file quarantined by antivirus -- left neither version, and said "That
+    /// skill's folder is not there any more", which reads as nothing having
+    /// happened.
+    #[test]
+    fn undo_keeps_the_copy_when_the_backup_it_needs_has_gone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = skill(tmp.path(), "demo");
+        let dest = tmp.path().join("dest").join("demo");
+        write(&dest, "SKILL.md", "mine
+");
+        let backups = tmp.path().join("backups");
+        fs::create_dir_all(&backups).unwrap();
+
+        let plan = plan_skill_copy(&src, &dest).unwrap();
+        let receipt = apply_skill_copy(&plan, &backups, true).unwrap();
+        let backup_dir = receipt.backup_dir.clone().expect("a replace makes a backup");
+
+        // The backup goes missing between the copy and the Undo.
+        fs::remove_dir_all(&backup_dir).unwrap();
+
+        assert!(undo_skill_copy(&receipt).is_err());
+        // The copied skill is still there: better one version than none.
+        assert!(fs::read_to_string(dest.join("SKILL.md")).unwrap().contains("Body"));
     }
 
     #[test]
