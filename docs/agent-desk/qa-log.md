@@ -235,3 +235,7 @@ competing sub-agents, the answer names the losing option too.
 | 226 | 2026-09-10 | Should a conversation with no date of its own be given an optional date? | No -- that is seventeen places across four adapters and improves nothing until the display changes too, which both arguments agreed on. |
 | 227 | 2026-09-10 | Where does a made-up date actually become visible? | At one boundary, where it is copied onto a chat and shown as an age, so that is the single place it is now stopped. |
 | 228 | 2026-09-10 | What did a conversation with no recorded date look like? | It read "56y" in the chat list -- a confident measurement of something GitWyrm was never told. |
+| 229 | 2026-09-11 | Could clicking one imported chat open a different one? | Yes -- two chats sharing a name resolved to whichever the folder listing reached first, and the answer looked entirely valid. |
+| 230 | 2026-09-11 | Should the name be made unique to tell them apart? | No -- that name is the key GitWyrm stores to remember what it has already imported, so changing its shape would re-import everything as duplicates. |
+| 231 | 2026-09-11 | Is refusing to open them a fix? | No, and it is not claimed as one -- those two chats stay unimportable, but GitWyrm stops showing the wrong one, which is the half that can be done safely. |
+| 232 | 2026-09-11 | Should two chats GitWyrm cannot tell apart be called a damaged file? | No -- nothing is damaged, and saying so would send someone hunting for a fault that is not there. |
