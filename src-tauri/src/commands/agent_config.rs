@@ -456,6 +456,32 @@ fn build_destination_preview(client: ClientId, source_item: &RawItem, repo_root:
         .map(|(bytes, _)| String::from_utf8_lossy(&bytes).into_owned())
         .unwrap_or_else(|| writers::empty_document(client).to_string());
 
+    // What the translation could not account for. Reported beside the
+    // preview rather than after the write, so the choice is made with the
+    // information rather than explained afterwards.
+    if write_supported && source_item.kind == crate::agent_config::model::ItemKind::McpConnector {
+        if !crate::agent_config::connector::transport_understood(&source_item.extra) {
+            warnings.push(PlanWarning {
+                kind: WarningKind::UnsupportedField,
+                message: format!(
+                    "GitWyrm did not recognise how this connection starts, so it is being copied to {} exactly as written. It may need editing there before it runs.",
+                    client.label()
+                ),
+            });
+        }
+        let (_, unmodelled) = crate::agent_config::connector::translate(&source_item.extra, client);
+        if !unmodelled.is_empty() {
+            warnings.push(PlanWarning {
+                kind: WarningKind::UnsupportedField,
+                message: format!(
+                    "GitWyrm does not know what these settings mean in {}, so they were copied across unchanged: {}.",
+                    client.label(),
+                    unmodelled.join(", ")
+                ),
+            });
+        }
+    }
+
     let proposed_content = if write_supported {
         match writers::build_new_content(client, source_item.kind, &source_item.identity, &source_item.extra, &current_text) {
             Ok(content) => content,

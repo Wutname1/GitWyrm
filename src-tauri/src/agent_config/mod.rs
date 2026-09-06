@@ -11,6 +11,7 @@
 //! being built concurrently in a separate session when this was written --
 //! see the note at the top of `locations.rs` for the follow-up to unify them.
 
+pub mod connector;
 pub mod json_patch;
 pub mod locations;
 pub mod model;

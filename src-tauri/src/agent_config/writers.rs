@@ -56,7 +56,18 @@ pub fn build_new_content(
     extra: &ExtraFields,
     current_text: &str,
 ) -> Result<String, WriteContentError> {
-    let value = Value::Object(extra.iter().map(|(k, v)| (k.clone(), v.0.clone())).collect());
+    // Translate into the destination's dialect first. Copying the source's
+    // fields across unchanged produces an entry the destination parses and
+    // then ignores -- it appears in the config and never starts -- so no
+    // write path is allowed to skip this. See `connector`.
+    let translated = match kind {
+        ItemKind::McpConnector => Some(super::connector::translate(extra, client).0),
+        // Skills are directories copied whole; they have no field shape to
+        // reconcile.
+        ItemKind::Skill => None,
+    };
+    let effective = translated.as_ref().unwrap_or(extra);
+    let value = Value::Object(effective.iter().map(|(k, v)| (k.clone(), v.0.clone())).collect());
     // Dispatch is on the *kind of writing* the registry row declares, not on
     // which client it is. A client with no writer never reaches a branch that
     // can produce content, which is what keeps read-only clients read-only.
@@ -140,7 +151,12 @@ mod tests {
         let item = extra(&[("command", json!("linear-mcp"))]);
         let out = build_new_content(ClientId::OpenCode, ItemKind::McpConnector, "linear", &item, current).unwrap();
         let parsed: Value = serde_json::from_str(&out).unwrap();
-        assert_eq!(parsed["mcp"]["linear"]["command"], json!("linear-mcp"));
+        // Translated on the way in, not copied across: OpenCode reads a
+        // command array and would parse-then-ignore the command string this
+        // entry arrived as. See `connector`.
+        assert_eq!(parsed["mcp"]["linear"]["command"], json!(["linear-mcp"]));
+        assert_eq!(parsed["mcp"]["linear"]["type"], json!("local"));
+        assert_eq!(parsed["mcp"]["linear"]["enabled"], json!(true));
     }
 
     #[test]
