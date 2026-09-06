@@ -2,7 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { listen } from '@tauri-apps/api/event'
 import { toast } from 'sonner'
-import { commands, type CreateSessionRequest, type RepoInfo, type SelectDeskTarget } from '@/lib/bindings'
+import {
+  commands,
+  type CreateSessionRequest,
+  type RepoInfo,
+  type SelectDeskTarget,
+  type SelectSessionTarget,
+} from '@/lib/bindings'
 import { unwrap, keys } from '@/lib/queryKeys'
 import { describeError, log } from '@/lib/log'
 import { describeOutcome } from '@/lib/agentDeskResult'
@@ -43,10 +49,6 @@ const SELECT_DESK_TARGET_EVENT = 'agent-desk://select-target'
  * been opened, which is the common case a kickoff fires into).
  */
 const SELECT_SESSION_EVENT = 'agent-desk://select-session'
-
-interface SelectSessionTarget {
-  sessionId: string
-}
 
 /**
  * The window's current target (repo, and optionally a change), kept live

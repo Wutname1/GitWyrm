@@ -411,6 +411,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         // and a rename becomes a TypeScript error instead.
         .typ::<commands::agent_desk::OpenSourceTarget>()
         .typ::<commands::agent_result::OpenResultDiffTarget>()
+        .typ::<commands::agent_kickoff::SelectSessionTarget>()
 }
 
 const SENTRY_DSN: &str = "https://543d8fb8597dad94c5d0bef310ad046f@o4511760230907904.ingest.us.sentry.io/4511924397735936";

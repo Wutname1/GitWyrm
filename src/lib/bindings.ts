@@ -7181,6 +7181,7 @@ head_branch: string | null }
  * Payload of [`SELECT_DESK_TARGET_EVENT`].
  */
 export type SelectDeskTarget = { repoId: string; repoPath: string; changeId: string | null }
+export type SelectSessionTarget = { sessionId: string }
 /**
  * One changed line the caller selected, identified by its diff line numbers.
  * Added lines carry `new_no`; removed lines carry `old_no`.
