@@ -36,6 +36,11 @@ const EXPECTED: &[&str] = &[
     "as it is the current head of a linked repository",
     "cannot delete branch",
     "you are not currently on a branch",
+    // Our own guard, raised before merge, cherry-pick, revert, branch switch,
+    // checkout and history rewrite: the operation would overwrite uncommitted
+    // work, so we refuse it. Declining to eat the user's changes is the feature
+    // working, not a fault -- there is nothing here to fix.
+    "working tree has changes",
     // The remote moved on since the last fetch, so a plain push was refused.
     // Everyday collaboration, not a fault: the answer is to pull and retry, which
     // the UI now says outright. 124 reports in 19 days told us nothing to fix.
@@ -130,6 +135,18 @@ mod tests {
         assert!(is_expected(
       "git error: Cannot delete branch 'refs/heads/feature' as it is the current HEAD of a linked repository.; class=Reference (4)"
     ));
+    }
+
+    /// Refusing to overwrite uncommitted work is the guard doing its job. The
+    /// tail names the operation and varies across the eight sites that raise it.
+    #[test]
+    fn a_dirty_working_tree_refusal_is_expected() {
+        assert!(is_expected(
+            "working tree has changes; commit or stash before merging"
+        ));
+        assert!(is_expected(
+            "working tree has changes; commit or stash before rewriting history"
+        ));
     }
 
     /// A push refused because the remote moved on is everyday collaboration.

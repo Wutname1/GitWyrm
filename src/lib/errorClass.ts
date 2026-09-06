@@ -61,6 +61,17 @@ const RULES: Rule[] = [
     message: 'Nothing to stash -- your working tree is already clean.',
   },
   {
+    // Our own guard before anything that rewrites the working tree (merge,
+    // cherry-pick, revert, branch switch, checkout, history rewrite). The tail
+    // names the operation and varies, so match the stable opening. Without a
+    // rule here a deliberate refusal was filed as a crash and shown in the
+    // backend's own wording.
+    match: (r) => r.includes('working tree has changes'),
+    severity: 'warning',
+    message:
+      'You have changes that this would overwrite. Commit or stash them first, then try again.',
+  },
+  {
     match: (r) => r.includes('your local changes conflict'),
     severity: 'warning',
     message: 'Your local changes conflict with that branch. Commit, stash, or discard them first.',

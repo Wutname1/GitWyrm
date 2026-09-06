@@ -131,3 +131,27 @@ describe('another program holding the index', () => {
     expect(classifyError(new Error(RAW)).severity).toBe('warning')
   })
 })
+
+describe('an operation refused because the working tree is dirty', () => {
+  // Every site raises the same opening and varies the tail with the operation.
+  const RAWS = [
+    'working tree has changes; commit or stash before merging',
+    'working tree has changes; commit or stash before switching branches',
+    'working tree has changes; commit or stash before cherry-picking',
+    'working tree has changes; commit or stash before rewriting history',
+  ]
+
+  it('is a warning for every operation, so a deliberate refusal is never a crash report', () => {
+    for (const raw of RAWS) {
+      expect(classifyError(new Error(raw)).severity).toBe('warning')
+    }
+  })
+
+  it('says what to do instead of repeating the backend sentence', () => {
+    const { message } = classifyError(new Error(RAWS[0]))
+    expect(message).toBe(
+      'You have changes that this would overwrite. Commit or stash them first, then try again.',
+    )
+    expect(message).not.toMatch(/working tree/i)
+  })
+})
