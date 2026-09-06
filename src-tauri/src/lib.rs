@@ -412,6 +412,12 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         .typ::<commands::agent_desk::OpenSourceTarget>()
         .typ::<commands::agent_result::OpenResultDiffTarget>()
         .typ::<commands::agent_kickoff::SelectSessionTarget>()
+        // Emitted as `ai-commit-progress` while commits are being written.
+        // Registered so the step names are one generated list rather than a
+        // union the frontend maintains separately: the dialog looks each one
+        // up in an icon table with no fallback, so a step it does not know
+        // renders `undefined` as a component and throws mid-run.
+        .typ::<commands::ai_commits::AiCommitProgressPayload>()
 }
 
 const SENTRY_DSN: &str = "https://543d8fb8597dad94c5d0bef310ad046f@o4511760230907904.ingest.us.sentry.io/4511924397735936";

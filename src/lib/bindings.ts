@@ -4216,6 +4216,18 @@ inputTokens: number | null; outputTokens: number | null;
  * Provider-reported cost in millionths of a dollar.
  */
 costMicroUsd: number | null; turns: number | null }
+/**
+ * Which step of writing commits an update is about.
+ * 
+ * An enum rather than a string, because the dialog picks an icon per kind by
+ * looking the value up in a table with no fallback -- so a kind it does not
+ * know renders `undefined` as a component and throws, taking the dialog down
+ * in the middle of writing commits. As a `&str` nothing stopped a new step
+ * from being emitted; as an enum the two sides share one generated list and
+ * adding a step without teaching the dialog about it is a build error.
+ */
+export type AiCommitProgressKind = "scan" | "plan" | "check" | "stage" | "commit" | "done" | "error"
+export type AiCommitProgressPayload = { repo_id: string; kind: AiCommitProgressKind; message: string; detail: string }
 export type AiCreatedCommit = { sha: string; summary: string; description: string; files: string[] }
 export type AiProviderStatus = { id: string; configured: boolean }
 /**

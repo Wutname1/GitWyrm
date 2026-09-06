@@ -30,28 +30,22 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useAiMutations } from "@/hooks/useAi";
 import { useAiSelection } from "@/hooks/useAiSelection";
-import type { AiCreatedCommit } from "@/lib/bindings";
+import type {
+  AiCommitProgressKind,
+  AiCommitProgressPayload,
+  AiCreatedCommit,
+} from "@/lib/bindings";
 import { copyToClipboard } from "@/lib/clipboard";
 import { describeError, log } from "@/lib/log";
 import { useActiveRepo, useWorkspaceStore } from "@/stores/workspaceStore";
 
-type ProgressKind =
-  | "scan"
-  | "plan"
-  | "check"
-  | "stage"
-  | "commit"
-  | "done"
-  | "error";
+// Both shapes are generated from the Rust side, so the list of steps is one
+// list. It used to be written out again here, which meant a step added in
+// Rust would arrive as a value this file had never heard of -- and the icon
+// table below has no fallback, so rendering it would throw and take the
+// dialog down in the middle of writing commits.
 
-interface AiCommitProgressPayload {
-  repo_id: string;
-  kind: ProgressKind;
-  message: string;
-  detail: string;
-}
-
-const progressIcons: Record<ProgressKind, typeof Sparkles> = {
+const progressIcons: Record<AiCommitProgressKind, typeof Sparkles> = {
   scan: FileSearch,
   plan: Brain,
   check: ShieldCheck,

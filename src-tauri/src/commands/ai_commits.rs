@@ -42,18 +42,38 @@ pub struct AiCreatedCommit {
     pub files: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
-struct AiCommitProgressPayload {
-    repo_id: String,
-    kind: String,
-    message: String,
-    detail: String,
+/// Which step of writing commits an update is about.
+///
+/// An enum rather than a string, because the dialog picks an icon per kind by
+/// looking the value up in a table with no fallback -- so a kind it does not
+/// know renders `undefined` as a component and throws, taking the dialog down
+/// in the middle of writing commits. As a `&str` nothing stopped a new step
+/// from being emitted; as an enum the two sides share one generated list and
+/// adding a step without teaching the dialog about it is a build error.
+#[derive(Debug, Clone, Copy, Serialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum AiCommitProgressKind {
+    Scan,
+    Plan,
+    Check,
+    Stage,
+    Commit,
+    Done,
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct AiCommitProgressPayload {
+    pub repo_id: String,
+    pub kind: AiCommitProgressKind,
+    pub message: String,
+    pub detail: String,
 }
 
 fn emit_progress(
     app: &tauri::AppHandle,
     repo_id: &str,
-    kind: &str,
+    kind: AiCommitProgressKind,
     message: impl Into<String>,
     detail: impl Into<String>,
 ) {
@@ -61,7 +81,7 @@ fn emit_progress(
         "ai-commit-progress",
         AiCommitProgressPayload {
             repo_id: repo_id.to_string(),
-            kind: kind.to_string(),
+            kind,
             message: message.into(),
             detail: detail.into(),
         },
@@ -587,7 +607,7 @@ fn create_commit_chain(
         emit_progress(
             app,
             repo_id,
-            "check",
+            AiCommitProgressKind::Check,
             "Checking your branch",
             "New file edits will stay uncommitted while this snapshot is committed.",
         );
@@ -623,7 +643,7 @@ fn create_commit_chain(
             emit_progress(
                 app,
                 repo_id,
-                "stage",
+                AiCommitProgressKind::Stage,
                 format!(
                     "Staging {} for commit {} of {total_commits}",
                     file_count_label(files.len()),
@@ -667,7 +687,7 @@ fn create_commit_chain(
             emit_progress(
                 app,
                 repo_id,
-                "commit",
+                AiCommitProgressKind::Commit,
                 format!("Created commit {} of {total_commits}", index + 1),
                 summary,
             );
@@ -679,7 +699,7 @@ fn create_commit_chain(
         emit_progress(
             app,
             repo_id,
-            "check",
+            AiCommitProgressKind::Check,
             "Checking the finished commit set",
             "Confirming that every change is included before updating your branch.",
         );
@@ -739,7 +759,7 @@ pub async fn generate_commits(
     emit_progress(
         &app,
         &repo_id,
-        "scan",
+        AiCommitProgressKind::Scan,
         "Reading your changes",
         "Finding the parts that can safely go into separate commits.",
     );
@@ -763,7 +783,7 @@ pub async fn generate_commits(
     emit_progress(
         &app,
         &repo_id,
-        "scan",
+        AiCommitProgressKind::Scan,
         format!("Found {}", file_count_label(changed_files)),
         format!(
             "Split them into {} safe change group{} for planning.",
@@ -816,7 +836,7 @@ Recent commit subjects:\n{}\n\nChange units:{}",
     emit_progress(
         &app,
         &repo_id,
-        "plan",
+        AiCommitProgressKind::Plan,
         format!("Planning {requested} commits"),
         "AI is deciding which changes belong together and writing clear messages.",
     );
@@ -836,7 +856,7 @@ Recent commit subjects:\n{}\n\nChange units:{}",
     emit_progress(
         &app,
         &repo_id,
-        "check",
+        AiCommitProgressKind::Check,
         "Checking the AI plan",
         "Making sure every change appears once and no change is left out.",
     );
@@ -846,7 +866,7 @@ Recent commit subjects:\n{}\n\nChange units:{}",
     emit_progress(
         &app,
         &repo_id,
-        "plan",
+        AiCommitProgressKind::Plan,
         format!("Plan ready for {requested} commits"),
         format!("All {} change groups are included.", snapshot.units.len()),
     );
@@ -871,7 +891,7 @@ Recent commit subjects:\n{}\n\nChange units:{}",
             emit_progress(
                 &app,
                 &repo_id,
-                "error",
+                AiCommitProgressKind::Error,
                 "Commit generation stopped",
                 error.to_string(),
             );
@@ -881,7 +901,7 @@ Recent commit subjects:\n{}\n\nChange units:{}",
     emit_progress(
         &app,
         &repo_id,
-        "done",
+        AiCommitProgressKind::Done,
         format!("Finished all {requested} commits"),
         "Your branch is ready. Nothing was pushed.",
     );
