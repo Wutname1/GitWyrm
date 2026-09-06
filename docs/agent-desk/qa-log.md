@@ -252,3 +252,8 @@ competing sub-agents, the answer names the losing option too.
 | 243 | 2026-09-13 | Should GitWyrm copy what it can and drop the rest? | No -- refusing costs one copy, dropping costs a file nobody agreed to lose, so a folder that cannot be copied exactly is now left untouched. |
 | 244 | 2026-09-13 | Did Undo check it could restore before deleting? | No -- it deleted the new version first, so a saved copy that had gone left neither version and said nothing had happened. |
 | 245 | 2026-09-13 | Does a test that needs a privilege this machine lacks prove anything? | No -- it silently skipped and passed with the fix removed, so the check is now tested directly where no privilege is needed. |
+| 246 | 2026-09-14 | Did a skill copy that stopped partway leave you with anything? | No -- the old folder was already deleted, some new files were on disk, and the saved copy was never recorded anywhere reachable. |
+| 247 | 2026-09-14 | Should a failed first-time copy leave the half-written folder? | No -- there is nothing to put back, so removing it is the restore; leaving it looks like a working skill. |
+| 248 | 2026-09-14 | Was the size limit measured before or after reading each file? | After -- so the folder the limit exists to turn away quickly was loaded into memory a file at a time first. |
+| 249 | 2026-09-14 | Was the file-count limit off by one, as reported? | No -- the two ways of writing the check are identical, and reverting it proved the reported bug never existed. |
+| 250 | 2026-09-14 | Can a test show that a file is refused without being read? | No -- it passes either way, so the test pins the refusal and says plainly that it does not pin the reason. |
