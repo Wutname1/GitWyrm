@@ -305,21 +305,22 @@ pub fn apply_skill_copy(
         None
     };
 
-    let mut written = 0usize;
-    for (rel, file) in &tree.files {
-        let target = safe_join(&plan.destination_dir, rel)?;
-        if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| SkillCopyError::WriteFailed {
-                path: parent.to_string_lossy().into_owned(),
-                detail: e.to_string(),
-            })?;
+    // A write that stops halfway used to return here and leave the person
+    // with nothing: the old folder already deleted, some of the new files on
+    // disk, and no receipt -- so the backup sat in GitWyrm's own data with
+    // nothing in the app pointing at it and no way to undo. A file locked by
+    // the destination app is ordinary on Windows, so this is not a remote
+    // case.
+    //
+    // Put the old folder back instead. The copy is refused either way; the
+    // difference is whether the person still has what they started with.
+    let written = match write_tree(&tree, &plan.destination_dir) {
+        Ok(count) => count,
+        Err(write_error) => {
+            roll_back(&plan.destination_dir, backup_dir.as_deref());
+            return Err(write_error);
         }
-        std::fs::write(&target, &file.bytes).map_err(|e| SkillCopyError::WriteFailed {
-            path: target.to_string_lossy().into_owned(),
-            detail: e.to_string(),
-        })?;
-        written += 1;
-    }
+    };
 
     Ok(SkillCopyReceipt {
         destination_dir: plan.destination_dir.to_string_lossy().into_owned(),
@@ -329,6 +330,25 @@ pub fn apply_skill_copy(
         // as before rather than refusing a copy that succeeded.
         after_digest: folder_digest(&plan.destination_dir).ok(),
     })
+}
+
+/// Put the destination back the way it was after a copy failed partway.
+///
+/// Best effort by design: this runs while already returning an error, and a
+/// rollback that itself fails must not replace the real reason the copy
+/// stopped with a second, less useful one. What it cannot restore stays in
+/// the backup folder, which the caller still names in its message.
+///
+/// With no backup the destination did not exist before, so removing the
+/// half-written folder IS the restore.
+fn roll_back(destination: &Path, backup: Option<&str>) {
+    let _ = std::fs::remove_dir_all(destination);
+    let Some(backup) = backup else {
+        return;
+    };
+    if let Ok(tree) = read_skill_tree(Path::new(backup)) {
+        let _ = write_tree(&tree, destination);
+    }
 }
 
 /// A single hash standing for a whole skill folder's contents.
@@ -420,14 +440,15 @@ pub fn undo_skill_copy(receipt: &SkillCopyReceipt) -> Result<(), SkillCopyError>
     let Some(tree) = restore else {
         return Ok(());
     };
-    write_tree(&tree, &destination)
+    write_tree(&tree, &destination).map(|_| ())
 }
 
 /// Write an already-read tree into `to`.
 ///
 /// Split out of `copy_tree` so the restore can read its backup first and
 /// only then touch the destination -- the read is the part that can fail.
-fn write_tree(tree: &SkillTree, to: &Path) -> Result<(), SkillCopyError> {
+fn write_tree(tree: &SkillTree, to: &Path) -> Result<usize, SkillCopyError> {
+    let mut written = 0usize;
     for (rel, file) in &tree.files {
         let target = safe_join(to, rel)?;
         if let Some(parent) = target.parent() {
@@ -440,8 +461,9 @@ fn write_tree(tree: &SkillTree, to: &Path) -> Result<(), SkillCopyError> {
             path: target.to_string_lossy().into_owned(),
             detail: e.to_string(),
         })?;
+        written += 1;
     }
-    Ok(())
+    Ok(written)
 }
 
 /// Copy a folder GitWyrm is about to destroy, or put one back.
@@ -466,7 +488,7 @@ fn copy_tree(from: &Path, to: &Path) -> Result<(), SkillCopyError> {
         });
     }
     let tree = read_skill_tree(from)?;
-    write_tree(&tree, to)
+    write_tree(&tree, to).map(|_| ())
 }
 
 /// Joins a relative key under `root`, refusing anything that would escape it.
@@ -790,6 +812,80 @@ mod tests {
         assert!(undo_skill_copy(&receipt).is_err());
         // The copied skill is still there: better one version than none.
         assert!(fs::read_to_string(dest.join("SKILL.md")).unwrap().contains("Body"));
+    }
+
+    /// A copy that stops halfway must put back what it replaced.
+    ///
+    /// It used to return leaving the person with nothing: the old folder
+    /// already deleted, some new files on disk, and no receipt -- so the
+    /// backup sat in GitWyrm's own data with nothing pointing at it and no
+    /// way to undo. A file locked by the destination app is ordinary on
+    /// Windows, so this is not a remote case.
+    ///
+    /// The failure is real, not simulated: the source holds both a file
+    /// named `references` and a folder `references/api.md`, which cannot
+    /// both exist at the destination. Writing the second one fails on every
+    /// platform, needs no privilege, and happens after the old folder has
+    /// already been deleted -- exactly the window that used to lose it.
+    #[test]
+    fn a_copy_that_fails_halfway_puts_the_old_skill_back() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        // A source whose second write cannot succeed: `references` is a
+        // file, and `references/api.md` needs it to be a directory.
+        let src = tmp.path().join("demo");
+        write(&src, "SKILL.md", "---
+name: demo
+---
+Body
+");
+        write(&src, "references", "not a folder
+");
+        // Built by hand so the impossible pair reaches the write loop.
+        let mut tree = read_skill_tree(&src).unwrap();
+        tree.files.insert(
+            "references/api.md".to_string(),
+            SkillFile { bytes: b"ref
+".to_vec(), hash: hash_bytes(b"ref
+") },
+        );
+
+        let dest = tmp.path().join("dest").join("demo");
+        write(&dest, "SKILL.md", "mine
+");
+        write(&dest, "keep.md", "my notes
+");
+        let backups = tmp.path().join("backups");
+        fs::create_dir_all(&backups).unwrap();
+
+        // The destination is deleted, SKILL.md lands, then the pair collides.
+        let backup = backups.join("demo-backup");
+        copy_tree(&dest, &backup).unwrap();
+        fs::remove_dir_all(&dest).unwrap();
+        let failed = write_tree(&tree, &dest);
+        assert!(failed.is_err(), "the collision must fail the write");
+
+        roll_back(&dest, Some(&backup.to_string_lossy().into_owned()));
+
+        assert_eq!(fs::read_to_string(dest.join("SKILL.md")).unwrap(), "mine
+");
+        assert_eq!(fs::read_to_string(dest.join("keep.md")).unwrap(), "my notes
+");
+        assert!(!dest.join("references").exists(), "the half-written copy is gone");
+    }
+
+    /// With no backup, the destination did not exist before -- so removing
+    /// the half-written folder IS putting things back.
+    #[test]
+    fn a_failed_first_copy_leaves_no_half_written_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("dest").join("demo");
+        write(&dest, "SKILL.md", "half
+");
+
+        roll_back(&dest, None);
+
+        assert!(!dest.exists());
     }
 
     #[test]
