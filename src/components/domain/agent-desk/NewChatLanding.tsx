@@ -177,6 +177,18 @@ export function NewChatLanding({
  * titles come from the backend at capture time, so they are safe to show as
  * they are; a source with no snapshot title falls back to its kind.
  */
+/**
+ * "1 file" / "3 files".
+ *
+ * The two lines below used to read "1 file(s) changed". Every other place
+ * that counts files -- `SessionContextPanel` describes these same two
+ * sources -- writes it properly, so this was the odd one out, and "(s)" is
+ * developer shorthand on the first screen a new person meets.
+ */
+function fileCount(n: number): string {
+  return `${n} file${n === 1 ? '' : 's'}`
+}
+
 export function describeSource(source: SessionSource | null): { title: string; detail: string | null } | null {
   if (!source || source.kind === 'manual') return null
   const kind = sourceKindLabel(source.kind)
@@ -194,9 +206,12 @@ export function describeSource(source: SessionSource | null): { title: string; d
     case 'commit':
       return { title: source.snapshot.title || kind, detail: `${kind} ${source.oid.slice(0, 8)}` }
     case 'diff':
-      return { title: source.snapshot.title || kind, detail: `${source.paths.length} file(s) changed` }
+      return { title: source.snapshot.title || kind, detail: `${fileCount(source.paths.length)} changed` }
     case 'workingChanges':
-      return { title: source.snapshot.title || kind, detail: `${source.paths.length} file(s) not yet committed` }
+      return {
+        title: source.snapshot.title || kind,
+        detail: `${fileCount(source.paths.length)} not yet committed`,
+      }
     case 'checkFailure':
       return { title: source.snapshot.title || kind, detail: `${kind} from ${source.provider}` }
     case 'imported':

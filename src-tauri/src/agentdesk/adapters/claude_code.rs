@@ -495,3 +495,69 @@ mod tests {
         assert!(detail.messages.iter().any(|m| m.raw_unrecognized));
     }
 }
+
+#[cfg(test)]
+mod audit_probe {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn probe_mixed_encoding_list_vs_read() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let p = dir.path().join("projects").join("C--x");
+        std::fs::create_dir_all(&p).unwrap();
+        let f = p.join("s1.jsonl");
+        let mut out: Vec<u8> = Vec::new();
+        out.extend_from_slice(br#"{"type":"user","message":{"role":"user","content":"hello"},"timestamp":"2026-01-01T00:00:01Z","cwd":"C:/code/real","version":"2.1.0","uuid":"u1"}"#);
+        out.push(b'\n');
+        // a latin-1 encoded byte in an otherwise fine line
+        out.extend_from_slice(br#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"caf"#);
+        out.push(0xE9);
+        out.extend_from_slice(br#""}]},"timestamp":"2026-01-01T00:00:02Z","uuid":"a1"}"#);
+        out.push(b'\n');
+        out.extend_from_slice(br#"{"type":"user","message":{"role":"user","content":"bye"},"timestamp":"2026-01-01T00:00:03Z","uuid":"u2"}"#);
+        out.push(b'\n');
+        std::fs::File::create(&f).unwrap().write_all(&out).unwrap();
+
+        let adapter = ClaudeCodeAdapter::at(dir.path().to_path_buf());
+        let client = adapter.detect().unwrap().unwrap();
+        let list = adapter.list_sessions(&client).unwrap();
+        println!("LIST -> {} sessions: {:?}", list.len(), list.iter().map(|s|(&s.external_session_id,&s.title,&s.message_count)).collect::<Vec<_>>());
+        let r = adapter.read_session(&client, "s1");
+        println!("READ -> {:?}", r.map(|d| d.messages.len()));
+    }
+
+    #[test]
+    fn probe_cwd_last_wins_and_updated_at_ordering() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let p = dir.path().join("projects").join("C--x");
+        std::fs::create_dir_all(&p).unwrap();
+        // Realistic: a resumed session where the user cd'd; and out-of-order timestamps
+        let lines = [
+            r#"{"type":"user","message":{"role":"user","content":"a"},"timestamp":"2026-01-05T00:00:00Z","cwd":"C:/code/project-A","version":"2.1.0","uuid":"u1"}"#,
+            r#"{"type":"user","message":{"role":"user","content":"b"},"timestamp":"2026-01-01T00:00:00Z","cwd":"C:/code/project-B","uuid":"u2"}"#,
+        ].join("\n");
+        std::fs::write(p.join("s2.jsonl"), lines).unwrap();
+        let adapter = ClaudeCodeAdapter::at(dir.path().to_path_buf());
+        let client = adapter.detect().unwrap().unwrap();
+        let list = adapter.list_sessions(&client).unwrap();
+        println!("SUMMARY cwd={:?} updated={:?}", list[0].project_path, list[0].updated_at);
+        let d = adapter.read_session(&client, "s2").unwrap();
+        println!("DETAIL cwd={:?} updated={:?}", d.summary.project_path, d.summary.updated_at);
+    }
+
+    #[test]
+    fn probe_truncated_last_line_live_append() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let p = dir.path().join("projects").join("C--x");
+        std::fs::create_dir_all(&p).unwrap();
+        let lines = format!("{}\n{}",
+            r#"{"type":"user","message":{"role":"user","content":"hello"},"timestamp":"2026-01-01T00:00:01Z","cwd":"C:/code/real","version":"2.1.0","uuid":"u1"}"#,
+            r#"{"type":"assistant","message":{"role":"assis"#);
+        std::fs::write(p.join("s3.jsonl"), lines).unwrap();
+        let adapter = ClaudeCodeAdapter::at(dir.path().to_path_buf());
+        let client = adapter.detect().unwrap().unwrap();
+        let d = adapter.read_session(&client, "s3").unwrap();
+        for m in &d.messages { println!("msg role={:?} raw={} ts={} id={}", m.role, m.raw_unrecognized, m.timestamp, m.external_message_id); }
+    }
+}
