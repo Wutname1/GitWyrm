@@ -207,7 +207,7 @@ impl AgentClientAdapter for VsCodeCopilotAdapter {
                 title,
                 updated_at: millis_to_rfc3339(parsed.last_message_date),
                 project_path,
-                message_count: (parsed.requests.len() * 2) as u32,
+                message_count: count_messages(&parsed.requests),
                 model: parsed.requests.first().and_then(|r| r.model_id.clone()),
             });
         }
@@ -448,6 +448,52 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8(out).unwrap_or_else(|_| s.to_string())
 }
 
+/// The reply text and whether a turn had any tagged parts.
+///
+/// Extracted so the listing's count and the transcript's messages are the
+/// same computation rather than two that must be kept in step. They were
+/// not: the listing answered `requests.len() * 2`, so the picker promised
+/// six messages and opening the conversation showed five.
+fn reply_of(req: &ChatRequest) -> (String, bool) {
+    let mut markdown = String::new();
+    let mut had_unrecognized = false;
+    for part in req.response.as_deref().unwrap_or(&[]) {
+        let is_plain_markdown =
+            part.get("kind").is_none() && part.get("value").and_then(|v| v.as_str()).is_some();
+        if is_plain_markdown {
+            if !markdown.is_empty() {
+                markdown.push('\n');
+            }
+            markdown.push_str(part.get("value").and_then(|v| v.as_str()).unwrap_or(""));
+        } else {
+            had_unrecognized = true;
+        }
+    }
+    (markdown, had_unrecognized)
+}
+
+/// How many messages `read_session` will produce for these turns.
+///
+/// One per turn always (the person's message, or a placeholder when it is
+/// empty), plus one for the reply when it has text, plus one for the tagged
+/// parts when a turn has any. A turn yields one to three, not two -- and a
+/// number worked out from a guess is not a measurement, which is the rule
+/// this violated.
+fn count_messages(requests: &[ChatRequest]) -> u32 {
+    let mut total = 0usize;
+    for req in requests {
+        total += 1;
+        let (markdown, had_unrecognized) = reply_of(req);
+        if !markdown.is_empty() {
+            total += 1;
+        }
+        if had_unrecognized {
+            total += 1;
+        }
+    }
+    total as u32
+}
+
 fn millis_to_rfc3339(millis: Option<i64>) -> String {
     let Some(millis) = millis else {
         return "1970-01-01T00:00:00Z".into();
@@ -575,6 +621,45 @@ mod tests {
         assert_eq!(file_uri_to_path("file:///c%3A/code/100%25"), "c:/code/100%");
         assert_eq!(file_uri_to_path("file:///c%3A/code/a%zz"), "c:/code/a%zz");
         assert_eq!(file_uri_to_path("file:///c%3A/code/ends%"), "c:/code/ends%");
+    }
+
+    /// The number in the picker must be the number of messages that appear
+    /// when the conversation is opened.
+    ///
+    /// It used to be `requests.len() * 2`, which is arithmetic rather than a
+    /// count: a turn produces one message always, plus one for the reply when
+    /// it has text, plus one for tagged parts when there are any -- one to
+    /// three, not two. So the picker promised six and opening showed five.
+    #[test]
+    fn the_listed_message_count_matches_what_opening_the_conversation_shows() {
+        let dir = fixtures::vscode_copilot::supported_fixture();
+        let adapter = VsCodeCopilotAdapter::at(dir.path().to_path_buf());
+        let client = adapter.detect().unwrap().expect("fixture is supported");
+
+        for listed in adapter.list_sessions(&client).unwrap() {
+            let detail = adapter.read_session(&client, &listed.external_session_id).unwrap();
+            assert_eq!(
+                listed.message_count as usize,
+                detail.messages.len(),
+                "session {} was listed with {} messages and opened with {}",
+                listed.external_session_id,
+                listed.message_count,
+                detail.messages.len()
+            );
+        }
+    }
+
+    /// A turn whose reply is empty produces one message, not two.
+    #[test]
+    fn a_turn_with_no_reply_counts_once() {
+        let empty_reply: Vec<ChatRequest> = vec![ChatRequest {
+            request_id: None,
+            timestamp: None,
+            message: None,
+            response: Some(Vec::new()),
+            model_id: None,
+        }];
+        assert_eq!(count_messages(&empty_reply), 1);
     }
 
     #[test]
