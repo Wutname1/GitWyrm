@@ -843,14 +843,28 @@ export function runStoppedBadly(state: SessionState | null | undefined): boolean
  * true for an interrupted run and simply wrong for a chat whose issue, pull
  * request or spec could not be read -- and the fix for the two is different,
  * so one sentence for both would send people to the wrong place.
+ *
+ * The same argument applies to `failed`, and used to stop one case short of
+ * it. A run reaches `failed` two completely different ways: the agent itself
+ * failed while GitWyrm watched (`bridge.rs`), or GitWyrm found it abandoned
+ * after a crash and wrote that state itself (`session_recovery.rs`). Both
+ * were told "This chat stopped when the app closed" -- a definite claim about
+ * a cause GitWyrm did not observe, and one that points at restarting when
+ * the actual answer is in what the agent said before it stopped.
+ *
+ * So `failed` now says the run failed without claiming why, and
+ * `interrupted` keeps the sentence that is only true of it. Neither invents a
+ * cause: the backend already separates these two states, and this is the one
+ * place that was collapsing them back together.
  */
 export function runStoppedBadlyLabel(state: SessionState | null | undefined): string | null {
   switch (state) {
     case 'missingSource':
       return 'GitWyrm could not open what this chat is about. It may have been moved, renamed or deleted.'
     case 'interrupted':
-    case 'failed':
       return 'This chat stopped when the app closed. Send a message to start it again.'
+    case 'failed':
+      return 'This run did not finish. What the agent said above is the best clue why.'
     default:
       return null
   }

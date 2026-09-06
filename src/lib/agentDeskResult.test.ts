@@ -799,6 +799,30 @@ describe('runStoppedBadlyLabel', () => {
     expect(runStoppedBadlyLabel('missingSource')).toMatch(/could not open/i)
   })
 
+  it('does not blame the app closing for a run that failed on its own', () => {
+    // A run reaches `failed` two ways: the agent failed while GitWyrm
+    // watched, or GitWyrm found it abandoned after a crash and wrote that
+    // state itself. Both used to say the app had closed -- a definite claim
+    // about a cause GitWyrm never observed, pointing at restarting when the
+    // answer is in what the agent said before it stopped.
+    expect(runStoppedBadlyLabel('failed')).not.toBe(runStoppedBadlyLabel('interrupted'))
+    expect(runStoppedBadlyLabel('failed')).not.toMatch(/app closed/i)
+  })
+
+  it('keeps the app-closed sentence for the state that is actually about that', () => {
+    expect(runStoppedBadlyLabel('interrupted')).toMatch(/app closed/i)
+  })
+
+  /** Rule #2: read by someone who does not know what any of this is called. */
+  it('explains a stopped run without naming anything internal', () => {
+    for (const s of ['failed', 'interrupted', 'missingSource'] as const) {
+      const text = runStoppedBadlyLabel(s)!
+      for (const word of ['session', 'execution', 'provider', 'backend', 'worktree', 'ACP']) {
+        expect(text.toLowerCase()).not.toContain(word.toLowerCase())
+      }
+    }
+  })
+
   it('gives words for every state the predicate accepts', () => {
     for (const s of ['failed', 'interrupted', 'missingSource'] as const) {
       expect(runStoppedBadlyLabel(s)).toBeTruthy()
