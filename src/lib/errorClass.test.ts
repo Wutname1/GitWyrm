@@ -170,3 +170,27 @@ describe('a remote delete that reported success but changed nothing', () => {
     expect(classifyError(new Error(RAW)).severity).toBe('warning')
   })
 })
+
+describe('a pull with nothing linked to pull from', () => {
+  // Verbatim from GITWYRM-BACKEND-7.
+  const RAW =
+    'mutation failed [error]: git pull failed: There is no tracking information for the current branch.'
+
+  it('explains the branch is unlinked instead of echoing git', () => {
+    const { message } = classifyError(new Error(RAW))
+    expect(message).toMatch(/isn't linked to a cloud copy/i)
+    expect(message).not.toMatch(/tracking information/i)
+  })
+
+  it('is a warning, matching how the backend already classifies it', () => {
+    expect(classifyError(new Error(RAW)).severity).toBe('warning')
+  })
+
+  it('treats a diverged pull the same way', () => {
+    const raw =
+      'git pull failed: You have divergent branches and need to specify how to reconcile them.'
+    const { severity, message } = classifyError(new Error(raw))
+    expect(severity).toBe('warning')
+    expect(message).toMatch(/merge or rebase/i)
+  })
+})

@@ -149,6 +149,20 @@ mod tests {
         ));
     }
 
+    /// Verbatim from the Sentry reports that kept arriving after these were
+    /// added to EXPECTED. Both turned out to be stale-build noise, but the
+    /// wording is the contract: `AppError::Other` prefixes vary by call site, so
+    /// the needles have to survive whatever precedes them.
+    #[test]
+    fn refusals_are_expected_with_their_reported_prefixes() {
+        assert!(is_expected(
+            "Command failed: working tree has changes; commit or stash before cherry-picking"
+        ));
+        assert!(is_expected(
+            "mutation failed [error]: git pull failed: There is no tracking information for the current branch."
+        ));
+    }
+
     /// A push refused because the remote moved on is everyday collaboration.
     /// `failure_detail` now surfaces the rejection line rather than git's
     /// trailing hint, so these are the shapes that reach us.

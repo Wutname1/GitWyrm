@@ -109,6 +109,23 @@ const RULES: Rule[] = [
     message: "This branch isn't on the cloud yet. Send it again to publish it and link it up.",
   },
   {
+    // The pull-side twin of the rule above. The backend already treats both of
+    // these as expected refusals, but with no rule here the frontend still
+    // showed git's own sentence in a red toast and filed a crash report.
+    match: (r) => r.includes('there is no tracking information for the current branch'),
+    severity: 'warning',
+    message:
+      "This branch isn't linked to a cloud copy yet, so there's nothing to get. Send it first to link it up.",
+  },
+  {
+    // Local and cloud both moved on, and git will not choose merge or rebase on
+    // the user's behalf. Ordinary state after working in two places, not a fault.
+    match: (r) => r.includes('divergent branches and need to specify how to reconcile'),
+    severity: 'warning',
+    message:
+      'Your copy and the cloud copy have both changed. Choose whether to merge or rebase, then try again.',
+  },
+  {
     // Server refused the update because the branch is protected -- most force
     // pushes to a shared main branch hit this. Nothing local will fix it.
     match: (r) =>
