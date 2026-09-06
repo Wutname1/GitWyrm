@@ -57,6 +57,17 @@ impl CancelHandle {
     /// once (e.g. a duplicate Stop click) is harmless -- `Notify::notify_one`
     /// just wakes the waiter again, and `run_task`'s loop only reads it once
     /// per cancel cycle.
+    ///
+    /// Two properties this relies on, both now pinned by tests rather than
+    /// asserted here, because a review argued from this comment that Stop
+    /// could not reach the audit phase and the tests showed otherwise:
+    ///
+    /// - A cancel raised while nobody is waiting is **kept**, so the audit
+    ///   that runs after the turn still receives a Stop pressed during it.
+    /// - Exactly **one** waiter is woken per cancel. The turn and the audit
+    ///   never wait at the same time (`run_task` awaits the audit only after
+    ///   its loop ends), so that is correct today -- but if they ever
+    ///   overlap, one Stop would reach only one of them.
     pub fn cancel(&self) {
         self.notify.notify_one();
     }
