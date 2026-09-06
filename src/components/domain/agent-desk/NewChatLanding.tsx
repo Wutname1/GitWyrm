@@ -1,7 +1,7 @@
 import { Bot, Check, ChevronDown, FolderGit2, GitFork, Link2, User } from 'lucide-react'
 import type { SessionSource } from '@/lib/bindings'
 import type { ComposerMode, ComposerTeam } from '@/lib/agentDeskComposer'
-import { MODE_NOTES } from '@/lib/agentDeskComposer'
+import { MODE_NOTES, READ_ONLY_REASON, isModeBlocked } from '@/lib/agentDeskComposer'
 import { sourceKindLabel } from '@/lib/agentSessionGrouping'
 import { adapterDisplayName } from '@/lib/agentImportDisplay'
 import { cn } from '@/lib/utils'
@@ -40,6 +40,7 @@ export function NewChatLanding({
   projects,
   onProjectChange,
   projectChanging = false,
+  canWrite = true,
   source,
 }: {
   mode: ComposerMode
@@ -55,6 +56,17 @@ export function NewChatLanding({
   onProjectChange: (project: ChatProjectChoice) => void
   /** True while a project change is still opening, so the control can say so. */
   projectChanging?: boolean
+  /**
+   * Whether this chat's purpose allows changing files at all.
+   *
+   * The composer's own mode pills already refuse Plan and Auto for a chat
+   * that only reads -- a Review or Explain chat is read-only in the engine,
+   * and mode can never widen what the intent allows. These cards took no
+   * such prop, so they sat an inch above those pills offering the same two
+   * modes as freely selectable: clicking one lit it up while the engine
+   * would refuse it, and the two controls disagreed on screen at once.
+   */
+  canWrite?: boolean
   /** What started this chat. `null` while the session is still loading. */
   source: SessionSource | null
 }) {
@@ -136,15 +148,26 @@ export function NewChatLanding({
 
         <Section label="How much can it do?">
           <div className="grid grid-cols-3 gap-1.5">
-            {(['Ask', 'Plan', 'Auto'] as ComposerMode[]).map((m) => (
-              <Choice
-                key={m}
-                selected={mode === m}
-                onClick={() => onModeChange(m)}
-                title={m}
-                detail={MODE_NOTES[m]}
-              />
-            ))}
+            {(['Ask', 'Plan', 'Auto'] as ComposerMode[]).map((m) => {
+              // A chat that only reads cannot be given more authority by
+              // picking a mode -- the engine refuses the write tools whatever
+              // is selected here. Offering these as freely selectable put
+              // this screen in disagreement with the pills directly beneath
+              // it, and lit up a choice that would never take effect.
+              const blocked = isModeBlocked(m, canWrite)
+              return (
+                <Choice
+                  key={m}
+                  selected={mode === m && !blocked}
+                  blocked={blocked}
+                  onClick={() => {
+                    if (!blocked) onModeChange(m)
+                  }}
+                  title={m}
+                  detail={blocked ? READ_ONLY_REASON : MODE_NOTES[m]}
+                />
+              )
+            })}
           </div>
         </Section>
 
@@ -236,17 +259,25 @@ function Choice({
   title,
   detail,
   icon,
+  blocked = false,
 }: {
   selected: boolean
   onClick: () => void
   title: string
   detail: string
   icon?: React.ReactNode
+  /**
+   * Offered but refused. `aria-disabled` rather than `disabled`, the same
+   * choice the composer's pills make: a truly disabled control leaves the
+   * tab order, so the reason never reaches the people most relying on it.
+   */
+  blocked?: boolean
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      aria-disabled={blocked}
       aria-pressed={selected}
       className={cn(
         'flex flex-col gap-0.5 rounded-md border px-2.5 py-2 text-left transition-colors',
@@ -255,9 +286,11 @@ function Choice({
         // rule forbids, and this is the first screen a new person meets. The
         // composer's equivalent control already colours its label; this adds
         // that plus a tick, so the choice reads at a glance.
-        selected
-          ? 'border-primary bg-soft'
-          : 'border-border hover:bg-panel3'
+        blocked
+          ? 'cursor-not-allowed border-border opacity-55'
+          : selected
+            ? 'border-primary bg-soft'
+            : 'border-border hover:bg-panel3'
       )}
     >
       <span className="flex items-center gap-1.5">

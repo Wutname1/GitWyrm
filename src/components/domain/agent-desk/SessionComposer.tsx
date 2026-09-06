@@ -449,6 +449,7 @@ export function SessionComposer({
           projects={projects}
           onProjectChange={(project) => void changeProject(project)}
           projectChanging={changingProject}
+          canWrite={canWrite}
           source={header?.source ?? null}
         />
       )}

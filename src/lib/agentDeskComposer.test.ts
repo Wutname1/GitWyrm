@@ -3,6 +3,7 @@ import {
   READ_ONLY_REASON,
   MODE_NOTES,
   canSendComposerDraft,
+  isModeBlocked,
   modeToExecutionMode,
   teamToExecutionTeam } from './agentDeskComposer'
 
@@ -91,5 +92,34 @@ describe('busy flags belong to the chat that set them', () => {
 
     const missing = FLAGS.filter((f) => !body.includes(f))
     expect(missing, 'these would describe the previous chat after a swap').toEqual([])
+  })
+})
+
+/**
+ * Both surfaces that offer a mode must refuse the same ones.
+ *
+ * The new-chat cards took no `canWrite` at all, so on a Review or Explain
+ * chat they offered Plan and Auto as freely selectable an inch above the
+ * composer pills that correctly refused them. Clicking one lit it up while
+ * the engine would refuse it -- a control that visibly accepts a choice it
+ * cannot honour.
+ */
+describe('isModeBlocked', () => {
+  it('refuses everything but Ask on a chat that only reads', () => {
+    expect(isModeBlocked('Ask', false)).toBe(false)
+    expect(isModeBlocked('Plan', false)).toBe(true)
+    expect(isModeBlocked('Auto', false)).toBe(true)
+  })
+
+  it('refuses nothing on a chat that may change files', () => {
+    for (const mode of ['Ask', 'Plan', 'Auto'] as const) {
+      expect(isModeBlocked(mode, true)).toBe(false)
+    }
+  })
+
+  /** Ask is the one mode a read-only chat can always be in. */
+  it('always leaves Ask available', () => {
+    expect(isModeBlocked('Ask', true)).toBe(false)
+    expect(isModeBlocked('Ask', false)).toBe(false)
   })
 })

@@ -1,4 +1,4 @@
-import { MODE_NOTES, READ_ONLY_REASON, type ComposerMode } from '@/lib/agentDeskComposer'
+import { MODE_NOTES, READ_ONLY_REASON, isModeBlocked, type ComposerMode } from '@/lib/agentDeskComposer'
 import { cn } from '@/lib/utils'
 
 /**
@@ -33,7 +33,7 @@ export function OperatingModeControl({
     <div className="mb-1.5 flex flex-wrap items-center gap-1 px-0.5" role="group" aria-label="Agent operating mode">
       <span className="mr-0.5 text-2xs text-muted-foreground">Mode</span>
       {(['Ask', 'Plan', 'Auto'] as const).map((m) => {
-        const blocked = !canWrite && m !== 'Ask'
+        const blocked = isModeBlocked(m, canWrite)
         return (
           <button
             key={m}

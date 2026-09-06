@@ -62,4 +62,21 @@ export function canSendComposerDraft(input: {
  * must not drift apart, and because a control that refuses a click owes the
  * person a reason rather than just going quiet.
  */
+/**
+ * Whether a mode is offered but refused for this chat.
+ *
+ * A chat started from "Review this pull request" or "Explain this issue" is
+ * read-only in the engine: the write and shell tools are denied when the CLI
+ * launches, and a mode can never widen what the intent allows. Picking Plan
+ * or Auto there changes nothing.
+ *
+ * Shared by the composer's pills and the new-chat cards. Each used to decide
+ * this for itself, and the cards did not decide it at all -- so on a Review
+ * chat the two controls sat an inch apart disagreeing, one refusing a mode
+ * the other lit up on click.
+ */
+export function isModeBlocked(mode: ComposerMode, canWrite: boolean): boolean {
+  return !canWrite && mode !== 'Ask'
+}
+
 export const READ_ONLY_REASON = 'This chat only reads and explains, so it cannot change files.'
