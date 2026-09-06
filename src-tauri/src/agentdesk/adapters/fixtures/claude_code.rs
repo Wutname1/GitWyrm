@@ -51,6 +51,41 @@ pub fn supported_fixture() -> TempDir {
     dir
 }
 
+/// A conversation that started in one project and moved to another, with a
+/// later record carrying an older timestamp.
+///
+/// Both are ordinary: `cwd` is written per line and a session legitimately
+/// moves between directories, and session management appends its own lines
+/// so records are not guaranteed to be in time order.
+pub fn moved_directory_fixture() -> TempDir {
+    let dir = TempDir::new().unwrap();
+    let session_id = "moved-1";
+    write_session(
+        dir.path(),
+        "C--code-started-here",
+        session_id,
+        &[
+            user_line(
+                session_id,
+                "C:/code/started-here",
+                "2.1.215",
+                "where it began",
+                "2026-01-05T00:00:00Z",
+            ),
+            assistant_line(session_id, "working", "2026-01-05T00:00:01Z"),
+            // A `cd` into a sibling repo, then a line appended out of order.
+            user_line(
+                session_id,
+                "C:/code/ended-up-here",
+                "2.1.215",
+                "and where it ended",
+                "2026-01-02T00:00:00Z",
+            ),
+        ],
+    );
+    dir
+}
+
 pub fn unsupported_version_fixture() -> TempDir {
     let dir = TempDir::new().unwrap();
     let session_id = "00000000-0000-0000-0000-000000000099";

@@ -196,8 +196,17 @@ impl AgentClientAdapter for ClaudeCodeAdapter {
             };
             parsed_any_line = true;
             last_timestamp = parsed.timestamp.clone().or(last_timestamp.clone());
-            cwd = parsed.cwd.clone().or(cwd);
-            version = parsed.version.clone().or(version);
+            // First one wins. `cwd` is recorded per line, and a conversation
+            // legitimately moves between directories -- into a submodule, a
+            // worktree, a sibling repo -- so last-wins attributed the whole
+            // conversation to wherever it happened to end. `reconcile`
+            // matches this path exactly against the open repositories,
+            // deliberately refusing to guess, so a confidently wrong value
+            // here defeats that: it resolves to the wrong project rather
+            // than honestly failing to resolve. Where the conversation
+            // started is the one directory that describes it.
+            cwd = cwd.or_else(|| parsed.cwd.clone());
+            version = version.or_else(|| parsed.version.clone());
 
             let id = parsed
                 .uuid
@@ -325,8 +334,21 @@ fn summarize_session(path: &Path, session_id: &str) -> ExternalSessionSummary {
                 continue;
             }
             if let Ok(parsed) = serde_json::from_str::<RawLine>(&line) {
-                cwd = parsed.cwd.clone().or(cwd);
-                updated_at = parsed.timestamp.clone().or(updated_at.clone());
+                // Same first-wins rule as `read_session`, for the same
+                // reason: the listing row and the transcript must name the
+                // same project, and it must be the one the work started in.
+                cwd = cwd.or_else(|| parsed.cwd.clone());
+                // Newest, not last. Records are not guaranteed to be in time
+                // order -- session management appends its own lines, and a
+                // resumed conversation interleaves -- so taking the last one
+                // could show a "last updated" older than messages plainly
+                // visible in the conversation, and sort it wrongly in a list
+                // ordered newest first.
+                updated_at = match (updated_at, parsed.timestamp.clone()) {
+                    (Some(current), Some(seen)) if seen > current => Some(seen),
+                    (Some(current), _) => Some(current),
+                    (None, seen) => seen,
+                };
                 if matches!(parsed.line_type.as_deref(), Some("user") | Some("assistant")) {
                     message_count += 1;
                     if title.is_none() && parsed.line_type.as_deref() == Some("user") {
@@ -407,6 +429,44 @@ mod tests {
         let adapter = ClaudeCodeAdapter::at(dir.path().to_path_buf());
         let detected = adapter.detect().unwrap().expect("should detect");
         assert!(detected.supported);
+    }
+
+    /// A conversation is attributed to where it STARTED, not where it ended.
+    ///
+    /// `cwd` is recorded per line, so a session that moves into a submodule
+    /// or a sibling repo used to be attributed to whichever directory its
+    /// last record happened to name. `reconcile` matches that path exactly
+    /// against the open projects and deliberately refuses to guess -- so a
+    /// confidently wrong path does not fail to resolve, it resolves to the
+    /// WRONG project, which is the outcome reconcile says it exists to avoid.
+    #[test]
+    fn a_conversation_that_moved_directories_keeps_the_one_it_started_in() {
+        let dir = fixtures::claude_code::moved_directory_fixture();
+        let adapter = ClaudeCodeAdapter::at(dir.path().to_path_buf());
+        let client = adapter.detect().unwrap().expect("fixture is supported");
+
+        let listed = adapter.list_sessions(&client).unwrap();
+        let row = listed.iter().find(|s| s.external_session_id == "moved-1").expect("listed");
+        assert_eq!(row.project_path.as_deref(), Some("C:/code/started-here"));
+
+        // The listing row and the transcript must name the same project.
+        let detail = adapter.read_session(&client, "moved-1").unwrap();
+        assert_eq!(detail.summary.project_path.as_deref(), Some("C:/code/started-here"));
+    }
+
+    /// "Last updated" is the newest timestamp in the file, not the last one
+    /// written. Records are not guaranteed to be in time order, so taking
+    /// the last could show a date older than messages plainly visible in the
+    /// conversation, and sort it wrongly in a newest-first list.
+    #[test]
+    fn the_updated_time_is_the_newest_not_the_last_written() {
+        let dir = fixtures::claude_code::moved_directory_fixture();
+        let adapter = ClaudeCodeAdapter::at(dir.path().to_path_buf());
+        let client = adapter.detect().unwrap().expect("fixture is supported");
+
+        let listed = adapter.list_sessions(&client).unwrap();
+        let row = listed.iter().find(|s| s.external_session_id == "moved-1").expect("listed");
+        assert_eq!(row.updated_at, "2026-01-05T00:00:01Z");
     }
 
     #[test]
