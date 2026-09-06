@@ -400,6 +400,17 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         // commands::spec_desk::open_spec_desk, never as a command param/return, so
         // it needs the same explicit registration.
         .typ::<commands::spec_desk::SelectDeskTarget>()
+        // Same reason again, for the two payloads that travel only as
+        // `agent-desk://open-source` and `agent-result://open-diff`.
+        //
+        // These were the last cross-boundary shapes in the app with no
+        // generated type: the frontend hand-wrote its own copy of each, so
+        // renaming a field here compiled, typechecked and passed every test
+        // while silently breaking "View source" and "View diff" at runtime.
+        // Registering them means the generated type is the only definition
+        // and a rename becomes a TypeScript error instead.
+        .typ::<commands::agent_desk::OpenSourceTarget>()
+        .typ::<commands::agent_result::OpenResultDiffTarget>()
 }
 
 const SENTRY_DSN: &str = "https://543d8fb8597dad94c5d0bef310ad046f@o4511760230907904.ingest.us.sentry.io/4511924397735936";

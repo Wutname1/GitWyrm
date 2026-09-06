@@ -5974,6 +5974,13 @@ export type OpenResultDiffOutcome =
  * command can do about a window that has not been created.
  */
 { kind: "mainWindowNotOpen" }
+export type OpenResultDiffTarget = { worktreePath: string; 
+/**
+ * `None` opens the changed-file list itself (the caller lands on
+ * whatever the main window shows for "no file selected yet" in that
+ * worktree); `Some(path)` jumps straight to one file's diff.
+ */
+path: string | null }
 export type OpenSourceOutcome = 
 /**
  * The main window was found and told to open the source.
@@ -5984,6 +5991,7 @@ export type OpenSourceOutcome =
  * `agent_result::OpenResultDiffOutcome::MainWindowNotOpen`.
  */
 { kind: "mainWindowNotOpen" } | { kind: "sessionNotFound" } | { kind: "sessionDamaged"; reason: string } | { kind: "sessionUnavailable"; detail: string }
+export type OpenSourceTarget = { repoId: string; repoPath: string; source: SessionSource }
 /**
  * tasks.md 2.4, third of three: "mark launch-vs-live differences." Wiring
  * the OpenSpec context into the live prompt (`start_execution_at`) and
