@@ -164,7 +164,11 @@ pub const CLIENTS: &[ClientSpec] = &[
         personal_paths: &[&[".codex", "config.toml"]],
         // Codex has no project-local config file GitWyrm reads today.
         repo_paths: &[],
-        readable_kinds: &[ItemKind::McpConnector],
+        // Skills live in `~/.codex/skills`, one folder per skill with a
+        // `SKILL.md` inside -- the same shape `skills::read_skills_at`
+        // already reads. Confirmed against a real install rather than
+        // documentation.
+        readable_kinds: &[ItemKind::McpConnector, ItemKind::Skill],
         // TOML, written through `toml_patch` rather than the narrow
         // display-only parser the reader uses, so comments and layout in a
         // hand-written config survive the merge.

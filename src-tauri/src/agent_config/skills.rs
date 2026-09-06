@@ -235,10 +235,27 @@ pub fn skill_dirs(home: &Path, repo_root: Option<&Path>, client: super::model::C
                 out.push((root.join(".opencode").join("skills"), ConfigScope::Repo));
             }
         }
-        // Unreachable while these rows do not declare `Skill`. Kept
+        // Codex reads `~/.codex/skills`, one folder per skill with a
+        // `SKILL.md` inside. Confirmed against a real install.
+        //
+        // No repository-scoped entry: a `.codex` folder at a project root is
+        // real (it holds `config.toml`, `agents`, `hooks.json`) but nothing
+        // observed puts skills in one, and a guessed path is worse than an
+        // absent one -- it would scan a folder nobody writes to and report
+        // the person has no project skills, which reads exactly like really
+        // having none. Add it when an install shows one.
+        ClientId::Codex => {
+            out.push((home.join(".codex").join("skills"), ConfigScope::Personal));
+        }
+        // Unreachable while this row does not declare `Skill`. Kept
         // exhaustive so adding that kind to another row fails to compile here
         // rather than silently returning nothing.
-        ClientId::Codex | ClientId::VsCodeCopilot => {}
+        //
+        // VS Code Copilot is deliberately absent: no skills folder was found
+        // on a machine that has Copilot installed, so GitWyrm does not know
+        // where they live. Saying so plainly is what `skill_copy_preview`
+        // already does.
+        ClientId::VsCodeCopilot => {}
     }
     out
 }
@@ -264,6 +281,33 @@ mod tests {
                 (repo.join(".opencode").join("skills"), ConfigScope::Repo),
             ]
         );
+    }
+
+    /// Codex keeps skills in one place only.
+    ///
+    /// A `.codex` folder at a project root is real, but nothing observed
+    /// puts skills in one -- so there is no repository entry. A guessed
+    /// second path would scan a folder nobody writes to and report no
+    /// project skills, which reads exactly like really having none.
+    #[test]
+    fn codex_skills_live_where_codex_keeps_them() {
+        use super::super::model::{ClientId, ConfigScope};
+        let home = Path::new("C:/Users/me");
+        let repo = Path::new("C:/code/widgets");
+
+        assert_eq!(
+            skill_dirs(home, Some(repo), ClientId::Codex),
+            vec![(home.join(".codex").join("skills"), ConfigScope::Personal)]
+        );
+    }
+
+    /// GitWyrm does not know where VS Code Copilot keeps skills, and says so
+    /// rather than scanning a guess. `skill_copy_preview` turns an empty
+    /// list into "GitWyrm cannot copy skills there yet".
+    #[test]
+    fn a_client_whose_skill_folder_is_unknown_returns_none() {
+        use super::super::model::ClientId;
+        assert!(skill_dirs(Path::new("C:/Users/me"), None, ClientId::VsCodeCopilot).is_empty());
     }
 
     /// Every client the registry says has skills must say where they are.
