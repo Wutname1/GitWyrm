@@ -225,7 +225,7 @@ pub fn skill_dirs(home: &Path, repo_root: Option<&Path>, client: super::model::C
         // Unreachable while Claude Code is the only row declaring `Skill`.
         // Kept exhaustive so adding that kind to another row fails to compile
         // here rather than silently returning nothing.
-        ClientId::Codex | ClientId::OpenCode | ClientId::VsCodeCopilot | ClientId::OpenChamber => {}
+        ClientId::Codex | ClientId::OpenCode | ClientId::VsCodeCopilot => {}
     }
     out
 }

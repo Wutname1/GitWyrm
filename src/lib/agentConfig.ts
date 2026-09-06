@@ -67,6 +67,22 @@ export const CLIENT_LABEL: Record<ClientId, string> = {
   'claude-code': 'Claude',
   'open-code': 'OpenCode',
   'vs-code-copilot': 'Copilot',
+}
+
+/**
+ * Apps that once had a column of their own and no longer do.
+ *
+ * OpenChamber was dropped as a separate destination because it keeps no
+ * settings of its own -- it reads OpenCode's files -- so a column for it
+ * showed one connector as two copies needing sync. But receipts written
+ * before that change still record `open-chamber`, and the permanent record
+ * of what GitWyrm changed has to keep naming it properly rather than
+ * printing an internal key at someone years later.
+ *
+ * Deliberately separate from `CLIENT_LABEL`: the columns are derived from
+ * that map, so a retired app listed there would come back as a column.
+ */
+const RETIRED_CLIENT_LABEL: Record<string, string> = {
   'open-chamber': 'OpenChamber',
 }
 
@@ -89,7 +105,7 @@ export function clientLabel(client: ClientId): string {
  * build would carry.
  */
 export function clientLabelFromKey(key: string): string {
-  return (CLIENT_LABEL as Record<string, string>)[key] ?? key
+  return (CLIENT_LABEL as Record<string, string>)[key] ?? RETIRED_CLIENT_LABEL[key] ?? key
 }
 
 /**

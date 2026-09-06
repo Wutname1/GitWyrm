@@ -73,6 +73,11 @@ export function DetectedAppsTab({
             <span className="text-xs font-medium text-foreground">{clientLabel(d.client)}</span>
             <span className="text-2xs text-muted-foreground">
               {d.present ? 'Configuration found' : 'Not found on this machine'}
+              {/* Some apps read another app's settings rather than keeping
+                  their own, so they get no row. Naming them here stops
+                  someone looking for their own app by name from deciding
+                  GitWyrm has never heard of it. */}
+              {d.alsoUsedBy.length > 0 && ` · also used by ${d.alsoUsedBy.join(', ')}`}
             </span>
           </div>
           <span className="text-2xs text-muted-foreground">

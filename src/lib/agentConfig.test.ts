@@ -116,8 +116,19 @@ describe('CLIENT_COLUMN_ORDER', () => {
     expect(new Set(CLIENT_COLUMN_ORDER).size).toBe(CLIENT_COLUMN_ORDER.length)
   })
 
-  it('includes open-chamber specifically, the one that was missing', () => {
-    expect(CLIENT_COLUMN_ORDER).toContain('open-chamber')
+  // OpenChamber used to be the specific case here: it had a writer but no
+  // column, so a copy could land in it without ever being offered. It is no
+  // longer a destination at all -- it reads OpenCode's settings rather than
+  // keeping its own -- so the guarantee is now stated the way that cannot go
+  // stale again: an app GitWyrm can write to always has a column.
+  it('gives every app that can be written to a column of its own', () => {
+    for (const client of Object.keys(CLIENT_LABEL)) {
+      expect(CLIENT_COLUMN_ORDER).toContain(client)
+    }
+  })
+
+  it('no longer shows a column for an app that keeps no settings of its own', () => {
+    expect(CLIENT_COLUMN_ORDER).not.toContain('open-chamber')
   })
 })
 
@@ -319,6 +330,15 @@ describe('describeConfigOperation names apps the way the user sees them', () => 
     )
     expect(describeConfigOperation({ client: 'open-chamber', beforeHash: null, undone: false })).toBe(
       'Created settings for OpenChamber'
+    )
+  })
+  it('still names an app that no longer has a column of its own', () => {
+    // OpenChamber was dropped as a destination because it reads OpenCode's
+    // settings rather than keeping its own. Receipts written before that
+    // change still record it, and the permanent record of what GitWyrm
+    // changed must keep naming it rather than printing an internal key.
+    expect(describeConfigOperation({ client: 'open-chamber', beforeHash: 'a', undone: false })).toBe(
+      'Changed settings for OpenChamber'
     )
   })
   it('falls back to the key for a client this build does not know', () => {

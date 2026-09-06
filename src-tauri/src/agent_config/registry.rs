@@ -111,6 +111,16 @@ pub struct ClientSpec {
     /// exist yet. An empty string for formats where an empty document has no
     /// syntax of its own.
     pub empty_document: &'static str,
+    /// Other apps that read this same configuration rather than keeping one
+    /// of their own.
+    ///
+    /// They are deliberately NOT separate rows. A row is a place settings
+    /// live, and giving one file two rows makes a single connector look like
+    /// two copies that need syncing -- GitWyrm would offer to copy it to a
+    /// client that already has it, then write the same file twice. Naming
+    /// them here keeps someone who looks for their own app by name from
+    /// concluding GitWyrm does not know about it.
+    pub also_used_by: &'static [&'static str],
 }
 
 impl ClientSpec {
@@ -160,6 +170,7 @@ pub const CLIENTS: &[ClientSpec] = &[
         // hand-written config survive the merge.
         writer: Some(WriterKind::TomlTableMap { key: "mcp_servers" }),
         empty_document: "",
+        also_used_by: &[],
     },
     ClientSpec {
         id: ClientId::ClaudeCode,
@@ -172,16 +183,42 @@ pub const CLIENTS: &[ClientSpec] = &[
         readable_kinds: &[ItemKind::McpConnector, ItemKind::Skill],
         writer: Some(WriterKind::JsonMcpMap { key: "mcpServers" }),
         empty_document: "{}\n",
+        also_used_by: &[],
     },
     ClientSpec {
         id: ClientId::OpenCode,
         key: "open-code",
         display_name: "OpenCode",
-        personal_paths: &[&[".config", "opencode", "opencode.json"]],
-        repo_paths: &[&["opencode.json"]],
+        // OpenCode reads its configuration in layers, taking the first file
+        // that exists at each level rather than one fixed name. Declaring
+        // only `opencode.json` meant a person whose config lives in
+        // `config.json` -- the default the tool falls back to when none of
+        // them exist -- had their connectors read as absent, and a copy
+        // aimed at a file their OpenCode does not read.
+        //
+        // Taken from the resolution order in OpenCode's own config loader
+        // rather than from documentation: user paths are tried
+        // config.json -> opencode.json -> opencode.jsonc, and project paths
+        // opencode.json -> opencode.jsonc -> .opencode/opencode.json ->
+        // .opencode/opencode.jsonc.
+        personal_paths: &[
+            &[".config", "opencode", "config.json"],
+            &[".config", "opencode", "opencode.json"],
+            &[".config", "opencode", "opencode.jsonc"],
+        ],
+        repo_paths: &[
+            &["opencode.json"],
+            &["opencode.jsonc"],
+            &[".opencode", "opencode.json"],
+            &[".opencode", "opencode.jsonc"],
+        ],
         readable_kinds: &[ItemKind::McpConnector],
         writer: Some(WriterKind::JsonMcpMap { key: "mcp" }),
         empty_document: "{}\n",
+        // OpenChamber is a web interface over OpenCode: it reads these same
+        // files and keeps no MCP configuration of its own, so it is named
+        // here rather than given a row that would double-count one file.
+        also_used_by: &["OpenChamber"],
     },
     ClientSpec {
         id: ClientId::VsCodeCopilot,
@@ -207,21 +244,7 @@ pub const CLIENTS: &[ClientSpec] = &[
             default_path: &["mcp", "servers"],
         }),
         empty_document: "{}\n",
-    },
-    ClientSpec {
-        id: ClientId::OpenChamber,
-        key: "open-chamber",
-        display_name: "OpenChamber",
-        personal_paths: &[&[".config", "openchamber", "config.json"]],
-        repo_paths: &[],
-        readable_kinds: &[ItemKind::McpConnector],
-        // Same JSON shape the reader accepts, following the file's own key so
-        // a config written by OpenChamber itself keeps working.
-        writer: Some(WriterKind::JsonMcpMapFirstPresent {
-            candidates: &[&["mcpServers"], &["mcp", "servers"]],
-            default_path: &["mcpServers"],
-        }),
-        empty_document: "{}\n",
+        also_used_by: &[],
     },
 ];
 
@@ -313,10 +336,51 @@ mod tests {
                 ClientId::Codex,
                 ClientId::ClaudeCode,
                 ClientId::OpenCode,
-                ClientId::VsCodeCopilot,
-                ClientId::OpenChamber
+                ClientId::VsCodeCopilot
             ]
         );
+    }
+
+    /// OpenChamber is a web interface over OpenCode and keeps no MCP
+    /// configuration of its own. It used to have a row pointing at
+    /// `.config/openchamber/config.json`, a file its source never reads: a
+    /// copy there wrote a file nothing would load, and the row reported the
+    /// client "not detected" on machines that had it, because detection is
+    /// driven by these same config paths.
+    ///
+    /// It is named on OpenCode's row instead of getting one of its own --
+    /// two rows over one file would show a single connector as two copies
+    /// needing sync, then write the same file twice.
+    #[test]
+    fn an_app_sharing_another_app_s_config_is_named_not_given_a_row() {
+        let opencode = spec(ClientId::OpenCode);
+        assert_eq!(opencode.also_used_by, &["OpenChamber"]);
+
+        // And no row claims a config path under an app that has none.
+        for spec in CLIENTS {
+            for path in spec.personal_paths {
+                assert!(
+                    !path.contains(&"openchamber"),
+                    "{:?} points at a config file OpenChamber does not read",
+                    spec.id
+                );
+            }
+        }
+    }
+
+    /// Every name in `also_used_by` must be an app with no row of its own.
+    /// A name that also has a row would be double-counted rather than
+    /// deduplicated, which is the whole thing this field exists to prevent.
+    #[test]
+    fn a_shared_config_name_never_also_has_its_own_row() {
+        for spec in CLIENTS {
+            for name in spec.also_used_by {
+                assert!(
+                    !CLIENTS.iter().any(|other| other.display_name == *name),
+                    "{name} is named as sharing config AND has its own row"
+                );
+            }
+        }
     }
 
     #[test]

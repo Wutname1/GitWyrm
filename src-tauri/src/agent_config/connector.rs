@@ -33,8 +33,7 @@ use super::model::{ClientId, ExtraFields, JsonValue};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Dialect {
     /// A command string, an `args` array beside it, and `env` for the
-    /// environment. Claude Code, VS Code Copilot and OpenChamber all read
-    /// this shape.
+    /// environment. Claude Code and VS Code Copilot both read this shape.
     CommandWithArgs,
     /// One `command` array with the program at its head, `environment` for
     /// the environment, and explicit `type`/`enabled` fields. OpenCode.
@@ -53,9 +52,7 @@ impl Dialect {
         match client {
             ClientId::OpenCode => Dialect::CommandArray,
             ClientId::Codex => Dialect::Toml,
-            ClientId::ClaudeCode | ClientId::VsCodeCopilot | ClientId::OpenChamber => {
-                Dialect::CommandWithArgs
-            }
+            ClientId::ClaudeCode | ClientId::VsCodeCopilot => Dialect::CommandWithArgs,
         }
     }
 }

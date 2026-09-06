@@ -357,6 +357,33 @@ the old one back.",
     }
 }
 
+/// Which of a client's declared config files a copy should be written to.
+///
+/// Prefers the source's own scope, so a repository connector lands in the
+/// repository and a personal one stays personal. Within a scope, **a file
+/// that already exists always wins over one that does not**.
+///
+/// That second rule is load-bearing for clients that read their settings in
+/// layers and accept several filenames, taking whichever exists first.
+/// Writing to the first *declared* name can create a brand new file that
+/// then shadows the one the person actually uses -- so the copy appears to
+/// work while every connector they already had stops being read. Following
+/// the file on disk is the same rule the writers already apply to the key
+/// inside a document, one level up.
+///
+/// `exists` is injected so this is testable without a real home directory.
+fn choose_destination<'a>(
+    locs: &'a [ConfigLocation],
+    source_scope: crate::agent_config::model::ConfigScope,
+    exists: impl Fn(&str) -> bool,
+) -> Option<&'a ConfigLocation> {
+    locs.iter()
+        .find(|l| l.scope == source_scope && exists(&l.path))
+        .or_else(|| locs.iter().find(|l| l.scope == source_scope))
+        .or_else(|| locs.iter().find(|l| exists(&l.path)))
+        .or_else(|| locs.first())
+}
+
 fn build_destination_preview(client: ClientId, source_item: &RawItem, repo_root: Option<&str>) -> DestinationPreview {
     // Support is per client AND per kind. A skill is a folder of files rather
     // than a member of a JSON object, so it does not go through the JSON
@@ -371,13 +398,8 @@ fn build_destination_preview(client: ClientId, source_item: &RawItem, repo_root:
     if let Some(root) = repo_root {
         locs.extend(locations::repo_locations(client, root));
     }
-    // Prefer a location matching the source's scope, else the first
-    // available location for this client.
-    let destination_location = locs
-        .iter()
-        .find(|l| l.scope == source_item.location.scope)
-        .or_else(|| locs.first())
-        .cloned();
+    let destination_location =
+        choose_destination(&locs, source_item.location.scope, |p| Path::new(p).is_file()).cloned();
 
     let Some(dest_loc) = destination_location else {
         return DestinationPreview {
@@ -868,6 +890,65 @@ mod tests {
             extra,
             content_hash: "h".into(),
         }
+    }
+
+    /// A client that reads several filenames in layers must be written to
+    /// wherever its settings actually live. Writing to the first declared
+    /// name instead can create a new file that shadows the real one, so the
+    /// copy looks like it worked while every existing connector stops being
+    /// read.
+    #[test]
+    fn a_copy_lands_in_the_config_file_that_already_exists() {
+        use crate::agent_config::model::ConfigScope;
+        let loc = |scope, path: &str| ConfigLocation {
+            client: ClientId::OpenCode,
+            scope,
+            path: path.to_string(),
+        };
+        // Declared order puts config.json first; the person's settings are
+        // in opencode.json.
+        let locs = vec![
+            loc(ConfigScope::Personal, "/home/.config/opencode/config.json"),
+            loc(ConfigScope::Personal, "/home/.config/opencode/opencode.json"),
+            loc(ConfigScope::Repo, "/repo/opencode.json"),
+        ];
+        let exists = |p: &str| p == "/home/.config/opencode/opencode.json";
+
+        let chosen = choose_destination(&locs, ConfigScope::Personal, exists).unwrap();
+        assert_eq!(chosen.path, "/home/.config/opencode/opencode.json");
+    }
+
+    /// With nothing on disk yet, the first declared name is the right
+    /// answer -- it is the one the client falls back to.
+    #[test]
+    fn a_copy_to_a_client_with_no_config_yet_uses_the_first_declared_file() {
+        use crate::agent_config::model::ConfigScope;
+        let locs = vec![ConfigLocation {
+            client: ClientId::OpenCode,
+            scope: ConfigScope::Personal,
+            path: "/home/.config/opencode/config.json".into(),
+        }];
+        let chosen = choose_destination(&locs, ConfigScope::Personal, |_| false).unwrap();
+        assert_eq!(chosen.path, "/home/.config/opencode/config.json");
+    }
+
+    /// A repository connector stays in the repository even when a personal
+    /// file exists and the repository one does not.
+    #[test]
+    fn a_copy_keeps_the_scope_it_came_from() {
+        use crate::agent_config::model::ConfigScope;
+        let loc = |scope, path: &str| ConfigLocation {
+            client: ClientId::OpenCode,
+            scope,
+            path: path.to_string(),
+        };
+        let locs = vec![
+            loc(ConfigScope::Personal, "/home/.config/opencode/config.json"),
+            loc(ConfigScope::Repo, "/repo/opencode.json"),
+        ];
+        let exists = |p: &str| p == "/home/.config/opencode/config.json";
+        let chosen = choose_destination(&locs, ConfigScope::Repo, exists).unwrap();
+        assert_eq!(chosen.path, "/repo/opencode.json");
     }
 
     /// GitWyrm only knows where Claude Code keeps skills. For every other

@@ -79,7 +79,7 @@ pub fn read_items(location: &ConfigLocation) -> Result<Vec<RawItem>, ReadError> 
         ClientId::ClaudeCode => read_claude_code(location, &raw),
         ClientId::OpenCode => read_opencode(location, &raw),
         ClientId::Codex => read_codex(location, &raw),
-        ClientId::VsCodeCopilot | ClientId::OpenChamber => read_generic_json_mcp(location, &raw),
+        ClientId::VsCodeCopilot => read_generic_json_mcp(location, &raw),
     }
 }
 
@@ -137,7 +137,7 @@ fn read_opencode(location: &ConfigLocation, raw: &[u8]) -> Result<Vec<RawItem>, 
 
 /// Generic reader for any JSON config that keeps MCP servers under a
 /// `mcpServers` or `mcp.servers` key, used for clients whose shape has not
-/// been independently proven yet (VS Code Copilot, OpenChamber). Read-only:
+/// been independently proven yet (VS Code Copilot). Read-only:
 /// no writer exists for these until their schema is proven (task 4.4, 4.5).
 fn read_generic_json_mcp(location: &ConfigLocation, raw: &[u8]) -> Result<Vec<RawItem>, ReadError> {
     let text = String::from_utf8_lossy(raw);

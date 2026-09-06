@@ -27,16 +27,14 @@ pub enum ClientId {
     ClaudeCode,
     OpenCode,
     VsCodeCopilot,
-    OpenChamber,
 }
 
 impl ClientId {
-    pub const ALL: [ClientId; 5] = [
+    pub const ALL: [ClientId; 4] = [
         ClientId::Codex,
         ClientId::ClaudeCode,
         ClientId::OpenCode,
         ClientId::VsCodeCopilot,
-        ClientId::OpenChamber,
     ];
 
     /// The short product name shown to people, read from this client's
@@ -207,6 +205,10 @@ pub struct ClientDetection {
     /// Drives the "Unsupported" badge and keeps discovery-only clients from
     /// ever reaching an apply path (task 4.6).
     pub write_supported: bool,
+    /// Other apps that read this same configuration rather than keeping one
+    /// of their own, so someone looking for their app by name still finds it
+    /// even though it has no column. See `registry::ClientSpec::also_used_by`.
+    pub also_used_by: Vec<String>,
 }
 
 /// One item's comparison state against a chosen source, for one destination

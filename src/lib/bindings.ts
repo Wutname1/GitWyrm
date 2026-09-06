@@ -4647,7 +4647,13 @@ export type ClientDetection = { client: ClientId; present: boolean;
  * Drives the "Unsupported" badge and keeps discovery-only clients from
  * ever reaching an apply path (task 4.6).
  */
-writeSupported: boolean }
+writeSupported: boolean; 
+/**
+ * Other apps that read this same configuration rather than keeping one
+ * of their own, so someone looking for their app by name still finds it
+ * even though it has no column. See `registry::ClientSpec::also_used_by`.
+ */
+alsoUsedBy: string[] }
 /**
  * Which agent client a location/state belongs to.
  * 
@@ -4661,7 +4667,7 @@ writeSupported: boolean }
  * (the same kebab-case string this enum serializes to) instead of the enum,
  * so a client added later can still be read back out of an old file.
  */
-export type ClientId = "codex" | "claude-code" | "open-code" | "vs-code-copilot" | "open-chamber"
+export type ClientId = "codex" | "claude-code" | "open-code" | "vs-code-copilot"
 /**
  * One item's comparison state against a chosen source, for one destination
  * client (task 1.4). The mockup's badge vocabulary is richer than a plain

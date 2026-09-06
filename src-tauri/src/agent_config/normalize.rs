@@ -189,6 +189,7 @@ mod tests {
                 client,
                 present: true,
                 write_supported: matches!(client, ClientId::ClaudeCode | ClientId::OpenCode),
+                also_used_by: Vec::new(),
             })
             .collect()
     }

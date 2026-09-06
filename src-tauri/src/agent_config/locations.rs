@@ -104,6 +104,11 @@ pub fn detect_clients(repo_root: Option<&str>) -> Vec<ClientDetection> {
                 client,
                 present,
                 write_supported: super::writers::is_supported(client),
+                also_used_by: super::registry::spec(client)
+                    .also_used_by
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
             }
         })
         .collect()

@@ -226,7 +226,6 @@ mod tests {
         assert!(is_supported(ClientId::ClaudeCode));
         assert!(is_supported(ClientId::OpenCode));
         assert!(is_supported(ClientId::VsCodeCopilot));
-        assert!(is_supported(ClientId::OpenChamber));
         // TOML, written through a real document model so the comments and
         // formatting the person wrote themselves survive the merge.
         assert!(is_supported(ClientId::Codex));
@@ -262,9 +261,10 @@ mod tests {
         let parsed: Value = serde_json::from_str(&vs).unwrap();
         assert!(parsed.pointer("/mcp/servers/github").is_some(), "{vs}");
 
-        let oc = build_new_content(ClientId::OpenChamber, ItemKind::McpConnector, "github", &item, "{}").unwrap();
+        // OpenCode's own default key, on a file that declares none yet.
+        let oc = build_new_content(ClientId::OpenCode, ItemKind::McpConnector, "github", &item, "{}").unwrap();
         let parsed: Value = serde_json::from_str(&oc).unwrap();
-        assert!(parsed.pointer("/mcpServers/github").is_some(), "{oc}");
+        assert!(parsed.pointer("/mcp/github").is_some(), "{oc}");
     }
 
     /// Everything outside the one member being written survives untouched --
