@@ -1,7 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { commands } from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
-import { importedSessionId } from '@/lib/agentImportDisplay'
+import { IMPORT_SCAN_STALE_MS, importedSessionId } from '@/lib/agentImportDisplay'
+import { describeError, log } from '@/lib/log'
+import { toast } from 'sonner'
 
 /**
  * External chat import (agent-desk-external-chat-import): detected clients,
@@ -25,7 +27,7 @@ export function useAgentImportAdapters() {
     queryFn: async () => unwrap(await commands.agentImportListAdapters()),
     // Detection touches the filesystem across up to five clients; a session
     // rarely needs it refreshed more than once every few minutes.
-    staleTime: 2 * 60 * 1000,
+    staleTime: IMPORT_SCAN_STALE_MS,
   })
 }
 
@@ -38,6 +40,13 @@ export function useAgentImportScan(adapterId: string | null, enabled: boolean) {
     queryKey: keys.agentImportScan(adapterId ?? 'none'),
     enabled: adapterId != null && enabled,
     queryFn: async () => unwrap(await commands.agentImportScan(adapterId!)),
+    // Same reasoning as the adapter list above, and more so: a scan reads and
+    // parses every conversation file the adapter has. Without this it
+    // refetched on every window focus, and each refetch rebuilds the row
+    // list -- which unmounts any row with a copy in flight, and TanStack
+    // drops a per-call callback whose component has gone. That is what made
+    // a failed import able to say nothing at all.
+    staleTime: IMPORT_SCAN_STALE_MS,
   })
 }
 
@@ -80,6 +89,19 @@ export function useImportExternalSession() {
       adapterId: string
       externalSessionId: string
     }) => unwrap(await commands.agentImportSession(adapterId, externalSessionId)),
+    // Here rather than at the call site. A per-call `onError` is dropped if
+    // the component that passed it unmounts before the mutation settles, and
+    // the row this runs from is rebuilt whenever the scan refetches -- so the
+    // one place a failure was reported was also the place most likely to be
+    // gone when it happened. A hook-level handler always runs.
+    onError: (error, variables) => {
+      log.error(
+        `import session failed for ${variables.externalSessionId}: ${describeError(error)}`
+      )
+      toast.error('That chat could not be brought in.', {
+        description: 'Nothing was changed. You can try again.',
+      })
+    },
     onSuccess: (result, variables) => {
       qc.invalidateQueries({ queryKey: keys.agentImportScan(variables.adapterId) })
       qc.invalidateQueries({ queryKey: keys.agentSessionsAll })
@@ -100,6 +122,12 @@ export function useContinueImportedSessionHere() {
   return useMutation({
     mutationFn: async (sessionId: string) =>
       unwrap(await commands.agentImportContinueHere(sessionId)),
+    onError: (error, sessionId) => {
+      log.error(`continue imported session here failed for ${sessionId}: ${describeError(error)}`)
+      toast.error('That chat could not be continued here.', {
+        description: 'Nothing was changed. You can try again.',
+      })
+    },
     onSuccess: (_result, sessionId) => {
       qc.invalidateQueries({ queryKey: keys.agentSession(sessionId) })
       qc.invalidateQueries({ queryKey: keys.agentSessionsAll })
@@ -118,6 +146,12 @@ export function useUnlinkImportedSession() {
   return useMutation({
     mutationFn: async ({ sessionId }: { sessionId: string; adapterId: string; externalSessionId: string }) =>
       unwrap(await commands.agentImportUnlink(sessionId)),
+    onError: (error, { sessionId }) => {
+      log.error(`unlink imported session failed for ${sessionId}: ${describeError(error)}`)
+      toast.error('That chat could not be unlinked.', {
+        description: 'Nothing was changed. You can try again.',
+      })
+    },
     onSuccess: (_result, { sessionId, adapterId, externalSessionId }) => {
       qc.invalidateQueries({ queryKey: keys.agentSession(sessionId) })
       qc.invalidateQueries({ queryKey: keys.agentSessionsAll })

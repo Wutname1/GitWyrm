@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  IMPORT_SCAN_STALE_MS,
   importedSessionId,
   isUnresolvedProject,
   explainImportScanRefusal,
@@ -46,6 +47,23 @@ function scanned(overrides: Partial<ScannedExternalSession> = {}): ScannedExtern
     ...overrides,
   }
 }
+
+describe('IMPORT_SCAN_STALE_MS', () => {
+  /**
+   * The scan had no staleness at all, so it refetched on every window
+   * focus -- rebuilding the row list, and with it unmounting any row whose
+   * copy was still running. Both reads walk the same filesystem, so they
+   * should agree about how often that is worth doing.
+   */
+  it('is long enough that looking at the window does not rescan', () => {
+    expect(IMPORT_SCAN_STALE_MS).toBeGreaterThanOrEqual(60 * 1000)
+  })
+
+  /** And short enough that a chat added in the other tool turns up. */
+  it('is short enough to notice a new chat without restarting', () => {
+    expect(IMPORT_SCAN_STALE_MS).toBeLessThanOrEqual(10 * 60 * 1000)
+  })
+})
 
 describe('importedSessionId', () => {
   const withSession = (kind: 'created' | 'refreshed', sessionId: string) =>

@@ -231,6 +231,23 @@ export function explainImportScanRefusal(
 }
 
 /**
+ * How long a look at another tool's saved chats stays fresh.
+ *
+ * Both reads touch the filesystem across every client GitWyrm knows about,
+ * and a scan parses each conversation file it finds -- so refetching on every
+ * window focus is expensive for a list that changes when the other tool is
+ * used, not when this window is looked at.
+ *
+ * It is also a correctness matter, which is why it is named rather than
+ * inlined twice. Each refetch rebuilds the row list, and a rebuilt row
+ * unmounts the one that was there -- which used to drop the only report a
+ * failed copy had, because the report lived on the row. The failure handling
+ * is at the hook now, so this is no longer load-bearing for that, but the two
+ * reads should still agree about how often they are worth repeating.
+ */
+export const IMPORT_SCAN_STALE_MS = 2 * 60 * 1000
+
+/**
  * The GitWyrm session an import produced, when it produced one.
  *
  * Both `created` and `refreshed` carry the session, and either can have

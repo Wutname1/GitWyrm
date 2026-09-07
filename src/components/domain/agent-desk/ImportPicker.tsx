@@ -199,10 +199,6 @@ function SessionRow({
           if (ok) toast.success(message)
           else toast.error(message)
         },
-        onError: (error) => {
-          log.error(`import session failed: ${String(error)}`)
-          toast.error('Could not import this session')
-        },
       }
     )
   }
@@ -235,12 +231,6 @@ function SessionRow({
             break
         }
       },
-      onError: (e) => {
-        log.error(`continue imported session here failed: ${describeError(e)}`)
-        toast.error('That chat could not be continued here.', {
-          description: 'Nothing was changed. You can try again.',
-        })
-      },
     })
   }
 
@@ -270,10 +260,6 @@ function SessionRow({
               toast.error('Could not unlink this chat')
               break
           }
-        },
-        onError: (error) => {
-          log.error(`unlink failed: ${String(error)}`)
-          toast.error('Could not unlink this chat')
         },
       }
     )
