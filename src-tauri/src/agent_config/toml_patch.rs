@@ -60,7 +60,33 @@ pub fn set_path(source: &str, path: &[&str], new_value: &Value) -> Result<String
 
     let written = to_table(new_value, last)?;
     table.insert(last, Item::Table(written));
-    Ok(doc.to_string())
+    Ok(restore_file_shape(source, doc.to_string()))
+}
+
+/// Put back the two things `toml_edit` normalises away.
+///
+/// Its document model keeps comments, key order and layout, which is why it
+/// is used -- but it emits LF line endings and drops a byte-order mark
+/// whatever the input had. On Windows that turns a one-key edit into a diff
+/// touching every line of someone's `config.toml`, and this module's own
+/// header promises it "keeps every byte it does not deliberately change".
+///
+/// `json_patch` already restores both for JSON and has a test pinning it;
+/// this is the same guarantee for the TOML side.
+fn restore_file_shape(source: &str, rendered: String) -> String {
+    // The rendered text is always LF, so this is a straight expansion rather
+    // than a normalise-then-expand.
+    let with_endings = if source.contains("\r\n") {
+        rendered.replace('\n', "\r\n")
+    } else {
+        rendered
+    };
+
+    const BOM: char = '\u{feff}';
+    if source.starts_with(BOM) && !with_endings.starts_with(BOM) {
+        return format!("{BOM}{with_endings}");
+    }
+    with_endings
 }
 
 /// Convert a JSON object into a TOML table.
@@ -118,6 +144,46 @@ fn to_value(value: &Value, label: &str) -> Result<TomlValue, TomlPatchError> {
 
 #[cfg(test)]
 mod tests {
+    /// Windows line endings survive. `toml_edit` emits LF whatever it was
+    /// given, so a one-key edit used to rewrite every line of someone's
+    /// `config.toml` -- contradicting this module's own promise to keep
+    /// every byte it does not deliberately change.
+    #[test]
+    fn windows_line_endings_are_not_rewritten() {
+        let src = "model = \"x\"\r\nother = 1\r\n";
+        let out = set_path(src, &["m", "g"], &serde_json::json!({"c": "y"})).expect("patched");
+
+        assert!(out.contains("model = \"x\"\r\n"), "{out:?}");
+        assert!(!out.contains("\n\n"), "a bare LF was left behind: {out:?}");
+        assert!(out.contains("[m.g]"), "{out:?}");
+    }
+
+    /// A file that used LF keeps LF -- the restoration must not add carriage
+    /// returns to a file that never had them.
+    #[test]
+    fn unix_line_endings_are_left_alone() {
+        let src = "model = \"x\"\nother = 1\n";
+        let out = set_path(src, &["m", "g"], &serde_json::json!({"c": "y"})).expect("patched");
+        assert!(!out.contains('\r'), "{out:?}");
+    }
+
+    /// A byte-order mark is part of the file, not noise. Dropping it changes
+    /// how some editors read the whole file back.
+    #[test]
+    fn a_byte_order_mark_survives() {
+        let src = "\u{feff}model = \"x\"\n";
+        let out = set_path(src, &["m", "g"], &serde_json::json!({"c": "y"})).expect("patched");
+        assert!(out.starts_with('\u{feff}'), "the mark was dropped: {out:?}");
+    }
+
+    /// And is not invented for a file that never had one.
+    #[test]
+    fn no_byte_order_mark_is_added() {
+        let src = "model = \"x\"\n";
+        let out = set_path(src, &["m", "g"], &serde_json::json!({"c": "y"})).expect("patched");
+        assert!(!out.starts_with('\u{feff}'), "{out:?}");
+    }
+
     use super::*;
     use serde_json::json;
 
