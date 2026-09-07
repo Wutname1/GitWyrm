@@ -168,6 +168,7 @@ fn find_member_value_span(source: &str, body_start: usize, body_end: usize, key:
     let mut current_key_start: Option<usize> = None;
     let mut current_key: Option<String> = None;
     let mut expect_value = false;
+    let mut found: Option<(usize, usize)> = None;
 
     while i < body_end {
         let c = bytes[i] as char;
@@ -179,7 +180,13 @@ fn find_member_value_span(source: &str, body_start: usize, body_end: usize, key:
             } else if c == '"' {
                 in_string = false;
                 if let (0, Some(start), false) = (depth, current_key_start, expect_value) {
-                    current_key = Some(source[start + 1..i].to_string());
+                    // Decoded, not the raw source text between the quotes.
+                    // A key the source spelled `"we\"ird"` never matched the
+                    // path `we"ird`, so an update silently became an insert
+                    // -- writing a second copy of a key that was already
+                    // there -- and a remove returned success having removed
+                    // nothing.
+                    current_key = decode_json_key(&source[start..=i]);
                 }
             }
             i += 1;
@@ -202,8 +209,13 @@ fn find_member_value_span(source: &str, body_start: usize, body_end: usize, key:
                     v += 1;
                 }
                 if current_key.as_deref() == Some(key) {
+                    // Recorded, not returned. A document can carry the same
+                    // key twice -- a hand-edited settings file easily does --
+                    // and every JSON reader takes the LAST one. Returning the
+                    // first wrote into the copy nothing reads: the write
+                    // reported success and the application saw no change.
                     let value_end = value_span_end(source, v, body_end)?;
-                    return Some((v, value_end));
+                    found = Some((v, value_end));
                 }
             }
             ',' if depth == 0 => {
@@ -215,7 +227,7 @@ fn find_member_value_span(source: &str, body_start: usize, body_end: usize, key:
         }
         i += 1;
     }
-    None
+    found
 }
 
 /// Given the start of a JSON value, find its end (exclusive) by scanning
@@ -546,6 +558,21 @@ fn pretty_print(value: &Value, indent: &str, depth: usize) -> String {
     }
 }
 
+/// The text a JSON string literal stands for, `literal` including its quotes.
+///
+/// The reverse of [`json_string_literal`], and it has to be, because a key is
+/// matched by what it MEANS rather than how it happens to be spelled: the
+/// same key can be written `"a"`, `"a"` or with any character escaped,
+/// and a settings file the person hand-edited may use any of them.
+///
+/// `None` for a literal that does not decode, which is treated as "does not
+/// match" rather than an error -- this walks a document that has already
+/// passed the structural check, and a lone unparseable key should not fail a
+/// write aimed at a different one.
+fn decode_json_key(literal: &str) -> Option<String> {
+    serde_json::from_str::<String>(literal).ok()
+}
+
 /// One JSON string literal, quotes included, escaped correctly.
 ///
 /// This was hand-rolled and handled five characters, letting everything else
@@ -568,6 +595,49 @@ fn json_string_literal(s: &str) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// A key is matched by what it means, not how it is spelled.
+    ///
+    /// Comparing the raw text between the quotes meant a key the file wrote
+    /// as `"we\"ird"` never matched the path `we"ird`. An update became an
+    /// insert -- leaving TWO copies of a key that was already there -- and a
+    /// remove reported success having removed nothing.
+    #[test]
+    fn a_key_the_file_spelled_with_an_escape_is_still_found() {
+        let src = r#"{"we\"ird": 1, "b": 2}"#;
+
+        let updated = set_path(src, &[r#"we"ird"#], &json!(5)).expect("patched");
+        let parsed: Value = serde_json::from_str(&updated).expect("readable");
+        assert_eq!(parsed[r#"we"ird"#], json!(5));
+        assert_eq!(parsed.as_object().unwrap().len(), 2, "a duplicate key was added: {updated}");
+
+        let removed = remove_path(src, &[r#"we"ird"#]).expect("removed");
+        let parsed: Value = serde_json::from_str(&removed).expect("readable");
+        assert!(parsed.get(r#"we"ird"#).is_none(), "nothing was removed: {removed}");
+    }
+
+    /// With the same key twice, every reader takes the last. Writing the
+    /// first reported success and changed nothing the application sees.
+    #[test]
+    fn a_duplicated_key_is_written_where_the_reader_will_look() {
+        let src = r#"{"a": 1, "a": 2}"#;
+        let out = set_path(src, &["a"], &json!(3)).expect("patched");
+        let parsed: Value = serde_json::from_str(&out).expect("readable");
+        assert_eq!(parsed["a"], json!(3), "the reader still sees the old value: {out}");
+    }
+
+    /// And the same for the map a connector is written into.
+    #[test]
+    fn a_duplicated_server_map_is_written_where_the_reader_will_look() {
+        let src = r#"{"mcpServers": {"old": 1}, "mcpServers": {"other": 2}}"#;
+        let out = set_path(src, &["mcpServers", "demo"], &json!({"command": "npx"}))
+            .expect("patched");
+        let parsed: Value = serde_json::from_str(&out).expect("readable");
+        assert!(
+            parsed["mcpServers"].get("demo").is_some(),
+            "the connector went into the map nothing reads: {out}"
+        );
+    }
 
     /// A connector name is taken verbatim from the source application and
     /// never validated, so one containing a quote or a backslash reached the
