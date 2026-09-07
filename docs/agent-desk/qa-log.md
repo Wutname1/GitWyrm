@@ -320,3 +320,11 @@ competing sub-agents, the answer names the losing option too.
 | 311 | 2026-09-25 | Does a helper now pass when the folder cannot be read? | No -- a condition nobody could check is not a condition met, but the sentence says GitWyrm could not look instead of blaming the agent. |
 | 312 | 2026-09-25 | Do results saved before this change still work? | Yes -- the new note defaults to absent, which is true of every result written before it existed, and a test loads an old one to prove it. |
 | 313 | 2026-09-25 | Was this one bug or several? | One line, four wrong things said to the user across three files, which is why every reader of that list was checked before anything was changed. |
+| 314 | 2026-09-26 | How did GitWyrm match an imported chat to one of your projects? | By lowercasing both folder paths and comparing them, which is safe on Windows but not on Linux. |
+| 315 | 2026-09-26 | What went wrong on Linux? | Two folders whose names differ only by capital letters are different folders there, so a chat could be filed under the wrong project. |
+| 316 | 2026-09-26 | Was that worse than not matching at all? | Yes -- a chat GitWyrm cannot place is shown with its folder and an offer to link it, while a wrong match says nothing. |
+| 317 | 2026-09-26 | Why not just compare the paths exactly? | Because VS Code writes the drive letter as a small c while GitWyrm stores a capital one, so every Copilot import would stop finding its project. |
+| 318 | 2026-09-26 | Why is ignoring the drive letter safe when ignoring folder names is not? | C: and c: are the same drive on every Windows machine no matter how the disk was set up, so that part is a fact rather than a guess. |
+| 319 | 2026-09-26 | Could this be decided by which system GitWyrm was built for? | No -- a Windows folder can be made case-sensitive and a Mac disk can be set up either way, so the build target does not know. |
+| 320 | 2026-09-26 | Did a test cover the old behaviour? | Yes, and it was the only evidence for it -- but its example was made up, since no tool actually spells a folder in a different case. |
+| 321 | 2026-09-26 | Did every suspected problem this pass turn out to be real? | No -- two looked like buttons and text that told the user nothing, and both were answered by what was already on screen beside them. |
