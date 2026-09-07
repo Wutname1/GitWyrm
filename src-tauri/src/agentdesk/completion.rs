@@ -20,15 +20,49 @@ use crate::agentdesk::result::{CheckRunOutcome, ResultCheckOutcome, ResultRecord
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompletionVerdict {
     /// The condition was met, or there was none to meet.
-    Met,
+    ///
+    /// `matched_loosely` names the check that answered the condition when it
+    /// was not called what the condition asked for -- `cargo test --lib` for
+    /// `cargo test`, say. Met either way: a helper that ran more than it was
+    /// asked to has still done the job. But the two are not the same claim,
+    /// and a met condition is otherwise completely silent, so the difference
+    /// is carried out rather than dropped here.
+    Met { matched_loosely: Option<LooseMatch> },
     /// The helper stopped without meeting it. `reason` is the sentence shown
     /// in the chat, written for someone who did not read the transcript.
     Unmet { reason: String },
 }
 
+/// A check that satisfied a condition under a different name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LooseMatch {
+    /// What the condition asked for.
+    pub wanted: String,
+    /// What the check that answered it was actually called.
+    pub recorded: String,
+}
+
 impl CompletionVerdict {
+    /// The plain [`CompletionVerdict::Met`] -- nothing to remark on.
+    pub fn met() -> Self {
+        CompletionVerdict::Met { matched_loosely: None }
+    }
+
     pub fn is_met(&self) -> bool {
-        matches!(self, CompletionVerdict::Met)
+        matches!(self, CompletionVerdict::Met { .. })
+    }
+
+    /// The sentence to add to the chat, if this verdict has anything to say
+    /// beyond passing or failing. `None` when there is nothing worth a note.
+    pub fn note(&self) -> Option<String> {
+        match self {
+            CompletionVerdict::Met {
+                matched_loosely: Some(LooseMatch { wanted, recorded }),
+            } => Some(format!(
+                "It was asked to make \"{wanted}\" pass. The check that passed was called \"{recorded}\"."
+            )),
+            _ => None,
+        }
     }
 }
 
@@ -46,13 +80,13 @@ pub fn judge(
     let Some(condition) = condition else {
         // No condition recorded: an older session, or the lead itself.
         // Finishing is finishing.
-        return CompletionVerdict::Met;
+        return CompletionVerdict::met();
     };
 
     match condition {
         // The helper finishing IS the report. This is the condition every
         // proposal uses today, and it is deliberately the weakest one.
-        CompletionCondition::ReportsResult => CompletionVerdict::Met,
+        CompletionCondition::ReportsResult => CompletionVerdict::met(),
 
         CompletionCondition::ChecksPass { command } => {
             let matching: Vec<&ResultCheckOutcome> = checks
@@ -70,7 +104,18 @@ pub fn judge(
             // fixed a failure and re-ran it has made it pass.
             let last = matching[matching.len() - 1];
             match last.outcome {
-                CheckRunOutcome::Passed => CompletionVerdict::Met,
+                CheckRunOutcome::Passed => CompletionVerdict::Met {
+                    // Only remarked on when the names genuinely differ. An
+                    // exact match has nothing to explain.
+                    matched_loosely: if last.command_name.trim().eq_ignore_ascii_case(command.trim()) {
+                        None
+                    } else {
+                        Some(LooseMatch {
+                            wanted: command.clone(),
+                            recorded: last.command_name.clone(),
+                        })
+                    },
+                },
                 CheckRunOutcome::Failed => CompletionVerdict::Unmet {
                     reason: format!("It was asked to make \"{command}\" pass, and it is still failing."),
                 },
@@ -101,7 +146,7 @@ pub fn judge(
                 .filter(|wanted| !changed.iter().any(|actual| path_matches(actual, wanted)))
                 .collect();
             if missing.is_empty() {
-                return CompletionVerdict::Met;
+                return CompletionVerdict::met();
             }
             let named = missing
                 .iter()
@@ -124,10 +169,41 @@ pub fn judge(
 /// Compared loosely on purpose: a condition says `cargo test` while the
 /// recorded name may be `cargo test --lib` or `Tests (cargo test)`. Demanding
 /// an exact string would fail a helper that ran precisely what was asked.
+///
+/// Loose in one direction only. The recorded name may add words; it may not
+/// drop them. This used to accept either name containing the other, which
+/// meant a *shorter* recorded name satisfied a longer condition: a check
+/// called `cargo` answered "make `cargo test --all-features` pass", `t`
+/// answered `cargo test`, and an empty name answered every condition there
+/// is, because every string contains the empty one.
+///
+/// That matters more than a string rule usually would. The name is the
+/// helper's own account of what it ran -- and a met condition is silent,
+/// while an unmet one stops the work and says so. So the weakest possible
+/// name bought the strongest possible outcome: the helper's changes went on
+/// to be merged with nothing said, which is the exact case
+/// `enforce_completion_condition` exists to prevent.
+///
+/// Compared as whole words rather than as substrings, so a shorter name can
+/// no longer ride inside a longer one. Punctuation is trimmed from each word
+/// so the `Tests (cargo test)` shape above still matches -- without that, its
+/// words are `(cargo` and `test)` and it would stop matching.
 fn check_matches(recorded: &str, wanted: &str) -> bool {
-    let recorded = recorded.trim().to_lowercase();
-    let wanted = wanted.trim().to_lowercase();
-    recorded == wanted || recorded.contains(&wanted) || wanted.contains(&recorded)
+    let recorded = words(recorded);
+    let wanted = words(wanted);
+    if recorded.is_empty() || wanted.is_empty() {
+        return false;
+    }
+    wanted.iter().all(|w| recorded.contains(w))
+}
+
+/// A name split into comparable words, lowercased, with surrounding
+/// punctuation dropped and empty pieces discarded.
+fn words(name: &str) -> Vec<String> {
+    name.split_whitespace()
+        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase())
+        .filter(|w| !w.is_empty())
+        .collect()
 }
 
 /// Whether a changed path satisfies a wanted path.
@@ -258,6 +334,83 @@ mod tests {
         // But an unrelated check does not stand in for the one asked for.
         let other = judge(Some(&condition), &[check("npm run lint", CheckRunOutcome::Passed)], None);
         assert!(matches!(other, CompletionVerdict::Unmet { .. }));
+    }
+
+    #[test]
+    /// A name shorter than the one asked for cannot stand in for it.
+    ///
+    /// The old rule accepted either name containing the other, so a check
+    /// called `cargo` answered a condition asking for `cargo test
+    /// --all-features`, `t` answered `cargo test`, and an empty name answered
+    /// everything -- every string contains the empty one. The name is the
+    /// helper's own account of what it ran, and a met condition is silent
+    /// while an unmet one stops the work, so the weakest name bought the
+    /// strongest outcome.
+    #[test]
+    fn a_shorter_name_cannot_stand_in_for_the_one_asked_for() {
+        let condition = CompletionCondition::ChecksPass {
+            command: "cargo test --all-features".into(),
+        };
+        for name in ["", "   ", "t", "cargo", "test"] {
+            let verdict = judge(Some(&condition), &[check(name, CheckRunOutcome::Passed)], None);
+            assert!(
+                matches!(verdict, CompletionVerdict::Unmet { .. }),
+                "{name:?} must not satisfy a condition it does not name"
+            );
+        }
+    }
+
+    /// The doc comment's own example keeps working.
+    ///
+    /// Words are compared with surrounding punctuation trimmed precisely so
+    /// this shape still matches -- untrimmed, its words are `(cargo` and
+    /// `test)` and a helper that ran exactly what was asked would be failed.
+    #[test]
+    fn a_decorated_name_still_matches_the_check_it_names() {
+        let condition = CompletionCondition::ChecksPass {
+            command: "cargo test".into(),
+        };
+        for name in ["Tests (cargo test)", "cargo test --lib", "Cargo Test", "cargo test"] {
+            assert!(
+                judge(Some(&condition), &[check(name, CheckRunOutcome::Passed)], None).is_met(),
+                "{name} should count"
+            );
+        }
+    }
+
+    /// A check called something other than what was asked for still counts,
+    /// and still gets said out loud.
+    #[test]
+    fn a_differently_named_check_is_met_and_remarked_on() {
+        let condition = CompletionCondition::ChecksPass {
+            command: "cargo test".into(),
+        };
+        let verdict = judge(
+            Some(&condition),
+            &[check("cargo test --lib", CheckRunOutcome::Passed)],
+            None,
+        );
+        assert!(verdict.is_met());
+        let note = verdict.note().expect("a differently named check is worth a sentence");
+        assert!(note.contains("cargo test --lib"), "{note}");
+        assert!(note.contains("cargo test"), "{note}");
+    }
+
+    /// The ordinary case stays silent. A check called exactly what the
+    /// condition asked for has nothing to explain, and a note on every
+    /// passing helper would be noise.
+    #[test]
+    fn an_exactly_named_check_says_nothing_extra() {
+        let condition = CompletionCondition::ChecksPass {
+            command: "cargo test".into(),
+        };
+        let verdict = judge(
+            Some(&condition),
+            &[check("Cargo Test", CheckRunOutcome::Passed)],
+            None,
+        );
+        assert!(verdict.is_met());
+        assert_eq!(verdict.note(), None, "only the spelling differed");
     }
 
     #[test]

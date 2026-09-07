@@ -2300,7 +2300,28 @@ fn enforce_completion_condition(
     let results = crate::agentdesk::result::read_results(root, session_id).unwrap_or_default();
     let result = results.iter().find(|r| r.execution_id == helper_execution_id);
 
-    let CompletionVerdict::Unmet { reason } = judge(condition.as_ref(), &checks, result) else {
+    let verdict = judge(condition.as_ref(), &checks, result);
+
+    let CompletionVerdict::Unmet { reason } = verdict else {
+        // Met. Says nothing at all when the check was called what it was
+        // asked to be called, which is the ordinary case and needs no
+        // remark. When a differently-named check answered the condition, the
+        // helper still counts as finished -- but the difference is worth one
+        // sentence, because this path is otherwise completely silent and its
+        // outcome is that the work goes on to be merged.
+        if let Some(note) = verdict.note() {
+            let title = helper
+                .job_title
+                .clone()
+                .unwrap_or_else(|| "A helper".to_string());
+            append_system_note(locks, root, session_id, &format!("\"{title}\" finished. {note}"));
+            // Re-read: the note above changed the session on disk, and
+            // returning the copy from before it would hand the caller a
+            // session that is one message behind.
+            if let Ok(updated) = store::read_session(root, session_id) {
+                return CompletionCheck::Passed(updated);
+            }
+        }
         return CompletionCheck::Passed(session);
     };
 

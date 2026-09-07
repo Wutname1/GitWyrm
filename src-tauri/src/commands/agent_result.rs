@@ -159,6 +159,13 @@ pub(crate) fn checks_for_execution(session: &AgentSession, execution_id: &str) -
             let rendered = m.rendered_content.as_deref()?;
             let step: crate::airun::driver::RunStep = serde_json::from_str(rendered).ok()?;
             match step {
+                // A check that reported no name is dropped rather than
+                // recorded. The name is what a completion condition is
+                // matched against, and a nameless one cannot answer "did it
+                // make `cargo test` pass?" either way -- keeping it would
+                // record evidence that names nothing. `detail` on the next
+                // line is already dropped when blank, for the same reason.
+                crate::airun::driver::RunStep::Check { name, .. } if name.trim().is_empty() => None,
                 crate::airun::driver::RunStep::Check { name, passed, detail } => Some(ResultCheckOutcome {
                     command_name: name,
                     outcome: if passed {
@@ -1719,6 +1726,48 @@ mod tests {
         SessionState, CURRENT_SCHEMA_VERSION,
     };
     use crate::agentdesk::result::{CheckRunOutcome, ResultCheckOutcome};
+
+    /// A check that reported no name is not recorded as evidence.
+    ///
+    /// The name is what a completion condition is matched against. A nameless
+    /// check cannot answer "did it make `cargo test` pass?" either way, so
+    /// keeping it would record evidence that names nothing -- and under the
+    /// old matching rule an empty name satisfied every condition there is.
+    #[test]
+    fn a_check_that_reported_no_name_is_not_recorded() {
+        let mut session = AgentSession::new(header("sess-1"));
+        for name in ["", "   ", "cargo test"] {
+            session.messages.push(crate::agentdesk::model::SessionMessage {
+                message_id: format!("m-{name}"),
+                segment_id: "seg-1".into(),
+                role: crate::agentdesk::model::MessageRole::Assistant,
+                timestamp: "2026-01-01T00:00:00Z".into(),
+                plain_content: String::new(),
+                rendered_content: Some(
+                    serde_json::to_string(&crate::airun::driver::RunStep::Check {
+                        name: name.to_string(),
+                        passed: true,
+                        detail: String::new(),
+                    })
+                    .unwrap(),
+                ),
+                provider: None,
+                model: None,
+                kind: crate::agentdesk::model::MessageKind::Tool,
+                execution_id: Some("exec-1".into()),
+                sequence: Some(1),
+                import: None,
+                targets: Vec::new(),
+            });
+        }
+
+        let checks = checks_for_execution(&session, "exec-1");
+        assert_eq!(
+            checks.iter().map(|c| c.command_name.as_str()).collect::<Vec<_>>(),
+            vec!["cargo test"],
+            "only the named check should survive"
+        );
+    }
 
     // -- startup orphan recovery, end to end against the real store and git --
 
