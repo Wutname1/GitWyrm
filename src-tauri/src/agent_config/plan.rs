@@ -81,6 +81,53 @@ pub enum ApplyWriteError {
     Rename { detail: String },
 }
 
+impl ApplyWriteError {
+    /// The sentence a person reads.
+    ///
+    /// The variant messages above are for a developer reading a log: they
+    /// name temp files, renames, flushes and receipts, and they carry the
+    /// operating system's own words. All of that reached the person
+    /// verbatim -- `apply_copy_at` puts `e.to_string()` straight into the
+    /// result the dialog prints -- so a locked settings file read as
+    /// "could not rename temp file into place: Access is denied. (os error
+    /// 5)".
+    ///
+    /// Same shape as `SkillCopyError::plain` next door: say what happened
+    /// and what would change it, and never make someone look up a word.
+    pub fn plain(&self) -> String {
+        match self {
+            ApplyWriteError::ReadDestination { .. } => {
+                "GitWyrm could not read that app's settings file, so it did not change it.                  The file may be open in another program."
+                    .into()
+            }
+            ApplyWriteError::ConcurrentChange { .. } => {
+                "That app's settings changed while you were looking at this, so nothing was                  written. Take another look and try again."
+                    .into()
+            }
+            ApplyWriteError::Backup { .. } => {
+                "GitWyrm could not save a copy of the old settings first, so it did not change                  them. Nothing has been altered."
+                    .into()
+            }
+            ApplyWriteError::Receipt { .. } => {
+                "GitWyrm could not record what it was about to change, so it stopped before                  changing anything. Without that record there would be no way to undo it."
+                    .into()
+            }
+            // The remaining four are all "the write itself did not land".
+            // Which step failed is a detail for the log, not for someone
+            // deciding what to do next -- and in every case the answer is
+            // the same, because the settings file is untouched.
+            ApplyWriteError::CreateDir { .. }
+            | ApplyWriteError::CreateTemp { .. }
+            | ApplyWriteError::WriteTemp { .. }
+            | ApplyWriteError::Flush { .. }
+            | ApplyWriteError::Rename { .. } => {
+                "GitWyrm could not write to that app's settings file. It is unchanged. The file                  may be open in another program, or read-only."
+                    .into()
+            }
+        }
+    }
+}
+
 /// Root directory for backups and receipts:
 /// `<app-data>/agent-config-sync/v1/{backups,receipts}`.
 #[derive(Debug, Clone)]
@@ -295,6 +342,34 @@ pub enum UndoWriteError {
     Write(#[from] ApplyWriteError),
 }
 
+impl UndoWriteError {
+    /// The sentence a person reads. Same reasoning as
+    /// [`ApplyWriteError::plain`]: the variant text above names receipts and
+    /// backups and carries the operating system's own words, and it reached
+    /// the person verbatim.
+    ///
+    /// The first three variants are handled before this is reached
+    /// (`undo_at` maps them to their own outcomes), so they are worded for
+    /// completeness rather than because they are seen here.
+    pub fn plain(&self) -> String {
+        match self {
+            UndoWriteError::NotFound => {
+                "GitWyrm has no record of that change, so there is nothing to undo.".into()
+            }
+            UndoWriteError::AlreadyUndone => "That change has already been undone.".into(),
+            UndoWriteError::ConcurrentChange { .. } => {
+                "That app's settings have changed since GitWyrm wrote to them, so they were left                  alone. Putting the old ones back would have thrown those changes away."
+                    .into()
+            }
+            UndoWriteError::BackupUnreadable { .. } => {
+                "GitWyrm could not read its copy of the old settings, so it left the file as it                  is rather than replacing it with nothing."
+                    .into()
+            }
+            UndoWriteError::Write(e) => e.plain(),
+        }
+    }
+}
+
 /// Undo one operation: verify the destination still matches the hash this
 /// operation last produced (`after_hash`), then restore the backed-up bytes
 /// (or delete the file, if this operation created it from nothing) and mark
@@ -376,6 +451,81 @@ pub fn undo_write(
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    /// Every reason a write can fail must reach the person in words they can
+    /// act on. These messages used to be the developer text plus the
+    /// operating system's own -- "could not rename temp file into place:
+    /// Access is denied. (os error 5)" -- printed straight into the dialog.
+    #[test]
+    fn a_failed_write_is_explained_without_jargon() {
+        let detail = || "Access is denied. (os error 5)".to_string();
+        let cases = [
+            ApplyWriteError::ReadDestination { detail: detail() },
+            ApplyWriteError::ConcurrentChange { expected_hash: None, actual_hash: None },
+            ApplyWriteError::Backup { detail: detail() },
+            ApplyWriteError::Receipt { detail: detail() },
+            ApplyWriteError::CreateDir { dir: PathBuf::from("x"), detail: detail() },
+            ApplyWriteError::CreateTemp { detail: detail() },
+            ApplyWriteError::WriteTemp { detail: detail() },
+            ApplyWriteError::Flush { detail: detail() },
+            ApplyWriteError::Rename { detail: detail() },
+        ];
+
+        for case in &cases {
+            let message = case.plain();
+            assert!(!message.is_empty(), "{case:?} has no sentence");
+            // Not the operating system's words, and not the code's own.
+            for word in ["os error", "temp", "flush", "rename", "receipt", "destination", "hash"] {
+                assert!(
+                    !message.to_lowercase().contains(word),
+                    "jargon {word:?} in: {message}"
+                );
+            }
+        }
+    }
+
+    /// The four steps of writing a file are one situation to the person: the
+    /// settings are unchanged. Saying which internal step failed would only
+    /// invite them to debug GitWyrm.
+    #[test]
+    fn the_write_steps_all_say_the_settings_are_unchanged() {
+        let detail = || "whatever".to_string();
+        for case in [
+            ApplyWriteError::CreateTemp { detail: detail() },
+            ApplyWriteError::WriteTemp { detail: detail() },
+            ApplyWriteError::Flush { detail: detail() },
+            ApplyWriteError::Rename { detail: detail() },
+        ] {
+            assert!(case.plain().contains("unchanged"), "{}", case.plain());
+        }
+    }
+
+    /// A failure while undoing is explained the same way, and one that wraps
+    /// a write failure reuses that wording rather than inventing a second.
+    #[test]
+    fn a_failed_undo_is_explained_without_jargon() {
+        let cases = [
+            UndoWriteError::NotFound,
+            UndoWriteError::AlreadyUndone,
+            UndoWriteError::BackupUnreadable { detail: "os error 5".into() },
+            UndoWriteError::Write(ApplyWriteError::Rename { detail: "os error 5".into() }),
+        ];
+        for case in &cases {
+            let message = case.plain();
+            for word in ["os error", "temp", "rename", "receipt", "backup file"] {
+                assert!(
+                    !message.to_lowercase().contains(word),
+                    "jargon {word:?} in: {message}"
+                );
+            }
+        }
+
+        // The wrapped case is the write's own sentence, not a new one.
+        assert_eq!(
+            UndoWriteError::Write(ApplyWriteError::Rename { detail: "x".into() }).plain(),
+            ApplyWriteError::Rename { detail: "x".into() }.plain()
+        );
+    }
 
     fn roots() -> (TempDir, SafeWriteRoot) {
         let dir = TempDir::new().unwrap();

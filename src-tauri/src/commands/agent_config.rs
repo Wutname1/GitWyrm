@@ -700,7 +700,7 @@ fn apply_copy_at(write_root: &SafeWriteRoot, plan_id: &str) -> ApplyOutcome {
             }
             Err(e) => DestinationApplyResult::WriteFailed {
                 client: destination.client,
-                detail: e.to_string(),
+                detail: e.plain(),
             },
         });
     }
@@ -774,7 +774,7 @@ fn undo_at(write_root: &SafeWriteRoot, operation_id: &str) -> UndoOutcome {
         Err(plan::UndoWriteError::ConcurrentChange { expected_hash, actual_hash }) => {
             UndoOutcome::ConcurrentChangeRefused { expected_hash, actual_hash }
         }
-        Err(e) => UndoOutcome::RestoreFailed { detail: e.to_string() },
+        Err(e) => UndoOutcome::RestoreFailed { detail: e.plain() },
     }
 }
 
