@@ -23,7 +23,9 @@ use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PatchError {
-    #[error("source is not valid JSON: {0}")]
+    /// The document is damaged in a way that makes editing unsafe. The
+    /// detail is written for a person, not copied from a parser.
+    #[error("that file could not be edited safely: {0}")]
     InvalidJson(String),
     #[error("expected a JSON object at the top level")]
     NotAnObject,
@@ -39,11 +41,9 @@ pub enum PatchError {
 /// style, which this function detects from the surrounding text rather than
 /// imposing a fixed style.
 pub fn set_path(source: &str, path: &[&str], new_value: &Value) -> Result<String, PatchError> {
-    // Parse once, purely to validate the document is well-formed JSON and to
-    // fail with a typed error before any text surgery. The parsed value is
-    // otherwise unused for building output -- output is built from the
-    // original text plus one spliced-in span.
-    serde_json::from_str::<Value>(source).map_err(|e| PatchError::InvalidJson(e.to_string()))?;
+    // Validated before any text surgery, so a genuinely damaged file fails
+    // with a typed error rather than being spliced into something worse.
+    check_editable(source)?;
 
     let root_span = top_level_object_span(source).ok_or(PatchError::NotAnObject)?;
     let indent = detect_indent(source);
@@ -54,7 +54,7 @@ pub fn set_path(source: &str, path: &[&str], new_value: &Value) -> Result<String
 /// unchanged) if any segment of the path does not exist -- undo and re-apply
 /// flows call this defensively and should not error on "already gone".
 pub fn remove_path(source: &str, path: &[&str]) -> Result<String, PatchError> {
-    serde_json::from_str::<Value>(source).map_err(|e| PatchError::InvalidJson(e.to_string()))?;
+    check_editable(source)?;
     let Some(root_span) = top_level_object_span(source) else {
         return Err(PatchError::NotAnObject);
     };
@@ -63,8 +63,59 @@ pub fn remove_path(source: &str, path: &[&str]) -> Result<String, PatchError> {
 
 /// Byte range `[start, end)` of the top-level `{ ... }`, including the
 /// braces.
+/// Whether this document is one this module can safely edit.
+///
+/// Strict `serde_json` was the gate here, and it was the wrong one. VS Code's
+/// `settings.json` is JSONC: it permits `//` and `/* */` comments and
+/// trailing commas, and VS Code itself writes them -- the settings file on
+/// the machine this was found on fails strict parsing at line 7, on a
+/// trailing comma VS Code put there. So copying a connector into Copilot was
+/// refused for an ordinary file, with a message calling it invalid.
+///
+/// The refusal was safe but wrong, and the machinery underneath never needed
+/// the gate to be that strict: `matching_brace` walks the text
+/// string-and-escape aware, and the splice copies every byte outside the one
+/// member it replaces -- comments and trailing commas included, exactly as
+/// this module's own header promises.
+///
+/// So the check is now structural rather than a full parse: the document must
+/// have a top-level object whose braces balance. That still refuses a
+/// truncated or garbled file, which is the case worth refusing, without
+/// rejecting a file the destination application reads happily.
+fn check_editable(source: &str) -> Result<(), PatchError> {
+    if source.trim().is_empty() {
+        return Err(PatchError::InvalidJson(
+            "the file is empty, so there is nothing to add to".into(),
+        ));
+    }
+    if top_level_object_span(source).is_some() {
+        return Ok(());
+    }
+    // "Not the shape of a settings file" and "damaged" are different
+    // problems and the caller says so differently. A document whose first
+    // real character is not `{` is the first: an array, a bare string, a
+    // number. Only a document that opens an object and never closes it is
+    // the second.
+    let opens_an_object = source
+        .trim_start()
+        .starts_with('{');
+    if !opens_an_object {
+        return Err(PatchError::NotAnObject);
+    }
+    Err(PatchError::InvalidJson(
+        "a bracket is left open somewhere in the file".into(),
+    ))
+}
+
 fn top_level_object_span(source: &str) -> Option<(usize, usize)> {
-    let start = source.find('{')?;
+    // The first non-whitespace byte, not the first `{` anywhere. A document
+    // that is a bare string containing a brace -- `"{}"` is valid JSON --
+    // would otherwise have the brace inside its quotes treated as the root
+    // object, and the splice returned corrupt output with `Ok`.
+    let start = source.find(|c: char| !c.is_whitespace())?;
+    if source[start..].chars().next()? != '{' {
+        return None;
+    }
     let end = matching_brace(source, start)?;
     Some((start, end + 1))
 }
@@ -331,10 +382,16 @@ fn set_path_in_object(
     let trimmed_body = body.trim_end_matches([' ', '\t', '\n', '\r']);
     let is_empty_body = trimmed_body.trim().is_empty();
 
+    // The key is escaped, not interpolated raw. A connector name is taken
+    // verbatim from the source application's config and never validated, so
+    // one containing a quote or a backslash used to produce a settings file
+    // the destination could not parse at all -- losing every unrelated
+    // setting in it, not just the copied entry.
+    let key_literal = json_string_literal(key);
     let insertion = if is_empty_body {
-        format!("{nl}{member_indent}\"{key}\": {pretty_value}{nl}{}", indent.repeat(depth))
+        format!("{nl}{member_indent}{key_literal}: {pretty_value}{nl}{}", indent.repeat(depth))
     } else {
-        format!(",{nl}{member_indent}\"{key}\": {pretty_value}")
+        format!(",{nl}{member_indent}{key_literal}: {pretty_value}")
     };
 
     let insert_at = body_start + trimmed_body.len();
@@ -464,8 +521,8 @@ fn pretty_print(value: &Value, indent: &str, depth: usize) -> String {
                 .iter()
                 .map(|(k, v)| {
                     format!(
-                        "{inner_indent}\"{}\": {}",
-                        escape_json_string(k),
+                        "{inner_indent}{}: {}",
+                        json_string_literal(k),
                         pretty_print(v, indent, depth + 1)
                     )
                 })
@@ -484,30 +541,95 @@ fn pretty_print(value: &Value, indent: &str, depth: usize) -> String {
                 .collect();
             format!("[\n{}\n{outer_indent}]", body.join(",\n"))
         }
-        Value::String(s) => format!("\"{}\"", escape_json_string(s)),
+        Value::String(s) => json_string_literal(s),
         Value::Number(_) | Value::Bool(_) | Value::Null => value.to_string(),
     }
 }
 
-fn escape_json_string(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c => out.push(c),
-        }
-    }
-    out
+/// One JSON string literal, quotes included, escaped correctly.
+///
+/// This was hand-rolled and handled five characters, letting everything else
+/// through unchanged -- including the control characters JSON forbids inside
+/// a string. A value carrying one (an environment variable, a header, text
+/// pasted from elsewhere) both lost the character and produced a file the
+/// destination application could not parse at all, taking every unrelated
+/// setting in it down too.
+///
+/// serde_json is correct by construction here and needs no maintaining, so
+/// there is no reason to keep a second implementation of it. A string cannot
+/// fail to serialise, but the fallback is written out rather than unwrapped:
+/// this runs while editing someone else's settings file, which is not a
+/// place to panic.
+fn json_string_literal(s: &str) -> String {
+    serde_json::to_string(s).unwrap_or_else(|_| format!("{s:?}"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// A connector name is taken verbatim from the source application and
+    /// never validated, so one containing a quote or a backslash reached the
+    /// insertion raw. The result was a settings file the destination could
+    /// not parse at all -- every unrelated setting in it lost, not just the
+    /// copied entry.
+    #[test]
+    fn a_key_needing_escaping_still_produces_a_readable_file() {
+        for key in [r#"say "hi""#, r"C:\path", "tab\there", "new\nline"] {
+            let out = set_path("{}", &[key], &json!(1)).expect("patched");
+            let parsed: Value = serde_json::from_str(&out)
+                .unwrap_or_else(|e| panic!("key {key:?} produced unreadable JSON: {e}\n{out}"));
+            assert_eq!(parsed[key], json!(1), "key {key:?} did not round-trip");
+        }
+    }
+
+    /// A control character is forbidden inside a JSON string. The hand-rolled
+    /// escaper passed them through untouched, so the character was lost AND
+    /// the file became unreadable.
+    #[test]
+    fn a_value_holding_a_control_character_survives_and_stays_readable() {
+        let value = "a\u{0007}b\u{0000}c";
+        let out = set_path("{}", &["k"], &json!(value)).expect("patched");
+        let parsed: Value = serde_json::from_str(&out).expect("readable JSON");
+        assert_eq!(parsed["k"], json!(value));
+    }
+
+    /// `"{}"` is a valid JSON document that is a string, not an object. The
+    /// brace scan used to find the `{` inside the quotes and splice there,
+    /// returning corrupt output as `Ok`.
+    #[test]
+    fn a_document_that_is_a_string_is_refused_not_spliced() {
+        assert_eq!(set_path("\"{}\"", &["a"], &json!(1)), Err(PatchError::NotAnObject));
+        assert_eq!(set_path("  [1, 2]", &["a"], &json!(1)), Err(PatchError::NotAnObject));
+    }
+
+    /// VS Code writes JSONC: comments and trailing commas are ordinary, and
+    /// the settings file this was found against fails strict JSON parsing on
+    /// a trailing comma VS Code itself put there. Refusing it told the person
+    /// their file was invalid when the application reads it happily.
+    #[test]
+    fn a_settings_file_with_a_trailing_comma_can_still_be_edited() {
+        let src = "{\n  \"a\": 1,\n  \"[lua]\": {\n    \"x\": \"y\",\n  },\n  \"b\": 2\n}\n";
+        let out = set_path(src, &["mcp", "servers", "demo"], &json!({"command": "npx"}))
+            .expect("an ordinary VS Code settings file is editable");
+
+        assert!(out.contains("\"x\": \"y\","), "{out}");
+        assert!(out.contains("\"[lua]\""), "{out}");
+        assert!(out.contains("\"demo\""), "{out}");
+    }
+
+    /// A genuinely damaged file is still refused, in words a person can read.
+    #[test]
+    fn a_truncated_file_is_refused_in_plain_words() {
+        let err = set_path("{\n  \"a\": 1,\n", &["b"], &json!(2)).expect_err("refused");
+        let message = err.to_string();
+        assert!(message.contains("could not be edited safely"), "{message}");
+        assert!(message.contains("bracket"), "{message}");
+        for jargon in ["EOF", "serde", "column", "token"] {
+            assert!(!message.contains(jargon), "jargon in: {message}");
+        }
+    }
 
     #[test]
     fn setting_a_new_top_level_key_on_a_two_key_object_preserves_the_rest() {
