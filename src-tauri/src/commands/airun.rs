@@ -567,20 +567,70 @@ fn route_to_agent_desk(app: &tauri::AppHandle, event: &RunEventKind) {
         // enum and `agentSessionStore.ts` handles it, but nothing in this
         // change's scope produces one; see that store's doc comment for the
         // forward-looking reason it stays.
-        RunEventRouted::NoLinkedSession
-        | RunEventRouted::Ignored(_) => {}
+        // Nothing was recorded and nothing was meant to be: no session is
+        // linked to this repository. The sequence number goes back, because a
+        // number spent on nothing still makes the next real event look like it
+        // skipped one -- and a skipped number is how a listener decides part
+        // of the chat went missing.
+        RunEventRouted::NoLinkedSession => {
+            links.release_sequence(&event_session_id, sequence);
+        }
+        // A duplicate or superseded event. `apply_run_event` was reached and
+        // decided this event adds nothing, which is correct and silent -- but
+        // it recorded no sequence either, so the number goes back for the same
+        // reason as above.
+        //
+        // In particular, `BridgeOutcome::ExecutionSuperseded` is deliberately
+        // *not* turned into an `AgentSessionEventKind::ExecutionSuperseded`
+        // emit here -- design.md is explicit that a superseded event is
+        // ignored on both sides, and nothing was persisted for it to describe
+        // (see "Persist an event before emitting it to the UI", also
+        // design.md). `AgentSessionEventKind::ExecutionSuperseded` exists in
+        // the event enum and `agentSessionStore.ts` handles it, but nothing in
+        // this change's scope produces one; see that store's doc comment for
+        // the forward-looking reason it stays.
+        RunEventRouted::Ignored(_) => {
+            links.release_sequence(&event_session_id, sequence);
+        }
         RunEventRouted::SessionUnavailable => {
             log::warn!(
                 "agent desk session for repo {} could not be read; durable run event dropped",
                 event.repo_id
             );
+            links.release_sequence(&event_session_id, sequence);
         }
         RunEventRouted::WriteFailed { detail } => {
             // Per task 4.3/design.md: a write failure must never be followed
-            // by an emit. There is nothing more to do here than log it --
-            // `ai-run-event` already carried the event to the live UI, so the
-            // run itself is unaffected, only its durable copy is missing.
+            // by an emit *of the event*, because a message shown to someone
+            // has to be one they can still find after reopening the chat.
+            //
+            // The sequence number is deliberately NOT released here, and this
+            // is the one case where the gap it leaves is telling the truth:
+            // this event really is missing from the durable record. Releasing
+            // it would hide a genuine loss, which is the failure this whole
+            // path exists to avoid.
+            //
+            // What is emitted is a separate notice carrying no message
+            // content, so it says the record is incomplete without pretending
+            // anything was saved. Without it the window drew "close this and
+            // open it again to load the full record" -- advice that sends
+            // someone to the copy that is missing the message, while the copy
+            // that has it is the one on their screen.
             log::warn!("agent desk durable write failed, event not persisted: {detail}");
+            if let Some(session_id) = links.get(&event_session_id) {
+                let _ = app.emit(
+                    crate::agentdesk::AGENT_SESSION_EVENT,
+                    crate::agentdesk::events::AgentSessionEvent {
+                        session_id: session_id.to_string(),
+                        execution_id: Some(crate::agentdesk::execution_id_for_run_session(
+                            &event_session_id,
+                        )),
+                        sequence,
+                        occurred_at: now.clone(),
+                        kind: crate::agentdesk::events::AgentSessionEventKind::NotSaved,
+                    },
+                );
+            }
         }
     }
 }

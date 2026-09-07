@@ -118,6 +118,30 @@ impl RunSessionLinks {
         *counter
     }
 
+    /// Hands `sequence` back, so the next event reuses it.
+    ///
+    /// A number is taken before the event is routed, because routing needs it.
+    /// When routing then decides the event is not going to be recorded at all
+    /// -- no session is linked to this repository, or the session file cannot
+    /// be read -- that number has been spent on nothing. The next event that
+    /// *is* recorded arrives one higher than the listener expects, and the
+    /// listener has no way to tell that apart from a message that went
+    /// missing: it draws "some of this chat did not reach this window" for a
+    /// chat that is whole.
+    ///
+    /// Only correct for a number nothing else has used yet, which is why this
+    /// takes the number back rather than just decrementing: a later call
+    /// having already moved the counter on means this one was not the last,
+    /// and putting it back would hand the same number out twice.
+    pub fn release_sequence(&self, run_session_id: &str, sequence: u32) {
+        let mut map = self.sequences.lock().unwrap();
+        if let Some(counter) = map.get_mut(run_session_id) {
+            if *counter == sequence {
+                *counter -= 1;
+            }
+        }
+    }
+
     /// Drops the sequence counter for a finished `airun` session, so a future
     /// reuse of the same session ID (should the counter type ever wrap, or in
     /// a test) starts clean rather than inheriting a stale count.
@@ -312,6 +336,12 @@ pub fn apply_run_event(
             }
         }
         AgentSessionEventKind::StateChanged { .. } | AgentSessionEventKind::ExecutionSuperseded { .. } => {}
+        // Never reached: `map_run_step` does not produce this. `NotSaved`
+        // reports that a write of one of the variants above failed, so it is
+        // emitted by the caller after this function has already returned --
+        // there is by definition no session to fold it into, because folding
+        // it in would require the write that just failed.
+        AgentSessionEventKind::NotSaved => {}
     }
     // The session's own header state always tracks its LEAD execution's
     // state, not only on the `Ended` step that produces an explicit
@@ -1023,6 +1053,50 @@ mod tests {
         assert_eq!(links.next_sequence("run-1"), 1);
         assert_eq!(links.next_sequence("run-1"), 2);
         assert_eq!(links.next_sequence("run-1"), 3);
+    }
+
+    /// A number taken for an event that was never recorded goes back, so the
+    /// next real event does not look like it skipped one.
+    ///
+    /// The listener decides "part of this chat is missing" purely from a jump
+    /// in these numbers. An event dropped for a reason that records nothing --
+    /// no session linked to this repository, a duplicate, a session file that
+    /// could not be read -- used to spend a number anyway, so a perfectly whole
+    /// chat drew the warning.
+    #[test]
+    fn a_number_taken_for_nothing_goes_back() {
+        let links = RunSessionLinks::new();
+        assert_eq!(links.next_sequence("run-1"), 1);
+        let unused = links.next_sequence("run-1");
+        assert_eq!(unused, 2);
+        links.release_sequence("run-1", unused);
+        assert_eq!(
+            links.next_sequence("run-1"),
+            2,
+            "the next event should reuse the number nothing was written under"
+        );
+    }
+
+    /// Releasing anything but the number just handed out is ignored.
+    ///
+    /// Only the most recent number is safe to take back. If another event has
+    /// already taken one since, putting this one back would hand the same
+    /// number to two different events -- and a repeated number reads as a
+    /// duplicate, which is dropped.
+    #[test]
+    fn releasing_a_stale_number_changes_nothing() {
+        let links = RunSessionLinks::new();
+        let first = links.next_sequence("run-1");
+        assert_eq!(links.next_sequence("run-1"), 2);
+        links.release_sequence("run-1", first);
+        assert_eq!(links.next_sequence("run-1"), 3);
+    }
+
+    #[test]
+    fn releasing_for_an_unknown_run_is_harmless() {
+        let links = RunSessionLinks::new();
+        links.release_sequence("never-seen", 7);
+        assert_eq!(links.next_sequence("never-seen"), 1);
     }
 
     #[test]

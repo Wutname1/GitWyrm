@@ -115,9 +115,15 @@ export function useAgentSession(sessionId: string | null) {
   // while turns are missing is the thing this product promises not to do.
   const hasMissingEvents = (liveEntry?.gappedExecutionIds?.length ?? 0) > 0
 
+  // Something the backend could not write to the session file. Kept apart from
+  // `hasMissingEvents` because the two need opposite advice: a missing event is
+  // in the file and reopening the chat loads it, while an unsaved one is only
+  // on screen and reopening loses it.
+  const hasUnsavedEvents = (liveEntry?.unsavedExecutionIds?.length ?? 0) > 0
+
   const state = liveEntry?.state ?? session?.header.state ?? null
 
-  return { ...query, session, messages, state, hasMissingEvents }
+  return { ...query, session, messages, state, hasMissingEvents, hasUnsavedEvents }
 }
 
 let listenerRefCount = 0

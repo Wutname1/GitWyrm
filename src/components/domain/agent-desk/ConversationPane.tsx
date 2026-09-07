@@ -447,7 +447,8 @@ export function ConversationPane({
   showSourceBanner = true,
   paneLabel,
 }: ConversationPaneProps) {
-  const { session, messages, state, isLoading, isError, hasMissingEvents } = useAgentSession(sessionId)
+  const { session, messages, state, isLoading, isError, hasMissingEvents, hasUnsavedEvents } =
+    useAgentSession(sessionId)
   const targetNav = useMessageTargetNav(session)
   const [flashId, setFlashId] = useState<string | null>(null)
   const transcriptRef = useRef<HTMLDivElement | null>(null)
@@ -740,11 +741,31 @@ export function ConversationPane({
               return nodes
             })
           )}
-          {hasMissingEvents && (
-            // Said plainly rather than left to a silent gap. Reopening the
-            // chat refetches from the durable file, which has the messages
-            // this window missed -- so the fix is in the person's hands and
-            // the sentence names it.
+          {/*
+            Two warnings that look the same from a sequence number and need
+            opposite advice.
+
+            A missing event is one the file has and this window did not get:
+            reopening the chat loads it. An unsaved event is the reverse -- the
+            file is what is missing it, and the only copy is the one on screen,
+            so reopening loads nothing and closing the app loses it. Telling
+            someone to reopen in that case sends them to the emptier copy.
+
+            The unsaved one is shown alone when both are true, because it is the
+            one with something to lose and its advice contradicts the other's.
+          */}
+          {hasUnsavedEvents ? (
+            <div
+              role="status"
+              className="flex items-start gap-1.5 rounded border border-[var(--gw-amber)]/40 bg-[var(--gw-amber)]/10 px-2 py-1 text-2xs leading-relaxed text-[var(--gw-amber)]"
+            >
+              <TriangleAlert size={12} className="mt-px flex-none" aria-hidden />
+              <span>
+                Part of this chat could not be saved. It is on screen now, but closing GitWyrm
+                will lose it. Copy anything you want to keep.
+              </span>
+            </div>
+          ) : hasMissingEvents ? (
             <div
               role="status"
               className="flex items-start gap-1.5 rounded border border-[var(--gw-amber)]/40 bg-[var(--gw-amber)]/10 px-2 py-1 text-2xs leading-relaxed text-[var(--gw-amber)]"
@@ -752,7 +773,7 @@ export function ConversationPane({
               <TriangleAlert size={12} className="mt-px flex-none" aria-hidden />
               <span>Some of this chat did not reach this window. Close it and open it again to load the full record.</span>
             </div>
-          )}
+          ) : null}
           {runIsActive(state) && (
             // Announced: a screen-reader user needs the run state most, and it
             // was the one transition this pane changed silently. The predicate

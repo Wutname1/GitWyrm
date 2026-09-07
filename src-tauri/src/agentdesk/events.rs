@@ -65,6 +65,22 @@ pub enum AgentSessionEventKind {
     /// already rendered something optimistically can reconcile.
     #[serde(rename_all = "camelCase")]
     ExecutionSuperseded { execution_id: ExecutionId },
+    /// This event could not be written to the session file, so the durable
+    /// record is missing it.
+    ///
+    /// Carries no message content, deliberately. "Persist an event before
+    /// emitting it to the UI" exists so nothing appears on screen that would
+    /// vanish on reopening -- this notice describes the store rather than
+    /// adding to the transcript, so it does not have that problem and does not
+    /// need to survive a reopen.
+    ///
+    /// It exists because a listener cannot otherwise tell two very different
+    /// situations apart. Both show up as a skipped sequence number. In one the
+    /// window missed an event the file has, and reopening the chat loads it.
+    /// In the other -- this one -- the file is what is missing it, and the
+    /// only copy is the one already on screen. The advice for the first is
+    /// actively wrong for the second.
+    NotSaved,
 }
 
 #[cfg(test)]

@@ -65,6 +65,16 @@ function message(id: string): SessionMessage {
   }
 }
 
+function notSaved(sequence: number, executionId: string | null = EXEC): AgentSessionEvent {
+  return {
+    sessionId: SESSION,
+    executionId,
+    sequence,
+    occurredAt: '2026-08-19T00:00:00Z',
+    kind: { kind: 'notSaved' },
+  }
+}
+
 function appended(sequence: number, id: string, executionId: string | null = EXEC): AgentSessionEvent {
   return {
     sessionId: SESSION,
@@ -74,6 +84,52 @@ function appended(sequence: number, id: string, executionId: string | null = EXE
     kind: { kind: 'messageAppended', message: message(id) },
   }
 }
+
+describe('an event the backend could not save', () => {
+  const apply = (e: AgentSessionEvent) => useAgentSessionStore.getState().applyEvent(e)
+  const entry = () => useAgentSessionStore.getState().bySession[SESSION]
+  const unsaved = () => entry()?.unsavedExecutionIds ?? []
+  const gaps = () => entry()?.gappedExecutionIds ?? []
+
+  // A gap and an unsaved event are indistinguishable from a sequence number --
+  // both are a jump -- and they need opposite advice. Without this the window
+  // told the person to reopen the chat, which loads the copy that is missing
+  // the message and leaves the one that has it behind.
+  it('is recorded apart from a delivery gap', () => {
+    apply(appended(1, 'a'))
+    apply(notSaved(2))
+    expect(unsaved()).toContain(EXEC)
+  })
+
+  it('adds no message to the transcript', () => {
+    apply(appended(1, 'a'))
+    apply(notSaved(2))
+    expect(entry()?.messages.map((m) => m.messageId)).toEqual(['a'])
+  })
+
+  // The number this notice carries is the one that was never written, so it
+  // must stay unclaimed: the next event really has skipped it, and that jump
+  // is what says the record is incomplete.
+  it('leaves the skipped number for the next event to reveal', () => {
+    apply(appended(1, 'a'))
+    apply(notSaved(2))
+    apply(appended(3, 'b'))
+    expect(gaps()).toContain(EXEC)
+  })
+
+  it('says nothing twice for the same execution', () => {
+    apply(appended(1, 'a'))
+    apply(notSaved(2))
+    apply(notSaved(5))
+    expect(unsaved()).toEqual([EXEC])
+  })
+
+  it('stays quiet when every event was saved', () => {
+    apply(appended(1, 'a'))
+    apply(appended(2, 'b'))
+    expect(unsaved()).toEqual([])
+  })
+})
 
 describe('agentSessionStore', () => {
   it('applies a new event and appends the message', () => {

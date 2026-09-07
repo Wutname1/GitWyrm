@@ -34,6 +34,21 @@ interface SessionLiveEntry {
    * do, in the surface a person reads to decide whether to keep the work.
    */
   gappedExecutionIds: string[]
+  /**
+   * Executions where the backend said outright that it could not save an
+   * event.
+   *
+   * A gap and an unsaved event look identical from a sequence number alone --
+   * both are a jump -- but they are opposites, and the advice for one is
+   * wrong for the other. A gap means the file has a message this window
+   * missed, so reopening the chat loads it. An unsaved event means the window
+   * has a message the file missed, so reopening loads nothing and the copy on
+   * screen is the only one there is.
+   *
+   * The backend now says which, on the one it knows: `notSaved` carries no
+   * message, only the fact that a write failed.
+   */
+  unsavedExecutionIds: string[]
   /** Latest state pushed by a `stateChanged` event, if newer than the query. */
   state: SessionState | null
   /** Executions superseded mid-flight; their further events are dropped. */
@@ -44,6 +59,7 @@ const EMPTY_ENTRY: SessionLiveEntry = {
   messages: [],
   lastSequenceByExecution: {},
   gappedExecutionIds: [],
+  unsavedExecutionIds: [],
   state: null,
   supersededExecutionIds: [],
 }
@@ -90,6 +106,28 @@ export const useAgentSessionStore = create<AgentSessionStore>((set) => ({
                 ...entry.supersededExecutionIds,
                 payload.executionId,
               ],
+            },
+          },
+        }
+      }
+
+      // The backend could not write this event to the session file. Recorded
+      // rather than folded into the transcript: it carries no message, and the
+      // message it is about is already on screen, delivered live.
+      //
+      // Deliberately does NOT touch `lastSequenceByExecution`. The number this
+      // event carries is the one that was never saved, so leaving it unclaimed
+      // is what lets the next event still read as a jump -- the jump is real
+      // here, and this notice is what says which kind it is.
+      if (payload.kind === 'notSaved') {
+        const key = event.executionId ?? '__none__'
+        if (entry.unsavedExecutionIds.includes(key)) return s
+        return {
+          bySession: {
+            ...s.bySession,
+            [event.sessionId]: {
+              ...entry,
+              unsavedExecutionIds: [...entry.unsavedExecutionIds, key],
             },
           },
         }
@@ -206,6 +244,15 @@ export const useAgentSessionStore = create<AgentSessionStore>((set) => ({
    *
    * Written down because a careful reading of `clearSession` alone concludes
    * the opposite, and did.
+   *
+   * `unsavedExecutionIds` is the case where that reasoning does NOT hold: the
+   * record is what is missing the message, so a refetch would load less than
+   * the window has. It is safe to clear here anyway, because this only runs
+   * when `liveOverlayIsRedundant` says every live message is already in the
+   * durable record -- an unsaved message keeps that false, so this is not
+   * reached while one is outstanding. If the write later succeeds and the
+   * record catches up, the warning has genuinely stopped being true and
+   * clearing it is right.
    */
   clearSession: (sessionId) =>
     set((s) => {
