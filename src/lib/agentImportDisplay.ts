@@ -230,6 +230,33 @@ export function explainImportScanRefusal(
   }
 }
 
+/**
+ * The GitWyrm session an import produced, when it produced one.
+ *
+ * Both `created` and `refreshed` carry the session, and either can have
+ * changed a transcript that is open on screen -- a refresh especially, since
+ * it appends every message found since last time. The caller needs the id to
+ * refresh that view; without it the person is told messages arrived and sees
+ * none of them.
+ *
+ * `null` for the outcomes that changed nothing, so the caller invalidates
+ * only what actually moved.
+ */
+export function importedSessionId(outcome: ImportSessionOutcome): string | null {
+  switch (outcome.kind) {
+    case 'created':
+    case 'refreshed':
+      return outcome.session.header.sessionId
+    case 'adapterDisabled':
+    case 'clientNotDetected':
+    case 'sessionNotFound':
+    case 'ambiguousSession':
+    case 'corruptSession':
+    case 'writeFailed':
+      return null
+  }
+}
+
 function explainAdapterError(error: AdapterError): string {
   switch (error.kind) {
     case 'clientNotDetected':

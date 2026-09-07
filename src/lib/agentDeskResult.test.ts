@@ -28,6 +28,7 @@ import {
   failingCheckLines,
   runActivityLabel,
   describeSetPreferencesFailure,
+  describeUpdateSessionFailure,
   runStoppedBadly,
   runStoppedBadlyLabel,
   runIsActive,
@@ -832,6 +833,54 @@ describe('runStoppedBadlyLabel', () => {
   it('says nothing for a run that did not stop badly', () => {
     expect(runStoppedBadlyLabel('working')).toBeNull()
     expect(runStoppedBadlyLabel(null)).toBeNull()
+  })
+})
+
+describe('describeUpdateSessionFailure', () => {
+  /**
+   * The backend says why a write failed. Discarding it left every write
+   * failure reading "Its saved file could not be written", whatever had
+   * actually gone wrong.
+   */
+  it('passes on the reason a write failed rather than a fixed sentence', () => {
+    expect(
+      describeUpdateSessionFailure({ kind: 'writeFailed', detail: 'the disk is full' })
+    ).toBe('the disk is full')
+  })
+
+  /** A locked file is worth retrying, and the wording says so. */
+  it('says a locked file is worth trying again', () => {
+    const message = describeUpdateSessionFailure({ kind: 'unavailable', detail: 'locked' })
+    expect(message).toMatch(/again/i)
+  })
+
+  /** A missing chat is not worth retrying, and must not say it is. */
+  it('does not invite a retry for a chat that is gone', () => {
+    const message = describeUpdateSessionFailure({ kind: 'notFound' })
+    expect(message).not.toMatch(/again/i)
+  })
+
+  /** Success has nothing to explain. */
+  it('says nothing when it worked', () => {
+    expect(
+      describeUpdateSessionFailure({ kind: 'updated', session: {} as never })
+    ).toBe('')
+  })
+
+  /** Rule #2: read by someone who does not know what any of this is called. */
+  it('explains every outcome without naming anything internal', () => {
+    const outcomes = [
+      { kind: 'notFound' },
+      { kind: 'damaged', reason: 'x' },
+      { kind: 'unavailable', detail: 'x' },
+    ] as const
+    for (const outcome of outcomes) {
+      const message = describeUpdateSessionFailure(outcome as never)
+      expect(message).toBeTruthy()
+      for (const word of ['session', 'outcome', 'variant', 'mutation', 'query']) {
+        expect(message.toLowerCase()).not.toContain(word)
+      }
+    }
   })
 })
 

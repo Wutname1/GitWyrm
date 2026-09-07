@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { commands } from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
+import { importedSessionId } from '@/lib/agentImportDisplay'
 
 /**
  * External chat import (agent-desk-external-chat-import): detected clients,
@@ -57,8 +58,18 @@ export function useAgentImportContinuation(
 
 /** Import (or incrementally refresh) one external session into a durable
  * GitWyrm session. Invalidates the adapter's scan (so `alreadyImported`
- * flips) and the native session list (the new/updated session must appear
- * there immediately, per Rule #1: every action needs a visible result). */
+ * flips), the native session list (the new/updated session must appear there
+ * immediately, per Rule #1: every action needs a visible result), and the
+ * imported session's OWN query.
+ *
+ * That last one was missing, and it is the one that matters most on a
+ * refresh: pressing Refresh on a chat already open in the conversation pane
+ * appended the newly-found messages, said "Added 4 new messages", and left
+ * the pane showing the transcript from before. The person was told messages
+ * had arrived and could see none of them.
+ *
+ * Both siblings below already do this; import was the only one that did not,
+ * and the only one that can add many messages at once. */
 export function useImportExternalSession() {
   const qc = useQueryClient()
   return useMutation({
@@ -69,9 +80,13 @@ export function useImportExternalSession() {
       adapterId: string
       externalSessionId: string
     }) => unwrap(await commands.agentImportSession(adapterId, externalSessionId)),
-    onSuccess: (_result, variables) => {
+    onSuccess: (result, variables) => {
       qc.invalidateQueries({ queryKey: keys.agentImportScan(variables.adapterId) })
       qc.invalidateQueries({ queryKey: keys.agentSessionsAll })
+      const sessionId = importedSessionId(result)
+      if (sessionId) {
+        qc.invalidateQueries({ queryKey: keys.agentSession(sessionId) })
+      }
     },
   })
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  importedSessionId,
   isUnresolvedProject,
   explainImportScanRefusal,
   explainImportOutcome, adapterDisplayName, canBrowseAdapter,
@@ -45,6 +46,40 @@ function scanned(overrides: Partial<ScannedExternalSession> = {}): ScannedExtern
     ...overrides,
   }
 }
+
+describe('importedSessionId', () => {
+  const withSession = (kind: 'created' | 'refreshed', sessionId: string) =>
+    ({
+      kind,
+      session: { header: { sessionId } },
+      ...(kind === 'refreshed' ? { newMessageCount: 4 } : {}),
+    }) as never
+
+  /**
+   * A refresh appends everything found since last time, so a chat already
+   * open on screen has to be told. Without this the person was shown
+   * "Added 4 new messages" above a transcript that still ended where it had
+   * before.
+   */
+  it('names the session for an import that changed one', () => {
+    expect(importedSessionId(withSession('created', 's1'))).toBe('s1')
+    expect(importedSessionId(withSession('refreshed', 's2'))).toBe('s2')
+  })
+
+  /** Nothing changed, so nothing needs refreshing. */
+  it('names nothing for an import that did not happen', () => {
+    for (const kind of [
+      'adapterDisabled',
+      'clientNotDetected',
+      'sessionNotFound',
+      'ambiguousSession',
+    ] as const) {
+      expect(importedSessionId({ kind } as never)).toBeNull()
+    }
+    expect(importedSessionId({ kind: 'corruptSession', detail: 'x' } as never)).toBeNull()
+    expect(importedSessionId({ kind: 'writeFailed', detail: 'x' } as never)).toBeNull()
+  })
+})
 
 describe('detectionLabel', () => {
   it('says Found for a supported, enabled, detected adapter', () => {

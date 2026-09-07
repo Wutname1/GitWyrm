@@ -3,7 +3,7 @@ import { toast } from 'sonner'
 import { commands } from '@/lib/bindings'
 import { keys, unwrap } from '@/lib/queryKeys'
 import { log } from '@/lib/log'
-import { explainEscalateToFixOutcome } from '@/lib/agentDeskResult'
+import { describeUpdateSessionFailure, explainEscalateToFixOutcome } from '@/lib/agentDeskResult'
 
 /**
  * Sidebar-scoped session mutations (rename, archive, delete) for task 3.5's
@@ -35,7 +35,7 @@ export function useAgentSessionMutations() {
       if (outcome.kind !== 'updated') {
         log.warn(`agent session rename: ${outcome.kind} for ${vars.sessionId}`)
         toast.error('Could not rename that chat.', {
-          description: renameFailureReason(outcome.kind),
+          description: describeUpdateSessionFailure(outcome),
         })
       }
     },
@@ -53,7 +53,12 @@ export function useAgentSessionMutations() {
       invalidate(vars.sessionId)
       if (outcome.kind !== 'updated') {
         log.warn(`agent session archive: ${outcome.kind} for ${vars.sessionId}`)
-        toast.error(vars.archived ? 'Could not archive that chat.' : 'Could not restore that chat.')
+        // The reason, not just the refusal. This used to discard the outcome
+        // and say only that it had not worked, so a locked file and a
+        // missing chat read identically and neither suggested what to do.
+        toast.error(vars.archived ? 'Could not archive that chat.' : 'Could not restore that chat.', {
+          description: describeUpdateSessionFailure(outcome),
+        })
         return
       }
       // Success is reported HERE, once it has actually happened. The row used
@@ -77,7 +82,17 @@ export function useAgentSessionMutations() {
 
   const markRead = useMutation({
     mutationFn: async (sessionId: string) => unwrap(await commands.agentSessionMarkRead(sessionId)),
-    onSuccess: (_outcome, sessionId) => invalidate(sessionId),
+    onSuccess: (outcome, sessionId) => {
+      invalidate(sessionId)
+      // No toast on purpose: marking read happens because someone opened a
+      // chat, not because they asked for it, so a red banner would be about
+      // something they did not do. But it can genuinely fail -- a locked
+      // file leaves the chat unread -- and swallowing the outcome left the
+      // dot refusing to clear with nothing recorded anywhere to explain it.
+      if (outcome.kind !== 'updated') {
+        log.warn(`agent session mark-read: ${outcome.kind} for ${sessionId}`)
+      }
+    },
     onError: (e) => log.error(`agent session mark-read threw: ${String(e)}`),
   })
 
@@ -98,7 +113,15 @@ export function useAgentSessionMutations() {
       if (outcome.kind === 'failed') {
         log.warn(`agent session delete failed for ${sessionId}: ${outcome.detail}`)
         toast.error('Could not delete that chat.', { description: outcome.detail })
+        return
       }
+      // Say so when it worked. Archiving -- the reversible one -- confirms,
+      // and deleting did not, so the irreversible action was the quieter of
+      // the two. The row leaving the list is not enough on its own: if the
+      // deleted chat is the one open beside it, the pane keeps showing it
+      // until its own query notices, and silence there reads as nothing
+      // having happened.
+      toast.success('Chat deleted.')
     },
     onError: (e, sessionId) => {
       log.error(`agent session delete threw for ${sessionId}: ${String(e)}`)
@@ -128,17 +151,4 @@ export function useAgentSessionMutations() {
   })
 
   return { rename, archive, markRead, remove, escalateToFix }
-}
-
-function renameFailureReason(kind: string): string {
-  switch (kind) {
-    case 'notFound':
-      return 'That chat no longer exists.'
-    case 'damaged':
-      return 'Its saved file could not be read.'
-    case 'unavailable':
-      return 'Its saved file is locked right now. Try again in a moment.'
-    default:
-      return 'Its saved file could not be written.'
-  }
 }

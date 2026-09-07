@@ -882,6 +882,38 @@ export function runStoppedBadlyLabel(state: SessionState | null | undefined): st
  * `notFound` deliberately carries no backend string: the chat is simply gone,
  * and there is nothing further to report about it.
  */
+/**
+ * Why renaming or archiving a chat did not work.
+ *
+ * Same shape as `describeSetPreferencesFailure` below, and here for the same
+ * reason: this lived inside the mutation hook, took a bare `string`, and
+ * matched four variant names by hand. So `writeFailed` fell through to a
+ * default reading "Its saved file could not be written" -- while the
+ * `detail` the backend sends saying WHY was thrown away -- and a variant
+ * added or renamed later would silently join it there, with the compiler
+ * unable to say so.
+ *
+ * Taking the typed outcome makes a new variant a build error, and moving it
+ * to `src/lib` is what lets it be tested at all: the test setup covers this
+ * folder and deliberately does not cover hooks.
+ */
+export function describeUpdateSessionFailure(outcome: UpdateSessionOutcome): string {
+  switch (outcome.kind) {
+    case 'updated':
+      return ''
+    case 'notFound':
+      return 'That chat no longer exists.'
+    case 'damaged':
+      return 'Its saved file could not be read.'
+    case 'unavailable':
+      return 'Its saved file is locked right now. Try again in a moment.'
+    case 'writeFailed':
+      // The backend says why. Discarding it left every write failure
+      // reading the same, whatever had actually gone wrong.
+      return outcome.detail
+  }
+}
+
 export function describeSetPreferencesFailure(outcome: UpdateSessionOutcome): string {
   switch (outcome.kind) {
     case 'updated':
