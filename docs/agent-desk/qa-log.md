@@ -282,3 +282,9 @@ competing sub-agents, the answer names the losing option too.
 | 273 | 2026-09-20 | What kept rebuilding the rows? | Re-reading the other tool's chats on every return to the window, which opens and parses every saved conversation. |
 | 274 | 2026-09-20 | Should the failure message stay on the row or move to the action? | The action -- it is the only one guaranteed to still be there when the answer arrives. |
 | 275 | 2026-09-20 | Was the same wording then shown twice when the row had not moved? | No -- the copies on the rows were removed at the same time, so each failure is reported once. |
+| 276 | 2026-09-21 | Did the confirm boxes show anything while the work was running? | No -- they closed the moment you clicked, so a slow delete or removal left nothing on screen at all. |
+| 277 | 2026-09-21 | Why did clicking twice show an error for something that worked? | The button was never disabled, so the second click deleted a thing that was already gone and reported that as a failure. |
+| 278 | 2026-09-21 | Was this only in the agent workspace? | No -- twelve dialogs across the whole app, including deleting files, removing worktrees and closing pull requests. |
+| 279 | 2026-09-21 | Was it a deliberate choice? | No -- nineteen other dialogs already did it correctly, two of them in the same files as the broken ones. |
+| 280 | 2026-09-21 | Should a fixed dialog close on success or on finish? | On finish -- closing only on success would leave it stranded open behind an error message when something failed. |
+| 281 | 2026-09-21 | Did the new guard work the first time? | No -- it read two dialogs I had just fixed as clean, because it stopped scanning inside their descriptions. |
