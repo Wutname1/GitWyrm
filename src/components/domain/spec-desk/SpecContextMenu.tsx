@@ -55,6 +55,9 @@ export function SpecContextMenu({ change, repoId, children }: SpecContextMenuPro
     archiveChange.mutate(
       { changeId: change.id },
       {
+        // The dialog is held open so "Archiving…" can be seen, so closing it
+        // is this handler's job -- on every outcome, including a throw.
+        onSettled: () => setConfirmArchive(false),
         onSuccess: (attempt) => {
           // The menu has no room for an explanation and an override, so a
           // blocked archive points at the Desk, where both live. It never
@@ -158,6 +161,7 @@ export function SpecContextMenu({ change, repoId, children }: SpecContextMenuPro
         confirmLabel="Archive it"
         pending={archiveChange.isPending}
         pendingLabel="Archiving…"
+        keepOpenOnConfirm
         onConfirm={archive}
       />
     </>

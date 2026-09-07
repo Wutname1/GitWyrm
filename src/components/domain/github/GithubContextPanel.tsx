@@ -127,7 +127,12 @@ function DependabotActions({
   pendingId,
 }: {
   number: number
-  onCommand: (cmd: DependabotCommand) => void
+  /**
+   * Runs the command, calling `onSettled` once it has finished either way.
+   * The confirmation below stays open until then so it can show its progress,
+   * which means it needs to be told when to close.
+   */
+  onCommand: (cmd: DependabotCommand, onSettled?: () => void) => void
   pendingId: string | null
 }) {
   const [confirming, setConfirming] = useState<DependabotCommand | null>(null)
@@ -199,9 +204,10 @@ function DependabotActions({
         confirmLabel={confirming?.label ?? ''}
         pendingLabel="Sending…"
         pending={pendingId != null}
+        keepOpenOnConfirm
         onConfirm={() => {
-          if (confirming) onCommand(confirming)
-          setConfirming(null)
+          if (!confirming) return
+          onCommand(confirming, () => setConfirming(null))
         }}
       />
     </div>
@@ -248,7 +254,7 @@ function PrPanel({ number }: { number: number }) {
   const method = useWorkspaceStore((s) => s.mergeMethod)
   const setMethod = useWorkspaceStore((s) => s.setMergeMethod)
 
-  const runDependabotCommand = (cmd: DependabotCommand) => {
+  const runDependabotCommand = (cmd: DependabotCommand, onSettled?: () => void) => {
     setDependabotPending(cmd.id)
     gh.comment.mutate(
       {
@@ -257,7 +263,12 @@ function PrPanel({ number }: { number: number }) {
         body: cmd.command,
         successMessage: 'Asked Dependabot. It usually acts within a minute.',
       },
-      { onSettled: () => setDependabotPending(null) }
+      {
+        onSettled: () => {
+          setDependabotPending(null)
+          onSettled?.()
+        },
+      }
     )
   }
 

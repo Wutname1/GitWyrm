@@ -157,6 +157,11 @@ function WorktreeRow({ worktree, canAdd }: { worktree: Worktree; canAdd: boolean
         choice: clean ? 'refuse' : discard ? 'discard' : 'keep',
       },
       {
+        // Closed only once the removal has actually finished, so the dialog
+        // shows "Removing…" for as long as the work takes. It used to close
+        // on the click, which left a slow remove with nothing on screen at
+        // all -- and let a second click remove twice.
+        onSettled: () => setConfirmRemove(false),
         onSuccess: ({ outcome }) => {
           if (outcome.kind === 'removed') {
             // Cleaning up in two places is the step people forget, so the
@@ -357,6 +362,7 @@ function WorktreeRow({ worktree, canAdd }: { worktree: Worktree; canAdd: boolean
         }
         pending={m.removeWorktree.isPending}
         pendingLabel="Removing…"
+        keepOpenOnConfirm
         onConfirm={runRemove}
       />
 
@@ -414,6 +420,7 @@ function WorktreeRow({ worktree, canAdd }: { worktree: Worktree; canAdd: boolean
         confirmLabel="Delete the branch"
         pending={m.deleteBranch.isPending || m.deleteRemoteBranch.isPending}
         pendingLabel="Deleting…"
+        keepOpenOnConfirm
         onConfirm={() => {
           if (!cleanupBranch) return
           if (remember) {

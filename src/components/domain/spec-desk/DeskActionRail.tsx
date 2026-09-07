@@ -423,6 +423,11 @@ export function DeskActionRail({
           setResult(outcome);
         },
         onError: (e) => toast.error(describeError(e)),
+        // Every success branch above closes the dialog itself, because each one
+        // decides where the answer goes. This covers the throw, which does not
+        // reach any of them -- without it the held-open dialog would stay up
+        // with an error toast behind it.
+        onSettled: () => setConfirmArchive(false),
       }
     );
   };
@@ -763,6 +768,7 @@ export function DeskActionRail({
         confirmLabel="Archive it"
         pending={archiveChange.isPending}
         pendingLabel="Archiving…"
+        keepOpenOnConfirm
         onConfirm={() => archive()}
       />
       {/* The drafted fix, for review. Nothing is on disk until Add. */}

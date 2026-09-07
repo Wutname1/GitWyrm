@@ -242,7 +242,13 @@ function SubmoduleRow({ sub }: { sub: SubmoduleStatus }) {
         confirmLabel="Match the project"
         pending={m.updateSubmodule.isPending}
         pendingLabel="Matching…"
-        onConfirm={() => m.updateSubmodule.mutate({ path: sub.path, init: true })}
+        keepOpenOnConfirm
+        onConfirm={() =>
+          m.updateSubmodule.mutate(
+            { path: sub.path, init: true },
+            { onSettled: () => setConfirmReset(false) }
+          )
+        }
       />
 
       <ConfirmDialog
@@ -271,7 +277,13 @@ function SubmoduleRow({ sub }: { sub: SubmoduleStatus }) {
         confirmLabel="Remove submodule"
         pending={m.removeSubmodule.isPending}
         pendingLabel="Removing…"
-        onConfirm={() => m.removeSubmodule.mutate({ path: sub.path, deleteFiles })}
+        keepOpenOnConfirm
+        onConfirm={() =>
+          m.removeSubmodule.mutate(
+            { path: sub.path, deleteFiles },
+            { onSettled: () => setConfirmRemove(false) }
+          )
+        }
       />
     </>
   )

@@ -139,10 +139,11 @@ export function SpecRowActions({
   // A draft has no tasks at all, so "everything is done" would be a lie.
   const canArchive = openTasks === 0 && !change.progress.is_draft
 
-  const archive = () => {
+  const archive = (onSettled?: () => void) => {
     archiveChange.mutate(
       { changeId: change.id },
       {
+        onSettled,
         onSuccess: (attempt) => {
           // A row has no room for an explanation and an override, so a blocked
           // archive points at the Desk's rail, where both live. It never forces
@@ -177,10 +178,11 @@ export function SpecRowActions({
     )
   }
 
-  const remove = () => {
+  const remove = (onSettled?: () => void) => {
     deleteChange.mutate(
       { changeId: change.id },
       {
+        onSettled,
         onSuccess: () => toast.success(`Deleted ${change.id}.`),
         onError: (e) =>
           toast.error(`Could not delete ${change.id}.`, { description: String(e) }),
@@ -206,8 +208,13 @@ export function SpecRowActions({
       if (which === 'archive') setSkipArchivePrompt(true)
       else setSkipDeletePrompt(true)
     }
-    if (which === 'archive') archive()
-    else remove()
+    // The dialog is held open by `keepOpenOnConfirm` so its progress label can
+    // be seen, which means closing it is this function's job. `archive` and
+    // `remove` are also called straight from `request` when the prompt has been
+    // waved through, and there is no dialog to close on that path.
+    const close = () => setConfirm(null)
+    if (which === 'archive') archive(close)
+    else remove(close)
   }
 
   return (
@@ -254,6 +261,7 @@ export function SpecRowActions({
         confirmLabel="Archive it"
         pending={archiveChange.isPending}
         pendingLabel="Archiving…"
+        keepOpenOnConfirm
         onConfirm={() => confirmed('archive')}
       />
 
@@ -287,6 +295,7 @@ export function SpecRowActions({
         confirmLabel="Delete it"
         pending={deleteChange.isPending}
         pendingLabel="Deleting…"
+        keepOpenOnConfirm
         onConfirm={() => confirmed('delete')}
       />
     </>

@@ -334,9 +334,24 @@ export function SessionSidebar({
         }
         confirmLabel="Delete"
         destructive
+        // Held open while the delete runs, the way every other destructive
+        // dialog here works. It used to fire and close in the same breath, so
+        // a second click landing before the close could send the delete
+        // twice -- and the second one comes back "failed", because the chat
+        // is already gone. That produced a red "Could not delete that chat"
+        // for a delete that had worked perfectly.
+        pending={remove.isPending}
+        pendingLabel="Deleting…"
+        keepOpenOnConfirm
         onConfirm={() => {
-          if (pendingDelete) remove.mutate(pendingDelete.id)
-          setPendingDelete(null)
+          if (!pendingDelete) return
+          remove.mutate(pendingDelete.id, {
+            // Closed on settle rather than on success: a delete that refused
+            // because the chat is still working has already said so in its
+            // own words, and leaving the dialog up would ask the person to
+            // dismiss the same news twice.
+            onSettled: () => setPendingDelete(null),
+          })
         }}
       />
       {isLoading && headers.length === 0 && (

@@ -141,7 +141,8 @@ export function FileActionDialogs({ path, confirm }: { path: string; confirm: Fi
         confirmLabel="Delete file"
         pending={m.deleteFile.isPending}
         pendingLabel="Deleting…"
-        onConfirm={() => m.deleteFile.mutate(path)}
+        keepOpenOnConfirm
+        onConfirm={() => m.deleteFile.mutate(path, { onSettled: () => confirm.close() })}
       />
 
       <ConfirmDialog
@@ -159,7 +160,8 @@ export function FileActionDialogs({ path, confirm }: { path: string; confirm: Fi
         confirmLabel="Restore file"
         pending={m.restoreFile.isPending}
         pendingLabel="Restoring…"
-        onConfirm={() => m.restoreFile.mutate(path)}
+        keepOpenOnConfirm
+        onConfirm={() => m.restoreFile.mutate(path, { onSettled: () => confirm.close() })}
       />
     </>
   )

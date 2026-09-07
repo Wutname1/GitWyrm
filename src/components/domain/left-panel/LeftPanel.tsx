@@ -699,18 +699,23 @@ export function LeftPanel() {
         confirmLabel="Delete branch"
         pending={m.deleteBranch.isPending || m.deleteRemoteBranch.isPending}
         pendingLabel="Deleting…"
+        keepOpenOnConfirm
         onConfirm={() => {
           if (!branchToDelete) return
+          const close = () => deleteBranchPrompt(null)
           if (alsoDeleteRemote && localDeleteRemoteTarget) {
-            m.deleteRemoteBranch.mutate({
-              name: localDeleteRemoteTarget.branch,
-              remote: localDeleteRemoteTarget.remote,
-              alsoLocal: true,
-              localName: branchToDelete,
-            })
+            m.deleteRemoteBranch.mutate(
+              {
+                name: localDeleteRemoteTarget.branch,
+                remote: localDeleteRemoteTarget.remote,
+                alsoLocal: true,
+                localName: branchToDelete,
+              },
+              { onSettled: close }
+            )
             return
           }
-          m.deleteBranch.mutate(branchToDelete)
+          m.deleteBranch.mutate(branchToDelete, { onSettled: close })
         }}
       />
 
@@ -902,8 +907,13 @@ export function LeftPanel() {
         confirmLabel="Remove it"
         pending={m.deleteRemoteTag.isPending}
         pendingLabel="Removing…"
+        keepOpenOnConfirm
         onConfirm={() =>
-          toRemoveFromRemote && m.deleteRemoteTag.mutate({ name: toRemoveFromRemote })
+          toRemoveFromRemote &&
+          m.deleteRemoteTag.mutate(
+            { name: toRemoveFromRemote },
+            { onSettled: () => setToRemoveFromRemote(null) }
+          )
         }
       />
     </div>

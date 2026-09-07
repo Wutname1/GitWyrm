@@ -261,6 +261,11 @@ function SessionRow({
               break
           }
         },
+        // Closed on settle, not on success: every outcome above has already
+        // said its piece, and a refusal that left the dialog up would ask
+        // the person to dismiss the same news twice. The hook reports a
+        // thrown failure, so that case is covered too.
+        onSettled: () => setConfirmUnlinkOpen(false),
       }
     )
   }
@@ -341,8 +346,12 @@ function SessionRow({
         title={unlinkCopy.title}
         description={unlinkCopy.description}
         confirmLabel="Unlink"
+        // Held open so `pending` has something to render on. Without this the
+        // dialog closed on confirm, so "Unlinking…" was never seen and a
+        // second click could unlink twice.
         pending={unlinkMutation.isPending}
         pendingLabel="Unlinking…"
+        keepOpenOnConfirm
         onConfirm={handleUnlink}
       />
     </div>

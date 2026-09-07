@@ -719,9 +719,16 @@ export function ResultReviewPanel({
         }
         confirmLabel="Throw it away"
         destructive
+        // `pending` needs the dialog to still be there to show it. Without
+        // `keepOpenOnConfirm` the dialog closed the moment it was confirmed,
+        // so "Throwing away…" was never seen and a second click could throw
+        // the same work away twice.
         pending={busy}
         pendingLabel="Throwing away…"
-        onConfirm={() => void handleUndo()}
+        keepOpenOnConfirm
+        onConfirm={() => {
+          void handleUndo().finally(() => setConfirmUndo(false))
+        }}
       />
     </div>
   )
