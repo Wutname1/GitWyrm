@@ -312,3 +312,11 @@ competing sub-agents, the answer names the losing option too.
 | 303 | 2026-09-24 | Was a sub-agent argument right that the doc example already failed? | No -- running it showed it passes today, and building on that claim would have broken the one case the note singles out. |
 | 304 | 2026-09-24 | Should a differently named check pass in silence? | No -- it still counts, but the chat now says which check answered the request in one sentence. |
 | 305 | 2026-09-24 | Is it now verified that the check really passed? | No -- whether it passed is still the agent own report, and the note above the code no longer claims otherwise. |
+| 306 | 2026-09-25 | What happened when GitWyrm could not read the folder an agent worked in? | It wrote down an empty list of changes, which is exactly what it writes for an agent that genuinely changed nothing. |
+| 307 | 2026-09-25 | What did that empty list cause? | The panel said "No file changes", Keep said there was nothing to keep, and a helper was told in the chat that it left no changes at all. |
+| 308 | 2026-09-25 | Why is the Keep one the worst? | Real work sitting in that folder became impossible to keep, and the reason given was that there was nothing there. |
+| 309 | 2026-09-25 | Was the right answer already written down somewhere? | Yes -- the same function is called by Undo, which treats an unreadable folder as touched and explains in a comment why that is the safe direction. |
+| 310 | 2026-09-25 | Should GitWyrm just refuse to build the result instead? | No -- that would throw away the outcome, the checks and the commit it did measure, which is the same mistake one layer up. |
+| 311 | 2026-09-25 | Does a helper now pass when the folder cannot be read? | No -- a condition nobody could check is not a condition met, but the sentence says GitWyrm could not look instead of blaming the agent. |
+| 312 | 2026-09-25 | Do results saved before this change still work? | Yes -- the new note defaults to absent, which is true of every result written before it existed, and a test loads an old one to prove it. |
+| 313 | 2026-09-25 | Was this one bug or several? | One line, four wrong things said to the user across three files, which is why every reader of that list was checked before anything was changed. |
