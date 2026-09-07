@@ -274,3 +274,7 @@ competing sub-agents, the answer names the losing option too.
 | 265 | 2026-09-18 | Should a settings file that is a shortcut be written through, or left alone? | Left alone -- writing through means writing somewhere the preview never showed you, which is the one thing "nothing lands automatically" forbids. |
 | 266 | 2026-09-18 | Does writing through a shortcut break the safety of the write? | No -- that objection describes a half-fix, and resolving properly keeps it safe; the reason to refuse is about consent, not safety. |
 | 267 | 2026-09-18 | Why can a shortcut not simply be put back afterwards? | Because nothing records that it was ever a shortcut -- the saved copy holds the file's contents, not the fact that it pointed somewhere else. |
+| 268 | 2026-09-19 | Did refreshing an imported chat show the messages it added? | No -- it reported a count and left the conversation on screen unchanged, so you were told about messages you could not see. |
+| 269 | 2026-09-19 | Did deleting a chat confirm that it worked? | No -- archiving, which you can undo, confirmed while deleting did not, so the irreversible action was the quieter of the two. |
+| 270 | 2026-09-19 | Was the reason a rename or archive failed ever shown? | No -- the explanation the backend sent was thrown away and every failure read the same, whatever had gone wrong. |
+| 271 | 2026-09-19 | Can these hooks be tested directly? | No -- the test setup deliberately covers only pure logic, so the fix was to move the decisions out into that folder rather than add a browser test framework. |
