@@ -304,3 +304,11 @@ competing sub-agents, the answer names the losing option too.
 | 295 | 2026-09-23 | Should a failed save give its number back too? | No -- that gap is telling the truth, and hiding it would turn a real loss back into silence. |
 | 296 | 2026-09-23 | What happens if the very first message of a run fails to save? | Nothing was said at all before, because there was no earlier number to skip from; the new notice covers it. |
 | 297 | 2026-09-23 | Did the competing arguments settle it? | They produced the two-part answer, but both rested on a claim about reopening that turned out to be wrong when checked. |
+| 298 | 2026-09-24 | How did GitWyrm decide the check an agent ran was the one it was asked for? | By seeing whether either name contained the other, which let a shorter name answer a longer request. |
+| 299 | 2026-09-24 | What could a helper get away with? | A check called "cargo" answered "make cargo test --all-features pass", and one with no name at all answered every condition there is. |
+| 300 | 2026-09-24 | Who chooses those names? | The agent itself, and nothing checked them, so the vaguest name bought the best outcome. |
+| 301 | 2026-09-24 | Why does meeting a condition matter so much? | A helper that meets its condition has its work folded in, and meeting it says nothing while failing it stops the work and explains why. |
+| 302 | 2026-09-24 | Does the stricter rule reject honest names? | No -- extra words are still forgiven, so "cargo test --lib" and "Tests (cargo test)" still answer "cargo test". |
+| 303 | 2026-09-24 | Was a sub-agent argument right that the doc example already failed? | No -- running it showed it passes today, and building on that claim would have broken the one case the note singles out. |
+| 304 | 2026-09-24 | Should a differently named check pass in silence? | No -- it still counts, but the chat now says which check answered the request in one sentence. |
+| 305 | 2026-09-24 | Is it now verified that the check really passed? | No -- whether it passed is still the agent own report, and the note above the code no longer claims otherwise. |
