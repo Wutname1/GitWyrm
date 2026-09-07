@@ -56,10 +56,37 @@ pub fn read_current(path: &Path) -> Result<Option<(Vec<u8>, String)>, io::Error>
     }
 }
 
+/// Whether this destination is a shortcut to a file somewhere else.
+///
+/// `fs::read` follows a link, so everything upstream -- the hash gate, the
+/// backup, the merge base -- describes the file the link POINTS AT. But the
+/// write does not: `NamedTempFile::persist` renames over the link itself,
+/// replacing it with an ordinary file and leaving the real one untouched and
+/// stale. GitWyrm reads one file and writes a different one.
+///
+/// Resolving the link instead would be atomic (resolving once makes the temp
+/// file and the rename target move together, so the same-volume rule holds
+/// by construction) -- but it would write to a path the preview never showed,
+/// which is the one thing "nothing lands automatically" forbids.
+///
+/// So this refuses, the way `skill_write` already refuses a folder it cannot
+/// copy faithfully: the link is a thing GitWyrm cannot put back, and no
+/// backup or receipt records that it ever existed. Refusing costs one copy;
+/// writing costs a setup the person did not agree to change.
+fn is_symlink(path: &Path) -> bool {
+    fs::symlink_metadata(path)
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ApplyWriteError {
     #[error("could not read destination before writing: {detail}")]
     ReadDestination { detail: String },
+    /// The destination is a shortcut to a file elsewhere. Writing would
+    /// replace the shortcut and leave the real file untouched.
+    #[error("destination is a link to another file")]
+    LinkedDestination { path: PathBuf },
     #[error("destination changed since preview")]
     ConcurrentChange {
         expected_hash: Option<String>,
@@ -98,6 +125,10 @@ impl ApplyWriteError {
         match self {
             ApplyWriteError::ReadDestination { .. } => {
                 "GitWyrm could not read that app's settings file, so it did not change it.                  The file may be open in another program."
+                    .into()
+            }
+            ApplyWriteError::LinkedDestination { .. } => {
+                "That app's settings file is a shortcut pointing somewhere else, so GitWyrm                  left it alone -- writing here would replace the shortcut and leave the real                  file unchanged. Open the file it points to and copy this there instead."
                     .into()
             }
             ApplyWriteError::ConcurrentChange { .. } => {
@@ -178,6 +209,15 @@ impl SafeWriteRoot {
 /// crash-safety guarantee `agentdesk::store::write_atomic` gives session
 /// files.
 pub(crate) fn write_atomic_bytes(path: &Path, bytes: &[u8]) -> Result<(), ApplyWriteError> {
+    // Checked here rather than at the caller because every write goes
+    // through this one function -- applying a copy, restoring a backup and
+    // undoing all route here, and the link would otherwise be destroyed by
+    // whichever of them ran first.
+    if is_symlink(path) {
+        return Err(ApplyWriteError::LinkedDestination {
+            path: path.to_path_buf(),
+        });
+    }
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(dir).map_err(|e| ApplyWriteError::CreateDir {
         dir: dir.to_path_buf(),
@@ -451,6 +491,62 @@ pub fn undo_write(
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    /// An ordinary file is not a link, and is written normally.
+    ///
+    /// The refusal itself needs a real symlink to exercise end to end, and
+    /// creating one needs a privilege a test run does not reliably have on
+    /// Windows. So the check is tested directly here, where no privilege is
+    /// needed -- a test that silently skips is a test that has never caught
+    /// anything.
+    #[test]
+    fn an_ordinary_file_is_not_treated_as_a_link() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("settings.json");
+        fs::write(&file, b"{}").unwrap();
+
+        assert!(!is_symlink(&file));
+        write_atomic_bytes(&file, b"{\"a\":1}").expect("an ordinary file writes");
+        assert_eq!(fs::read(&file).unwrap(), b"{\"a\":1}");
+    }
+
+    /// A path that does not exist yet is not a link either -- creating a
+    /// brand-new settings file must keep working.
+    #[test]
+    fn a_missing_file_is_not_treated_as_a_link() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("new.json");
+        assert!(!is_symlink(&file));
+        write_atomic_bytes(&file, b"{}").expect("a new file writes");
+    }
+
+    /// A settings file that is a shortcut to somewhere else is left alone.
+    ///
+    /// Reading follows the link, so the hash gate, the backup and the merge
+    /// all describe the file it points at -- but the write would replace the
+    /// shortcut itself, leaving the real file stale. GitWyrm cannot put a
+    /// shortcut back, and nothing records that it existed.
+    #[cfg(windows)]
+    #[test]
+    fn a_linked_settings_file_is_refused() {
+        let dir = TempDir::new().unwrap();
+        let real = dir.path().join("real.json");
+        fs::write(&real, b"{\"real\":true}").unwrap();
+        let link = dir.path().join("settings.json");
+        if std::os::windows::fs::symlink_file(&real, &link).is_err() {
+            // No privilege for links in this session; the direct check above
+            // still ran.
+            return;
+        }
+
+        assert!(matches!(
+            write_atomic_bytes(&link, b"{\"new\":true}"),
+            Err(ApplyWriteError::LinkedDestination { .. })
+        ));
+        // Both files are exactly as they were.
+        assert_eq!(fs::read(&real).unwrap(), b"{\"real\":true}");
+        assert!(fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+    }
 
     /// Every reason a write can fail must reach the person in words they can
     /// act on. These messages used to be the developer text plus the
