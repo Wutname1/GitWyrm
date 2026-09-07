@@ -288,3 +288,11 @@ competing sub-agents, the answer names the losing option too.
 | 279 | 2026-09-21 | Was it a deliberate choice? | No -- nineteen other dialogs already did it correctly, two of them in the same files as the broken ones. |
 | 280 | 2026-09-21 | Should a fixed dialog close on success or on finish? | On finish -- closing only on success would leave it stranded open behind an error message when something failed. |
 | 281 | 2026-09-21 | Did the new guard work the first time? | No -- it read two dialogs I had just fixed as clean, because it stopped scanning inside their descriptions. |
+| 282 | 2026-09-22 | What happens if you import two chats from the same tool at once? | One of them was forgotten -- the chat was saved but the note saying it had been brought in was erased by the other import. |
+| 283 | 2026-09-22 | Why does a lost note matter if the chat was saved? | That note is the only thing stopping a second import, so the chat looked new again and importing it again made a duplicate copy of the whole conversation. |
+| 284 | 2026-09-22 | Could unlinking a chat hit the same record? | Yes -- and it was guarded by a different key entirely, so the two could not see each other at all. |
+| 285 | 2026-09-22 | Should the guard live with the callers or with the record itself? | With the record -- guarding it at the callers would have fixed importing and left unlinking racing. |
+| 286 | 2026-09-22 | Does the guard slow imports down? | No -- it is held only while the record is read and saved; reading the other tool files and saving the chat stay outside it. |
+| 287 | 2026-09-22 | Did the new tests fail for the right reason when the guard was removed? | No -- on Windows the two writers collided on the file itself first, so a third test pins the lost note with no timing involved. |
+| 288 | 2026-09-22 | Did the Import button show anything while it worked? | No -- it only dimmed, which reads as a click that did not register rather than work in progress. |
+| 289 | 2026-09-22 | Was any button worse than that? | Yes -- "Continue here" had no gate at all, on the one action that replaces the whole view when it succeeds. |
