@@ -64,6 +64,10 @@ const EXPECTED: &[&str] = &[
     // answer is always theirs or their admin's -- there is nothing here we could
     // change. "merge conflicts" alone accounted for 522 reports in 20 days.
     "merge conflicts",
+    // Committing while a merge is still half-resolved. git refuses to build a
+    // tree until every conflicted path is staged, which is the whole point of a
+    // conflict -- the answer is to finish resolving, not anything we could fix.
+    "not fully merged index",
     "sign-in is no longer valid",
     "rate limit reached",
     "review is required",
@@ -157,6 +161,21 @@ mod tests {
         assert!(is_expected(
             "working tree has changes; commit or stash before rewriting history"
         ));
+    }
+
+    /// The index conditions, which split three ways and must not be conflated.
+    #[test]
+    fn index_refusals_are_expected_but_corruption_is_not() {
+        // Refusal: a merge that is still half-resolved. Nothing to fix here.
+        assert!(is_expected(
+            "git error: cannot create a tree from a not fully merged index.; class=Index (10); code=Unmerged (-10)"
+        ));
+        // Corruption is a real fault and MUST keep reporting. Both transports:
+        // libgit2's wording and git's own.
+        assert!(!is_expected(
+            "git error: invalid data in index - incorrect header signature; class=Index (10)"
+        ));
+        assert!(!is_expected("git fetch failed: fatal: index file corrupt"));
     }
 
     /// A host that will not admit the repo exists, in git's own words.

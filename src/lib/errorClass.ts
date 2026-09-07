@@ -171,6 +171,28 @@ const RULES: Rule[] = [
     message: "Couldn't update the submodule. Check that it's set up and try again.",
   },
   {
+    // Committing with a merge still half-resolved. git will not build a tree
+    // until every conflicted file is staged, so this is the conflict doing its
+    // job rather than a failure.
+    match: (r) => r.includes('not fully merged index'),
+    severity: 'warning',
+    message: 'Some conflicts still need resolving. Finish those files, then try again.',
+  },
+  {
+    // A damaged .git/index. Genuinely broken -- stays an error and keeps
+    // reporting -- but the index is a rebuildable cache, not history, so say
+    // that rather than leaving someone thinking their work is gone. Covers both
+    // transports: libgit2's "invalid data in index" and git's "index file
+    // corrupt".
+    match: (r) =>
+      r.includes('invalid data in index') ||
+      r.includes('index file corrupt') ||
+      r.includes('incorrect header signature'),
+    severity: 'error',
+    message:
+      "This project's file index is damaged. Your commits are safe - the index is a rebuildable cache. Close other Git programs and reopen the project.",
+  },
+  {
     match: (r) => r.includes('code=conflict') || r.includes('merge conflict'),
     severity: 'warning',
     message: 'That ran into a conflict. Check the changed files and resolve the markers.',

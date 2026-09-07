@@ -215,3 +215,31 @@ describe('a cloud copy the host will not admit exists', () => {
     expect(classifyError(new Error(raw)).severity).toBe('warning')
   })
 })
+
+describe('an index that is mid-conflict or damaged', () => {
+  it('treats a half-resolved merge as the conflict doing its job', () => {
+    const raw =
+      'git error: cannot create a tree from a not fully merged index.; class=Index (10); code=Unmerged (-10)'
+    const { severity, message } = classifyError(new Error(raw))
+    expect(severity).toBe('warning')
+    expect(message).toMatch(/conflicts still need resolving/i)
+  })
+
+  it('keeps a corrupt index at error severity, so it never stops reporting', () => {
+    const raws = [
+      'git error: invalid data in index - incorrect header signature; class=Index (10)',
+      'git fetch failed: fatal: index file corrupt',
+    ]
+    for (const raw of raws) {
+      expect(classifyError(new Error(raw)).severity).toBe('error')
+    }
+  })
+
+  it('reassures that commits survive a damaged index', () => {
+    const { message } = classifyError(
+      new Error('git error: invalid data in index - incorrect header signature; class=Index (10)')
+    )
+    expect(message).toMatch(/commits are safe/i)
+    expect(message).not.toMatch(/header signature/i)
+  })
+})
