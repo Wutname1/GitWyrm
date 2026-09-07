@@ -328,3 +328,11 @@ competing sub-agents, the answer names the losing option too.
 | 319 | 2026-09-26 | Could this be decided by which system GitWyrm was built for? | No -- a Windows folder can be made case-sensitive and a Mac disk can be set up either way, so the build target does not know. |
 | 320 | 2026-09-26 | Did a test cover the old behaviour? | Yes, and it was the only evidence for it -- but its example was made up, since no tool actually spells a folder in a different case. |
 | 321 | 2026-09-26 | Did every suspected problem this pass turn out to be real? | No -- two looked like buttons and text that told the user nothing, and both were answered by what was already on screen beside them. |
+| 322 | 2026-09-27 | How does GitWyrm fill in a pull request on your host? | It puts the drafted title and description into the link it opens, so the host page arrives already filled in. |
+| 323 | 2026-09-27 | What happens when the description is long? | The link goes past what Windows will open, so the page simply did not appear -- and ten short paragraphs is enough. |
+| 324 | 2026-09-27 | Why was that worse than just not opening? | The box closed the moment you pressed the button, so the description you had just written was gone before anyone knew it had failed. |
+| 325 | 2026-09-27 | Should the description be shortened to make it fit? | No -- half a description that looks complete on the host page is worse than a whole one you paste in yourself. |
+| 326 | 2026-09-27 | Which fix was the important one? | Both -- keeping the box open covers every way opening can fail, and the length check is what explains why it failed. |
+| 327 | 2026-09-27 | Was the copy button already there? | Yes, but only when updating a pull request that already exists; it is now always there, since that is the way a description travels whenever the link cannot carry it. |
+| 328 | 2026-09-27 | Did the first version of the fix work? | No -- it claimed the description had travelled to hosts GitWyrm does not recognise, which drop it from the link entirely. |
+| 329 | 2026-09-27 | What is the risk when undoing a change to check a test? | The comment explaining it can be left behind above unrelated code, which leaves a false claim in the source. |
