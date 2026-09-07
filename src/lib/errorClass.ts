@@ -86,6 +86,17 @@ const RULES: Rule[] = [
     message: 'Your local changes conflict with that branch. Commit, stash, or discard them first.',
   },
   {
+    // The host will not admit the repository exists. It answers 404 whether the
+    // repo is private, renamed, deleted, or merely outside the token's scope, so
+    // the app genuinely cannot tell the user which -- say all four rather than
+    // guess. Covers both wordings: git's own `fatal: repository '<url>' not
+    // found` and the API's "could not find that".
+    match: (r) => r.includes("fatal: repository '") || r.includes('could not find that'),
+    severity: 'warning',
+    message:
+      "The cloud copy couldn't be found. It may have been renamed or deleted, or your account may not have access to it.",
+  },
+  {
     // A repository with nowhere to send work. Push publishes an unlinked branch
     // by itself, so reaching this means there is genuinely no remote set up --
     // a setup step the user has to do once, not a failure of the push.

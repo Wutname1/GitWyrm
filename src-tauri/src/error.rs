@@ -73,6 +73,16 @@ const EXPECTED: &[&str] = &[
     // indistinguishable from each other because the host deliberately answers
     // 404 rather than admitting the thing exists.
     "could not find that. it may be private",
+    // The same condition in git's own words rather than the API's. A push or
+    // fetch to a repo the host will not admit exists prints
+    // `fatal: repository '<url>' not found`, and the host answers 404 whether it
+    // is private, renamed, deleted, or simply outside the token's scope -- all
+    // the user's to sort out, none of them ours.
+    //
+    // Matched with the quote so it cannot reach the bare words: "object not
+    // found" and "repository not open" are real faults that must keep reporting,
+    // and both are pinned in real_failures_are_still_reported below.
+    "fatal: repository '",
     // No build for the running platform in the update manifest. Raised by the
     // updater plugin on a flavor we do not publish (a dev or WSL/Linux run
     // against a Windows-only manifest); nothing is wrong with the app.
@@ -147,6 +157,28 @@ mod tests {
         assert!(is_expected(
             "working tree has changes; commit or stash before rewriting history"
         ));
+    }
+
+    /// A host that will not admit the repo exists, in git's own words.
+    ///
+    /// Verbatim from GITWYRM-BACKEND-2, and reproduced locally to confirm the
+    /// shape: git prints `remote: Repository not found.` followed by
+    /// `fatal: repository '<url>' not found`.
+    #[test]
+    fn a_missing_remote_repository_is_expected() {
+        assert!(is_expected(
+            "Command failed: git push failed: fatal: repository 'https://github.com/owner/repo.git/' not found"
+        ));
+        // The API transport's wording for the same condition, already covered.
+        assert!(is_expected(
+            "GitHub could not find that. It may be private, renamed, or your token may not cover it."
+        ));
+        // The needle keeps the quote so it cannot reach the bare words. These
+        // two are real faults and are also pinned in the not-expected test.
+        assert!(!is_expected(
+            "git error: object not found - no match for id (abc123); class=Odb (9)"
+        ));
+        assert!(!is_expected("repository not open: 0123456789abcdef"));
     }
 
     /// Verbatim from the Sentry reports that kept arriving after these were

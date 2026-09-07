@@ -194,3 +194,24 @@ describe('a pull with nothing linked to pull from', () => {
     expect(message).toMatch(/merge or rebase/i)
   })
 })
+
+describe('a cloud copy the host will not admit exists', () => {
+  // Verbatim from GITWYRM-BACKEND-2.
+  const RAW =
+    "Command failed: git push failed: fatal: repository 'https://github.com/owner/repo.git/' not found"
+
+  it('names every reason it could be, since the host will not say which', () => {
+    const { message } = classifyError(new Error(RAW))
+    expect(message).toMatch(/renamed or deleted/i)
+    expect(message).not.toMatch(/fatal:/i)
+  })
+
+  it('is a warning: nothing local can fix a repo the host denies', () => {
+    expect(classifyError(new Error(RAW)).severity).toBe('warning')
+  })
+
+  it('covers the API wording for the same condition', () => {
+    const raw = 'GitHub could not find that. It may be private, renamed, or your token may not cover it.'
+    expect(classifyError(new Error(raw)).severity).toBe('warning')
+  })
+})
