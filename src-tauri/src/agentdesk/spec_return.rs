@@ -81,6 +81,10 @@ pub enum ReturnRefusal {
     StillWorking,
     /// It finished without changing anything, so there is nothing to report.
     NothingChanged,
+    /// GitWyrm could not read the folder the work was done in, so what it
+    /// changed is unknown. Distinct from `NothingChanged`, which is a
+    /// measurement -- this is the absence of one.
+    ChangesUnreadable,
     /// The work was thrown away with Undo, so it proved nothing the spec
     /// should be told about.
     ///
@@ -110,6 +114,9 @@ impl ReturnRefusal {
             }
             ReturnRefusal::StillBeingReviewed => {
                 "Keep this work first, then tell the spec what it found."
+            }
+            ReturnRefusal::ChangesUnreadable => {
+                "GitWyrm could not read the folder this work was done in, so it cannot tell the spec what changed."
             }
             ReturnRefusal::NothingChanged => {
                 "This work did not change any files, so there is nothing to tell the spec."
@@ -170,6 +177,15 @@ pub fn build_return_context(
         _ => return Err(ReturnRefusal::StillBeingReviewed),
     }
 
+    // Only a real measurement of nothing counts as nothing. A record whose
+    // folder could not be read has an empty list for a different reason, and
+    // "it finished without changing anything" would be a claim about the work
+    // rather than about GitWyrm's own blindness. Keep already refuses such a
+    // record, so this should be unreachable -- kept because the rule belongs
+    // beside the check it guards, not in another file's ordering.
+    if result.changed_paths_unreadable.is_some() {
+        return Err(ReturnRefusal::ChangesUnreadable);
+    }
     if result.changed_paths.is_empty() {
         return Err(ReturnRefusal::NothingChanged);
     }
@@ -322,6 +338,7 @@ mod tests {
                     status: "M".into(),
                 })
                 .collect(),
+            changed_paths_unreadable: None,
             checks: Vec::new(),
             commit: None,
             openspec_change_id: Some("add-the-thing".into()),

@@ -217,7 +217,7 @@ export function ResultReviewPanel({
   }
 
   const availability = resultActionAvailability(record)
-  const changedLine = changedPathsSummaryLine(record.changedPaths)
+  const changedLine = changedPathsSummaryLine(record.changedPaths, record.changedPathsUnreadable)
   const destination = describeCommitDestination(record)
   const checksLine = checksSummaryLine(record.checks)
   const failingChecks = hasFailingCheck(record.checks)

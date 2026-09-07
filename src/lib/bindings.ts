@@ -5915,7 +5915,14 @@ export type KeepResultOutcome = { kind: "kept"; record: ResultRecord } |
  * Nothing to keep: no worktree, or a worktree with zero changes (a
  * read-only intent's result, or a helper that made no edits).
  */
-{ kind: "nothingToKeep" } | { kind: "resultNotFound" } | { kind: "sessionNotFound" } | { kind: "sessionDamaged"; reason: string } | { kind: "sessionUnavailable"; detail: string } | { kind: "writeFailed"; detail: string }
+{ kind: "nothingToKeep" } | 
+/**
+ * The changed-file list was never read, so what would be kept is
+ * unknown. Distinct from `NothingToKeep`, which is a measurement --
+ * this one is the absence of one, and answering it with "nothing to
+ * keep" would state as fact something GitWyrm never checked.
+ */
+{ kind: "worktreeUnreadable"; detail: string } | { kind: "resultNotFound" } | { kind: "sessionNotFound" } | { kind: "sessionDamaged"; reason: string } | { kind: "sessionUnavailable"; detail: string } | { kind: "writeFailed"; detail: string }
 export type ListResultsOutcome = { kind: "found"; records: ResultRecord[] } | { kind: "sessionNotFound" } | { kind: "sessionDamaged"; reason: string } | { kind: "sessionUnavailable"; detail: string }
 /**
  * One file in the log folder, for the day picker in the log viewer.
@@ -6962,7 +6969,27 @@ baseOid: string | null;
  * when nothing was committed inside the worktree itself (the common
  * case: changes sit uncommitted until Keep -> Commit).
  */
-headOid: string | null; changedPaths: ResultChangedPath[]; checks: ResultCheckOutcome[]; 
+headOid: string | null; changedPaths: ResultChangedPath[]; 
+/**
+ * Why the changed-file list could not be read, when it could not be.
+ * 
+ * `None` means the list above is a real measurement -- including a real
+ * measurement of nothing, which is what a run that changed no files
+ * leaves behind. `Some` means GitWyrm never managed to look, so the
+ * empty list beside it is an absence of knowledge rather than an absence
+ * of changes.
+ * 
+ * Those were the same value until now. A worktree GitWyrm could not open
+ * produced an empty list, and everything downstream read it as measured:
+ * the review panel said "No file changes", and a helper asked to change
+ * specific files was failed and told in the chat that it "left no
+ * changes at all" -- an accusation about the agent built out of
+ * GitWyrm's own failure to open a folder.
+ * 
+ * Additive and defaulted, so every record written before this field
+ * existed reads back as `None`, which is true of all of them.
+ */
+changedPathsUnreadable?: string | null; checks: ResultCheckOutcome[]; 
 /**
  * Set once `agent_result_commit` (task 3.3) lands a commit for this
  * result.

@@ -243,9 +243,23 @@ pub(crate) fn build_result_at(
         }
     }
 
-    let changed_paths = match &worktree_path {
-        Some(p) => changed_paths_for_worktree(Path::new(p)).unwrap_or_default(),
-        None => Vec::new(),
+    // A worktree that could not be read is recorded as unread, not as empty.
+    // `unwrap_or_default()` used to make those two the same value, and every
+    // reader downstream took the empty list at face value -- see
+    // `ResultRecord::changed_paths_unreadable` for what that cost.
+    //
+    // No worktree at all is a different thing again, and genuinely empty: a
+    // read-only intent never provisions one, so there is nothing that could
+    // have changed. That stays `None`.
+    let (changed_paths, changed_paths_unreadable) = match &worktree_path {
+        Some(p) => match changed_paths_for_worktree(Path::new(p)) {
+            Ok(paths) => (paths, None),
+            Err(e) => {
+                log::warn!("agent desk: could not read the worktree for a result: {e}");
+                (Vec::new(), Some(e.to_string()))
+            }
+        },
+        None => (Vec::new(), None),
     };
     let head_oid = worktree_path.as_deref().and_then(|p| {
         let repo = git2::Repository::open(p).ok()?;
@@ -261,6 +275,7 @@ pub(crate) fn build_result_at(
     record.base_oid = base_oid;
     record.head_oid = head_oid;
     record.changed_paths = changed_paths;
+    record.changed_paths_unreadable = changed_paths_unreadable;
     record.checks = checks;
     record.openspec_change_id = openspec_change_id;
 
@@ -370,6 +385,11 @@ pub enum KeepResultOutcome {
     /// Nothing to keep: no worktree, or a worktree with zero changes (a
     /// read-only intent's result, or a helper that made no edits).
     NothingToKeep,
+    /// The changed-file list was never read, so what would be kept is
+    /// unknown. Distinct from `NothingToKeep`, which is a measurement --
+    /// this one is the absence of one, and answering it with "nothing to
+    /// keep" would state as fact something GitWyrm never checked.
+    WorktreeUnreadable { detail: String },
     ResultNotFound,
     SessionNotFound,
     SessionDamaged { reason: String },
@@ -398,6 +418,11 @@ fn keep_result_at(
         let Some(existing) = records.iter().position(|r| r.execution_id == execution_id) else {
             return KeepResultOutcome::ResultNotFound;
         };
+        // Asked before the emptiness check, because an unreadable worktree
+        // has an empty list for a reason that is not emptiness.
+        if let Some(detail) = records[existing].changed_paths_unreadable.clone() {
+            return KeepResultOutcome::WorktreeUnreadable { detail };
+        }
         if !records[existing].has_landable_changes() {
             return KeepResultOutcome::NothingToKeep;
         }

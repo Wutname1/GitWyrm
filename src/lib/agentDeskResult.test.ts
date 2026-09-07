@@ -169,6 +169,20 @@ describe('changedPathsSummaryLine', () => {
   it('says no changes for an empty list', () => {
     expect(changedPathsSummaryLine([])).toBe('No file changes')
   })
+
+  // An empty list used to mean both "we looked and there was nothing" and
+  // "we could not look", so a folder GitWyrm failed to open was reported as
+  // a measured "No file changes" -- a confident statement about something
+  // nobody checked.
+  it('does not claim there were no changes when it could not look', () => {
+    const line = changedPathsSummaryLine([], 'could not open worktree')
+    expect(line).not.toBe('No file changes')
+    expect(line.toLowerCase()).toContain('could not read')
+  })
+
+  it('still reports a real measurement of nothing as no changes', () => {
+    expect(changedPathsSummaryLine([], null)).toBe('No file changes')
+  })
   it('uses singular for exactly one file', () => {
     expect(changedPathsSummaryLine([path('M')])).toBe('1 file changed')
   })

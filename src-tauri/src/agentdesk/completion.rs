@@ -149,6 +149,24 @@ pub fn judge(
                         .to_string(),
                 };
             };
+            // GitWyrm never managed to look inside the helper's folder, so it
+            // does not know whether these files changed. Still unmet -- a
+            // condition nobody could check is not a condition met, and
+            // nothing should land on the strength of a guess -- but the
+            // sentence says what actually happened instead of blaming the
+            // helper for GitWyrm's blindness.
+            if result.changed_paths_unreadable.is_some() {
+                let named = paths
+                    .iter()
+                    .map(|p| p.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return CompletionVerdict::Unmet {
+                    reason: format!(
+                        "GitWyrm could not read this helper's folder, so it cannot tell whether {named} changed."
+                    ),
+                };
+            }
             let changed: Vec<&str> = result
                 .changed_paths
                 .iter()
@@ -279,9 +297,18 @@ mod tests {
             checks: Vec::new(),
             commit: None,
             openspec_change_id: None,
+            changed_paths_unreadable: None,
             linked_execution_ids: Vec::new(),
             updated_at: "2026-01-01T00:00:00Z".into(),
         }
+    }
+
+    /// A result whose worktree GitWyrm could not read: an empty file list
+    /// that is an absence of knowledge rather than an absence of changes.
+    fn result_unreadable() -> ResultRecord {
+        let mut r = result_with(&[]);
+        r.changed_paths_unreadable = Some("could not open worktree".into());
+        r
     }
 
     #[test]
@@ -453,6 +480,39 @@ mod tests {
         // A sibling folder does not.
         let miss = judge(Some(&condition), &[], Some(&result_with(&["src/parser2/lex.rs"])));
         assert!(matches!(miss, CompletionVerdict::Unmet { .. }));
+    }
+
+    /// A folder GitWyrm could not read is not a folder with no changes in it.
+    ///
+    /// The changed-file list is measured from git, and a failure to measure
+    /// used to be recorded as an empty list -- so a helper that changed
+    /// exactly what it was asked to could be failed, and told in the chat
+    /// that it "left no changes at all". That is an accusation about the
+    /// helper assembled out of GitWyrm's own failure to open a directory.
+    ///
+    /// Still unmet: a condition nobody could check is not a condition met,
+    /// and nothing should be merged on a guess. Only the sentence changes,
+    /// and the sentence is the whole harm.
+    #[test]
+    fn an_unreadable_folder_is_not_reported_as_no_changes() {
+        let condition = CompletionCondition::FilesChanged {
+            paths: vec!["src/parser.rs".into()],
+        };
+        let verdict = judge(Some(&condition), &[], Some(&result_unreadable()));
+        match verdict {
+            CompletionVerdict::Unmet { reason } => {
+                assert!(
+                    reason.contains("could not read"),
+                    "should say GitWyrm could not look: {reason}"
+                );
+                assert!(
+                    !reason.contains("left no changes"),
+                    "must not accuse the helper of changing nothing: {reason}"
+                );
+                assert!(reason.contains("src/parser.rs"), "{reason}");
+            }
+            other => panic!("expected Unmet, got {other:?}"),
+        }
     }
 
     #[test]

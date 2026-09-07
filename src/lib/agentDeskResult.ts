@@ -157,7 +157,16 @@ export function changedPathStatusLabel(status: string): { label: string; tone: '
  * change still reads "12 files changed" rather than growing a breakdown that
  * says nothing.
  */
-export function changedPathsSummaryLine(paths: ResultChangedPath[]): string {
+export function changedPathsSummaryLine(
+  paths: ResultChangedPath[],
+  /**
+   * Set when GitWyrm could not read the agent's folder. The empty list beside
+   * it is then an absence of knowledge, not an absence of changes, and saying
+   * "No file changes" would state as fact something nobody checked.
+   */
+  unreadable?: string | null
+): string {
+  if (unreadable) return 'Could not read this folder, so what changed is unknown'
   if (paths.length === 0) return 'No file changes'
   const counts = summarizeChangedPaths(paths)
   const head = paths.length === 1 ? '1 file changed' : `${paths.length} files changed`
@@ -197,6 +206,11 @@ export function explainKeepOutcome(outcome: KeepResultOutcome): string | null {
       return null
     case 'nothingToKeep':
       return 'There is nothing to keep: this result made no file changes.'
+    // Deliberately not the sentence above. That one states as fact that
+    // nothing changed; this is the case where GitWyrm never managed to look,
+    // and the agent's work may be sitting in that folder untouched.
+    case 'worktreeUnreadable':
+      return `GitWyrm could not read this agent's folder, so it cannot tell what to keep. Close anything using it and try again. (${outcome.detail})`
     case 'resultNotFound':
       return 'That result could not be found. Try refreshing.'
     case 'sessionNotFound':

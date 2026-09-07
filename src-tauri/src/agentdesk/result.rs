@@ -169,6 +169,25 @@ pub struct ResultRecord {
     /// case: changes sit uncommitted until Keep -> Commit).
     pub head_oid: Option<String>,
     pub changed_paths: Vec<ResultChangedPath>,
+    /// Why the changed-file list could not be read, when it could not be.
+    ///
+    /// `None` means the list above is a real measurement -- including a real
+    /// measurement of nothing, which is what a run that changed no files
+    /// leaves behind. `Some` means GitWyrm never managed to look, so the
+    /// empty list beside it is an absence of knowledge rather than an absence
+    /// of changes.
+    ///
+    /// Those were the same value until now. A worktree GitWyrm could not open
+    /// produced an empty list, and everything downstream read it as measured:
+    /// the review panel said "No file changes", and a helper asked to change
+    /// specific files was failed and told in the chat that it "left no
+    /// changes at all" -- an accusation about the agent built out of
+    /// GitWyrm's own failure to open a folder.
+    ///
+    /// Additive and defaulted, so every record written before this field
+    /// existed reads back as `None`, which is true of all of them.
+    #[serde(default)]
+    pub changed_paths_unreadable: Option<String>,
     pub checks: Vec<ResultCheckOutcome>,
     /// Set once `agent_result_commit` (task 3.3) lands a commit for this
     /// result.
@@ -203,6 +222,7 @@ impl ResultRecord {
             base_oid: None,
             head_oid: None,
             changed_paths: Vec::new(),
+            changed_paths_unreadable: None,
             checks: Vec::new(),
             commit: None,
             openspec_change_id: None,
@@ -217,7 +237,18 @@ impl ResultRecord {
     /// to refuse Keep/Commit on a read-only result rather than silently
     /// no-op-ing (design.md, policy.rs's `can_write` enforcement surface).
     pub fn has_landable_changes(&self) -> bool {
-        self.worktree_path.is_some() && !self.changed_paths.is_empty()
+        if self.worktree_path.is_none() {
+            return false;
+        }
+        // Could not look. "Nothing to keep" is a claim about the folder, and
+        // this record is not entitled to make it -- so the answer is yes,
+        // there may be something, and the refusal happens further in where it
+        // can say why. The same safe direction Undo takes for the identical
+        // failure: assume work is there rather than assume it is not.
+        if self.changed_paths_unreadable.is_some() {
+            return true;
+        }
+        !self.changed_paths.is_empty()
     }
 }
 
@@ -474,6 +505,32 @@ mod persistence_tests {
 mod tests {
     use super::*;
 
+    /// A record written before this field existed still reads back.
+    ///
+    /// The field is additive and defaulted precisely so no saved result needs
+    /// migrating -- and `None` is the truth for every one of them, since they
+    /// were all written by code that could only produce a real measurement or
+    /// a silent empty list, never a recorded failure.
+    #[test]
+    fn a_result_saved_before_this_field_existed_still_loads() {
+        let old = r#"{
+            "executionId": "exec-1",
+            "outcome": "finished",
+            "state": "reviewing",
+            "worktreePath": null,
+            "branch": null,
+            "baseOid": null,
+            "headOid": null,
+            "changedPaths": [],
+            "checks": [],
+            "commit": null,
+            "openspecChangeId": null,
+            "updatedAt": "2026-01-01T00:00:00Z"
+        }"#;
+        let r: ResultRecord = serde_json::from_str(old).expect("an older record must still load");
+        assert_eq!(r.changed_paths_unreadable, None);
+    }
+
     #[test]
     fn a_fresh_result_needs_review() {
         let r = ResultRecord::new_reviewing(
@@ -483,6 +540,34 @@ mod tests {
         );
         assert!(r.state.needs_review());
         assert_eq!(r.state, ResultState::Reviewing);
+    }
+
+    /// A folder that could not be read must not answer "nothing to keep".
+    ///
+    /// That is a claim about what is in the folder, and this record is not
+    /// entitled to make it -- the agent's work may be sitting there
+    /// untouched. Answering yes sends the question further in, where Keep
+    /// refuses with a sentence that says GitWyrm could not look. The same
+    /// safe direction Undo already takes for the identical failure: assume
+    /// work is there rather than assume it is not.
+    #[test]
+    fn an_unreadable_worktree_does_not_claim_there_is_nothing_to_keep() {
+        let mut r = ResultRecord::new_reviewing(
+            "exec-1".into(),
+            ResultOutcomeKind::Finished,
+            "2026-01-01T00:00:00Z",
+        );
+        r.worktree_path = Some("C:/wt".into());
+        assert!(
+            !r.has_landable_changes(),
+            "a measured empty list really is nothing to keep"
+        );
+
+        r.changed_paths_unreadable = Some("could not open worktree".into());
+        assert!(
+            r.has_landable_changes(),
+            "an unread list is not a measurement of nothing"
+        );
     }
 
     #[test]
