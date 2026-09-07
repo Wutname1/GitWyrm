@@ -876,24 +876,28 @@ function PullRequestButton({
           initialTitle={draft.title}
           initialBody={draft.body}
           existingUrl={existing?.html_url ?? null}
-          onOpen={(url) => {
-            // Dropped its Result entirely, and the dialog closes regardless --
-            // so a browser that never opened discarded the drafted title and
-            // body with it. Same defect the diff button had, corrected in this
-            // same file.
-            void commands
+          onOpen={(url) =>
+            // Reports whether the page was handed over, so the dialog can keep
+            // the typed title and description on screen when it was not.
+            // Dropping the Result and closing regardless is what discarded
+            // someone's writing on any failure -- the same defect the diff
+            // button had, corrected in this same file.
+            commands
               .agentResultOpenPullRequestPage(url)
               .then((res) => {
                 if (res.status === 'error') {
                   log.error(`open pull request page failed: ${describeError(res.error)}`)
                   toast.error('Could not open that page.', { description: describeError(res.error) })
+                  return false
                 }
+                return true
               })
               .catch((e: unknown) => {
                 log.error(`open pull request page threw: ${describeError(e)}`)
                 toast.error('Could not open that page.', { description: describeError(e) })
+                return false
               })
-          }}
+          }
         />
       )}
     </>

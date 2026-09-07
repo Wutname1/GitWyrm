@@ -10,7 +10,65 @@
  * An unrecognised host keeps its plain compare URL rather than gaining
  * parameters it would ignore or choke on.
  */
-export function pullRequestUrlWithDraft(compareUrl: string, title: string, body: string): string {
+/**
+ * The longest URL worth handing to the operating system.
+ *
+ * Windows opens the page through `ShellExecute`, which stops accepting a URL
+ * somewhere around 2048 characters -- and Windows is the platform GitWyrm
+ * ships an installer for, so it is the ceiling that binds. Past it the browser
+ * simply does not open, or opens something truncated; either way the person
+ * pressed a button and got nothing.
+ *
+ * 2000 rather than 2048, to leave room for any escaping the opener adds on the
+ * way out.
+ */
+const MAX_URL_LENGTH = 2000
+
+export interface PullRequestLink {
+  /** The URL to open. */
+  url: string
+  /**
+   * Whether the description travelled in it.
+   *
+   * `false` means the link would have been too long for the system to open,
+   * so it carries the title only and the description has to reach the host
+   * another way. The caller is expected to put it on the clipboard and say so
+   * -- the same answer this already gives when updating an existing pull
+   * request, whose page ignores these parameters entirely.
+   *
+   * The description is never shortened to make it fit. A half-written
+   * description that looks complete on the host's page is worse than an
+   * honest one that arrives by clipboard.
+   */
+  bodyFitsInLink: boolean
+}
+
+export function pullRequestUrlWithDraft(
+  compareUrl: string,
+  title: string,
+  body: string
+): PullRequestLink {
+  const withBody = buildUrl(compareUrl, title, body)
+
+  // An unrecognised host (or a compare address that is not a URL at all) gets
+  // its plain link back, with no parameters on it -- so the description did
+  // not travel, whatever its length. Reporting that it did would leave the
+  // caller believing the host has text it never received.
+  const trimmedBody = body.trim()
+  if (trimmedBody && withBody === compareUrl) {
+    return { url: compareUrl, bodyFitsInLink: false }
+  }
+
+  if (withBody.length <= MAX_URL_LENGTH) {
+    return { url: withBody, bodyFitsInLink: true }
+  }
+  return {
+    url: buildUrl(compareUrl, title, ''),
+    bodyFitsInLink: false,
+  }
+}
+
+function buildUrl(compareUrl: string, title: string, body: string): string {
   let url: URL
   try {
     url = new URL(compareUrl)

@@ -36,10 +36,16 @@ export function PullRequestDraftDialog({
   initialTitle: string
   initialBody: string
   existingUrl: string | null
-  onOpen: (url: string) => void
+  /**
+   * Opens `url`. Resolves `true` when the page was handed to the system,
+   * `false` when it could not be -- the dialog stays open on `false` so
+   * the description that was just typed is still there.
+   */
+  onOpen: (url: string) => Promise<boolean>
 }) {
   const [title, setTitle] = useState(initialTitle)
   const [body, setBody] = useState(initialBody)
+  const [opening, setOpening] = useState(false)
 
   // A fresh draft replaces whatever was left from the last one, so reopening
   // never shows another result's text.
@@ -97,30 +103,55 @@ export function PullRequestDraftDialog({
             -- with nothing anywhere to paste from. Copying them is what makes
             that sentence true.
           */}
-          {updating && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => void copyToClipboard(body, 'Description copied. Paste it into the pull request.')}
-            >
-              <ClipboardCopy size={13} aria-hidden />
-              Copy the description
-            </Button>
-          )}
+          {/*
+            Offered on both paths now, not only when updating. It used to be
+            the answer to one way the description cannot travel in the link;
+            it is the answer to the others too -- a description too long for
+            the system to open, or an open that simply failed.
+          */}
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={body.trim().length === 0}
+            onClick={() => void copyToClipboard(body, 'Description copied. Paste it into the pull request.')}
+          >
+            <ClipboardCopy size={13} aria-hidden />
+            Copy the description
+          </Button>
           <Button
             size="sm"
-            disabled={title.trim().length === 0}
+            disabled={title.trim().length === 0 || opening}
             onClick={() => {
-              onOpen(
+              const link =
                 updating && existingUrl
-                  ? existingUrl
+                  ? { url: existingUrl, bodyFitsInLink: false }
                   : pullRequestUrlWithDraft(compareUrl, title, body)
-              )
-              onOpenChange(false)
+
+              // The description could not fit in a link the system will open,
+              // so it goes to the clipboard instead of being dropped. Said
+              // before the page opens, because the page is what takes the
+              // person's attention next.
+              if (!updating && !link.bodyFitsInLink && body.trim().length > 0) {
+                void copyToClipboard(
+                  body,
+                  'That description is too long to travel in a link, so it is copied. Paste it into the form.'
+                )
+              }
+
+              setOpening(true)
+              void onOpen(link.url)
+                .then((opened) => {
+                  // Closed only once the page has actually been handed over.
+                  // It used to close on the click, so an open that failed took
+                  // the description with it and left a toast explaining a loss
+                  // the person could do nothing about.
+                  if (opened) onOpenChange(false)
+                })
+                .finally(() => setOpening(false))
             }}
           >
             <ExternalLink size={13} aria-hidden />
-            {updating ? 'Open the pull request' : 'Open it on the host'}
+            {opening ? 'Opening…' : updating ? 'Open the pull request' : 'Open it on the host'}
           </Button>
         </div>
       </DialogContent>
