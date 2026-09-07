@@ -70,8 +70,21 @@ impl CompletionVerdict {
 ///
 /// `checks` are the checks that helper ran; `result` is its result record, if
 /// one was built. Both are what the run itself produced -- this never asks
-/// the model whether it thinks it succeeded, because a helper's own account
-/// is exactly what a condition exists to verify.
+/// the model, in words, whether it thinks it did the job, because a helper's
+/// own summary of itself is exactly what a condition exists to check.
+///
+/// How far that goes is worth being exact about, because the comment used to
+/// claim more than the code does. A check arrives as
+/// `RunStep::Check { name, passed, .. }`, and BOTH fields are the helper's
+/// own report -- nothing here re-runs the check to see for itself, by
+/// deliberate choice (see this module's own doc comment on why). So a helper
+/// that reported a check it never ran would be believed.
+///
+/// What this does verify is that the report is *about the right thing*: that
+/// a check answering "make `cargo test` pass" is actually named that, rather
+/// than being any string that happens to sit inside it. That is a smaller
+/// claim than "the check really passed", and the difference should stay
+/// visible to whoever reads this next.
 pub fn judge(
     condition: Option<&CompletionCondition>,
     checks: &[ResultCheckOutcome],
