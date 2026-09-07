@@ -296,3 +296,11 @@ competing sub-agents, the answer names the losing option too.
 | 287 | 2026-09-22 | Did the new tests fail for the right reason when the guard was removed? | No -- on Windows the two writers collided on the file itself first, so a third test pins the lost note with no timing involved. |
 | 288 | 2026-09-22 | Did the Import button show anything while it worked? | No -- it only dimmed, which reads as a click that did not register rather than work in progress. |
 | 289 | 2026-09-22 | Was any button worse than that? | Yes -- "Continue here" had no gate at all, on the one action that replaces the whole view when it succeeds. |
+| 290 | 2026-09-23 | What did Agent Desk say when part of a chat went missing? | To close the chat and open it again to load the full record. |
+| 291 | 2026-09-23 | When is that advice wrong? | When the saved copy is the one missing the message, because then reopening loads the emptier version and the only good copy is the one on screen. |
+| 292 | 2026-09-23 | Could the window tell the two apart? | No -- both looked identical from the inside, so it always guessed the first and could be confidently wrong. |
+| 293 | 2026-09-23 | Did reopening actually destroy the unsaved message? | No -- the on-screen copy is kept until the saved copy catches up, so the advice was useless rather than destructive; closing the app is what loses it. |
+| 294 | 2026-09-23 | Was the warning ever shown on a chat where nothing was wrong? | Yes -- a number was used up even for events never meant to be recorded, so the next real event looked like it had skipped one. |
+| 295 | 2026-09-23 | Should a failed save give its number back too? | No -- that gap is telling the truth, and hiding it would turn a real loss back into silence. |
+| 296 | 2026-09-23 | What happens if the very first message of a run fails to save? | Nothing was said at all before, because there was no earlier number to skip from; the new notice covers it. |
+| 297 | 2026-09-23 | Did the competing arguments settle it? | They produced the two-part answer, but both rested on a claim about reopening that turned out to be wrong when checked. |
