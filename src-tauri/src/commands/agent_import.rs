@@ -401,12 +401,16 @@ fn import_session_at(
     };
 
     let imported_at = now_rfc3339();
-    // Checked, because everything below writes this ledger back. The
-    // defaulting read turned a damaged ledger into an empty one, and the write
-    // at the end then made that permanent -- every record of what had already
-    // been imported for this tool, discarded by an unrelated import, silently.
-    // Refusing costs the person one import; overwriting costs them all of them.
-    let mut ledger = match import_store::read_ledger_checked(root, adapter_id) {
+    // Read only to decide create-vs-refresh below. The write back goes through
+    // `record_import_logged`, which re-reads under the ledger's own lock, so
+    // this copy going stale during the slow work that follows -- reading the
+    // other tool's files, writing the session -- costs nothing.
+    //
+    // Still the checked read: a damaged ledger seen as empty would make an
+    // already-imported chat look new, and the create path would then build a
+    // second copy of the whole conversation. Refusing costs the person one
+    // import; guessing costs them a duplicate.
+    let ledger = match import_store::read_ledger_checked(root, adapter_id) {
         Ok(l) => l,
         Err(e) => {
             log::error!("import ledger unreadable for {adapter_id}: {e}");
@@ -458,8 +462,13 @@ fn import_session_at(
                 )
             }) {
                 Ok((session, new_count)) => {
-                    ledger.sessions.insert(
-                        external_session_id.to_string(),
+                    // A refresh already has its ledger entry; losing this
+                    // update costs a re-check of messages it already has,
+                    // which provenance handles.
+                    let _ = record_import_logged(
+                        root,
+                        adapter_id,
+                        external_session_id,
                         ImportedSessionRecord {
                             gitwyrm_session_id: session_id,
                             last_imported_external_message_id: detail
@@ -470,10 +479,6 @@ fn import_session_at(
                             last_seen_external_updated_at: detail.summary.updated_at.clone(),
                         },
                     );
-                    // A refresh already has its ledger entry; losing this
-                    // update costs a re-check of messages it already has,
-                    // which provenance handles.
-                    let _ = write_ledger_logged(root, adapter_id, &ledger);
                     ImportSessionOutcome::Refreshed {
                         session,
                         new_message_count: new_count,
@@ -504,8 +509,14 @@ fn import_session_at(
                 Ok(()) => {
                     let (headers, _) = store::rebuild_index_from_sessions(root);
                     let _ = store::write_index(root, &headers);
-                    ledger.sessions.insert(
-                        external_session_id.to_string(),
+                    // Only the create path needs this. A refresh already has a
+                    // ledger entry, and message provenance covers its messages;
+                    // a first import has neither, so a lost ledger write here
+                    // is the one case that silently duplicates the whole chat.
+                    if record_import_logged(
+                        root,
+                        adapter_id,
+                        external_session_id,
                         ImportedSessionRecord {
                             gitwyrm_session_id: session_id,
                             last_imported_external_message_id: detail
@@ -515,12 +526,7 @@ fn import_session_at(
                                 .unwrap_or_default(),
                             last_seen_external_updated_at: detail.summary.updated_at.clone(),
                         },
-                    );
-                    // Only the create path needs this. A refresh already has a
-                    // ledger entry, and message provenance covers its messages;
-                    // a first import has neither, so a lost ledger write here
-                    // is the one case that silently duplicates the whole chat.
-                    if write_ledger_logged(root, adapter_id, &ledger) {
+                    ) {
                         ImportSessionOutcome::Created { session }
                     } else {
                         let mut session = session;
@@ -559,12 +565,25 @@ fn import_session_at(
 /// not vanish silently either: the next scan would show "Import" again for a
 /// chat that is already here. The error text names the ledger path, so it is
 /// redacted before it reaches the log.
-fn write_ledger_logged(
+///
+/// The record is inserted inside `with_ledger_mut`, against the ledger as it
+/// stands at that moment rather than the copy this import read before doing
+/// its slow work. Two imports from the same tool are two different external
+/// session IDs, so both entries survive; previously the slower writer put
+/// back its own stale copy and erased the other's.
+fn record_import_logged(
     root: &SessionStoreRoot,
     adapter_id: &str,
-    ledger: &import_store::AdapterImportLedger,
+    external_session_id: &str,
+    record: import_store::ImportedSessionRecord,
 ) -> bool {
-    if let Err(e) = import_store::write_ledger(root, adapter_id, ledger) {
+    let written = import_store::with_ledger_mut(root, adapter_id, |ledger| {
+        ledger
+            .sessions
+            .insert(external_session_id.to_string(), record);
+        Ok::<(), std::convert::Infallible>(())
+    });
+    if let Err(e) = written {
         log::warn!(
             "import ledger for {adapter_id} could not be saved: {}",
             redact_for_log(&e.to_string())
