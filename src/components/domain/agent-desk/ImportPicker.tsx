@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { Download, ExternalLink, FolderOpen, Unlink } from 'lucide-react'
 import type { AdapterListEntry, ScannedExternalSession } from '@/lib/bindings'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
+import { PendingIndicator } from '@/components/ui/pending-indicator'
 import {
   useAgentImportAdapters,
   useAgentImportContinuation,
@@ -295,21 +296,40 @@ function SessionRow({
         {project.text}
       </span>
       <div className="mt-1 flex flex-wrap items-center gap-2">
+        {/*
+          Reading a chat out of another tool means opening and parsing every
+          message in it, so this is not instant. A button that only dimmed said
+          nothing about that -- it read as a click that had not registered.
+          Says what it is doing instead, the way the source panel's own
+          refresh button beside it already does.
+        */}
         <button
           type="button"
           onClick={handleImport}
           disabled={importMutation.isPending}
-          className="rounded-md bg-primary px-2 py-1 text-2xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+          className="inline-flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-2xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
         >
-          {linkedSessionId ? 'Refresh' : 'Import'}
+          {importMutation.isPending && <PendingIndicator className="size-3" />}
+          {importMutation.isPending
+            ? linkedSessionId
+              ? 'Refreshing…'
+              : 'Bringing it in…'
+            : linkedSessionId
+              ? 'Refresh'
+              : 'Import'}
         </button>
         {linkedSessionId && (
+          // Nothing gated this before: no disabled state and no label change,
+          // on the one action here that navigates away on success. A second
+          // click landed after the view had already been replaced.
           <button
             type="button"
             onClick={handleContinueHere}
-            className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-2xs font-medium text-foreground hover:bg-panel2"
+            disabled={continueHereMutation.isPending}
+            className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-2xs font-medium text-foreground hover:bg-panel2 disabled:opacity-60"
           >
-            Continue here
+            {continueHereMutation.isPending && <PendingIndicator className="size-3" />}
+            {continueHereMutation.isPending ? 'Opening it here…' : 'Continue here'}
           </button>
         )}
         {continueExternalLabel && (
@@ -328,8 +348,12 @@ function SessionRow({
             disabled={unlinkMutation.isPending}
             className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-2xs font-medium text-muted-foreground hover:bg-panel2 hover:text-foreground disabled:opacity-60"
           >
-            <Unlink size={10} aria-hidden />
-            Unlink from {adapterName}
+            {unlinkMutation.isPending ? (
+              <PendingIndicator className="size-3" />
+            ) : (
+              <Unlink size={10} aria-hidden />
+            )}
+            {unlinkMutation.isPending ? 'Unlinking…' : `Unlink from ${adapterName}`}
           </button>
         )}
         {project.offerLinking && (
