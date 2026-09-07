@@ -278,3 +278,7 @@ competing sub-agents, the answer names the losing option too.
 | 269 | 2026-09-19 | Did deleting a chat confirm that it worked? | No -- archiving, which you can undo, confirmed while deleting did not, so the irreversible action was the quieter of the two. |
 | 270 | 2026-09-19 | Was the reason a rename or archive failed ever shown? | No -- the explanation the backend sent was thrown away and every failure read the same, whatever had gone wrong. |
 | 271 | 2026-09-19 | Can these hooks be tested directly? | No -- the test setup deliberately covers only pure logic, so the fix was to move the decisions out into that folder rather than add a browser test framework. |
+| 272 | 2026-09-20 | Could a failed import say nothing at all? | Yes -- the message was attached to the row you clicked, and a row that has been rebuilt since never shows it. |
+| 273 | 2026-09-20 | What kept rebuilding the rows? | Re-reading the other tool's chats on every return to the window, which opens and parses every saved conversation. |
+| 274 | 2026-09-20 | Should the failure message stay on the row or move to the action? | The action -- it is the only one guaranteed to still be there when the answer arrives. |
+| 275 | 2026-09-20 | Was the same wording then shown twice when the row had not moved? | No -- the copies on the rows were removed at the same time, so each failure is reported once. |
