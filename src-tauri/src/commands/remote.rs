@@ -405,6 +405,20 @@ fn run_streaming_with(
 
     if !output.status.success() {
         let detail = failure_detail(&stderr_lines, &stdout);
+        // A detail that is still one of git's example commands means the cause
+        // line was not recognised: either an advisory whose opening sentence is
+        // missing from UNTAGGED_CAUSES, or one this build never saw because the
+        // output was localized or truncated. Reported as a bare `git pull
+        // <remote> <branch>` six times on 0.12.0, which already carried the
+        // no-upstream fix, so the shape that escapes is NOT the one we know and
+        // could not be reproduced locally. Log the whole stderr when it happens;
+        // the next occurrence then says which line to add.
+        if detail.starts_with("git ") && detail.contains('<') {
+            log::warn!(
+                "unrecognised git advisory for {operation}; reported \"{detail}\" from stderr: {:?}",
+                stderr_lines
+            );
+        }
         let detail = humanize_credential_failure(&detail, &stderr_lines).unwrap_or(detail);
         return Err(AppError::Other(format!("git {operation} failed: {detail}")));
     }

@@ -68,6 +68,12 @@ const EXPECTED: &[&str] = &[
     // tree until every conflicted path is staged, which is the whole point of a
     // conflict -- the answer is to finish resolving, not anything we could fix.
     "not fully merged index",
+    // A repository with nowhere to send work. Push publishes an unlinked branch
+    // by itself, so reaching this means no remote is set up at all -- a one-time
+    // setup step, not a failure. The frontend has phrased this for users since
+    // before the backend classified it, which is how 6 reports arrived for a
+    // condition both layers already understood.
+    "no remote to push to",
     "sign-in is no longer valid",
     // The same "connect an account" answer via the git shell rather than the
     // API. remote.rs translates git's "could not read username/password" into
@@ -165,6 +171,16 @@ mod tests {
         ));
         assert!(is_expected(
             "working tree has changes; commit or stash before rewriting history"
+        ));
+    }
+
+    /// A project with no remote configured. The frontend had a rule for this
+    /// long before EXPECTED did, so the two layers disagreed and 6 routine
+    /// reports arrived for a setup step both already understood.
+    #[test]
+    fn a_project_with_no_remote_is_expected() {
+        assert!(is_expected(
+            "Command failed: This repository has no remote to push to."
         ));
     }
 
