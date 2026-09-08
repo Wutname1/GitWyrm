@@ -376,3 +376,11 @@ competing sub-agents, the answer names the losing option too.
 | 367 | 2026-10-02 | Is hiding more always better? | No -- it costs a line of the screen that exists to show what will be written, and repeated it costs the warning its meaning. |
 | 368 | 2026-10-02 | So what is the test now? | Whether the field actually holds a set of values, not merely whether it is called headers. |
 | 369 | 2026-10-02 | Was environment affected too? | Yes, in a milder way, and it is fixed by the same single change rather than a patch to one case. |
+| 370 | 2026-10-03 | Did GitWyrm find VS Code on Windows? | No -- it looked in the folder VS Code uses on Linux, so VS Code came up as not installed. |
+| 371 | 2026-10-03 | How was that confirmed? | By checking the developer machine: the real settings file exists where VS Code puts it and not where GitWyrm looked. |
+| 372 | 2026-10-03 | What did that cost? | Its connectors never appeared and it could never be picked as somewhere to copy one to. |
+| 373 | 2026-10-03 | Would copying to it have been harmless? | No -- copying to a place with no file yet creates one, so GitWyrm would have written a settings file the editor never reads and called it a success. |
+| 374 | 2026-10-03 | Were the other tools wrong too? | No -- all three really do keep their settings under the home folder, which is why the assumption held everywhere else. |
+| 375 | 2026-10-03 | Had anyone seen this coming? | Yes -- a note in the code said this part and the chat importer would drift apart unless they were brought together, and they did. |
+| 376 | 2026-10-03 | Should the two have been merged? | No -- they look at different folders for other tools, so merging them would have forced a wrong answer somewhere else. |
+| 377 | 2026-10-03 | What stops them drifting again? | A check that fails the build if the two ever disagree about where VS Code keeps its files. |
