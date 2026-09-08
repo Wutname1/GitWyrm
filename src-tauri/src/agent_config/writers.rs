@@ -82,7 +82,18 @@ pub fn build_new_content(
             }),
             ItemKind::McpConnector,
         ) => {
-            let base = first_present_path(current_text, candidates).unwrap_or(default_path);
+            // `?`, not `unwrap_or`. A file GitWyrm cannot read is not a file
+            // with no server map in it, and defaulting on that is how a second
+            // map gets written into someone else's config.
+            //
+            // No test covers the refusal, deliberately: it cannot currently be
+            // reached. `path_is_object` and `set_path` both start from
+            // `check_editable`, so a document the detector cannot read is one
+            // the write refuses moments later anyway. The `?` is here so that
+            // stays true if the two ever stop sharing that gate -- swallowing
+            // the error with `.ok().flatten()` would be the same defect this
+            // fix removes, waiting for its opportunity.
+            let base = first_present_path(current_text, candidates)?.unwrap_or(default_path);
             let mut path: Vec<&str> = base.to_vec();
             path.push(identity);
             Ok(json_patch::set_path(current_text, &path, &value)?)
@@ -100,21 +111,30 @@ pub fn build_new_content(
 /// would add a second map the client never reads: the write would appear to
 /// succeed and change nothing. Following the file is what makes that
 /// impossible.
+///
+/// Three answers, not two. `Ok(Some(path))` is the map the file uses.
+/// `Ok(None)` is a file GitWyrm read and found no map in -- a new or empty
+/// settings file, where creating the documented one is right. `Err` is a file
+/// it could not read, where nothing is known about where the servers live.
+///
+/// This used to parse with `serde_json` and fold the third answer into the
+/// second. VS Code's settings file is JSONC and VS Code itself writes comments
+/// and trailing commas into it, so strict parsing fails on ordinary files --
+/// which meant the common case took the fallback, and a connector was written
+/// to `mcp.servers` for a file whose servers were under `servers`. It read as
+/// a success and Copilot saw nothing. `json_patch::path_is_object` is the same
+/// walk the write itself performs, so detection and write now agree about what
+/// this file contains rather than agreeing by luck.
 fn first_present_path<'a>(
     current_text: &str,
     candidates: &'a [&'a [&'a str]],
-) -> Option<&'a [&'a str]> {
-    let value: Value = serde_json::from_str(current_text).ok()?;
-    candidates.iter().copied().find(|path| {
-        let mut node = &value;
-        for segment in path.iter() {
-            match node.get(*segment) {
-                Some(next) => node = next,
-                None => return false,
-            }
+) -> Result<Option<&'a [&'a str]>, PatchError> {
+    for path in candidates.iter().copied() {
+        if json_patch::path_is_object(current_text, path)? {
+            return Ok(Some(path));
         }
-        node.is_object()
-    })
+    }
+    Ok(None)
 }
 
 /// The empty-document text a writer starts from when the destination file
@@ -133,6 +153,65 @@ mod tests {
             .iter()
             .map(|(k, v)| (k.to_string(), super::super::model::JsonValue(v.clone())))
             .collect()
+    }
+
+    /// A real VS Code settings file keeps its servers where the file says.
+    ///
+    /// The detector used to parse with `serde_json`, which fails on the
+    /// comments and trailing commas VS Code writes into its own settings
+    /// file. So the ordinary case took the fallback and the connector was
+    /// written to `mcp.servers` while the file kept its servers under
+    /// `servers` -- a second map Copilot never reads. The apply reported
+    /// success and nothing changed.
+    #[test]
+    fn a_settings_file_with_comments_keeps_its_own_server_map() {
+        let existing = concat!(
+            "{
+",
+            "  // Where Copilot keeps them on this machine
+",
+            "  \"servers\": {
+",
+            "    \"already-here\": { \"command\": \"node\" },
+",
+            "  },
+",
+            "}
+"
+        );
+        let out = build_new_content(
+            ClientId::VsCodeCopilot,
+            ItemKind::McpConnector,
+            "added",
+            &extra(&[("command", json!("node"))]),
+            existing,
+        )
+        .expect("an ordinary settings file must be writable");
+
+        assert!(out.contains("already-here"), "the existing entry must survive: {out}");
+        assert!(out.contains("added"), "the new entry must be written: {out}");
+        assert!(
+            !out.contains("\"mcp\""),
+            "must not create a second map the editor never reads: {out}"
+        );
+    }
+
+    /// A file with no map yet gets the documented one. This is the case
+    /// `default_path` exists for, and it stays working: an absent file
+    /// arrives as `{}`, which reads fine and simply has no candidate in it.
+    #[test]
+    fn a_file_with_no_server_map_gets_the_documented_one() {
+        let out = build_new_content(
+            ClientId::VsCodeCopilot,
+            ItemKind::McpConnector,
+            "added",
+            &extra(&[("command", json!("node"))]),
+            "{}
+",
+        )
+        .expect("an empty settings file must be writable");
+        assert!(out.contains("\"mcp\""), "{out}");
+        assert!(out.contains("added"), "{out}");
     }
 
     #[test]

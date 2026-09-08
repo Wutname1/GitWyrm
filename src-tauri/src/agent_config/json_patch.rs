@@ -61,6 +61,47 @@ pub fn remove_path(source: &str, path: &[&str]) -> Result<String, PatchError> {
     Ok(remove_path_in_object(source, root_span, path).unwrap_or_else(|| source.to_string()))
 }
 
+/// Whether `path` already names an object in this document.
+///
+/// The same walk `set_path` performs, stopping short of writing. Callers use
+/// it to find which of several possible keys a file already uses, so a write
+/// follows the file rather than putting a second map somewhere the
+/// application never reads.
+///
+/// Deliberately structural, like every other reader here. `serde_json` would
+/// answer "no" for an ordinary VS Code settings file -- see `check_editable`
+/// for why that is the normal case rather than a damaged one -- and a
+/// detector stricter than the writer beside it is worse than no detector: it
+/// reports "not here" for a key that is here, and the write then lands
+/// somewhere else.
+///
+/// `Err` means the document could not be read at all, which is not the same
+/// answer as `Ok(false)` and must not be treated as one.
+pub(crate) fn path_is_object(source: &str, path: &[&str]) -> Result<bool, PatchError> {
+    check_editable(source)?;
+    let Some((start, end)) = top_level_object_span(source) else {
+        return Err(PatchError::NotAnObject);
+    };
+    // Body of the object, inside the braces -- what `find_member_value_span`
+    // expects, and what `set_path_in_object` hands itself when it descends.
+    let mut span = (start + 1, end - 1);
+    for (i, key) in path.iter().enumerate() {
+        let Some((value_start, value_end)) = find_member_value_span(source, span.0, span.1, key) else {
+            return Ok(false);
+        };
+        // The same object test the writer applies one step later, so
+        // "this key holds an object" means the same thing to both.
+        if !source[value_start..value_end].trim_start().starts_with('{') {
+            return Ok(false);
+        }
+        if i + 1 == path.len() {
+            return Ok(true);
+        }
+        span = (value_start + 1, value_end - 1);
+    }
+    Ok(false)
+}
+
 /// Byte range `[start, end)` of the top-level `{ ... }`, including the
 /// braces.
 /// Whether this document is one this module can safely edit.
@@ -602,6 +643,56 @@ mod tests {
     /// as `"we\"ird"` never matched the path `we"ird`. An update became an
     /// insert -- leaving TWO copies of a key that was already there -- and a
     /// remove reported success having removed nothing.
+    /// The detector reads what the writer writes.
+    ///
+    /// It used to be `serde_json`, which says "no" to an ordinary VS Code
+    /// settings file -- the comments and trailing commas the editor writes
+    /// itself. A detector stricter than the writer beside it reports a key as
+    /// absent when it is present, and the write then lands somewhere else.
+    #[test]
+    fn a_key_is_found_through_comments_and_trailing_commas() {
+        let source = concat!(
+            "{
+",
+            "  // a note the editor left
+",
+            "  \"servers\": {
+",
+            "    \"a\": { \"command\": \"node\" },
+",
+            "  },
+",
+            "}
+"
+        );
+        assert_eq!(path_is_object(source, &["servers"]), Ok(true));
+        assert_eq!(path_is_object(source, &["mcp", "servers"]), Ok(false));
+    }
+
+    #[test]
+    fn a_nested_key_is_found_and_a_missing_one_is_not() {
+        let source = "{ \"mcp\": { \"servers\": { \"a\": {} } } }";
+        assert_eq!(path_is_object(source, &["mcp", "servers"]), Ok(true));
+        assert_eq!(path_is_object(source, &["mcp", "other"]), Ok(false));
+        assert_eq!(path_is_object(source, &["nope"]), Ok(false));
+    }
+
+    /// A key holding something other than an object is not a server map.
+    /// The same test the writer applies one step later, so both agree.
+    #[test]
+    fn a_key_holding_a_non_object_is_not_a_map() {
+        assert_eq!(path_is_object("{ \"servers\": 3 }", &["servers"]), Ok(false));
+        assert_eq!(path_is_object("{ \"servers\": [] }", &["servers"]), Ok(false));
+        assert_eq!(path_is_object("{ \"servers\": null }", &["servers"]), Ok(false));
+    }
+
+    /// "Could not read this" is not "not here".
+    #[test]
+    fn an_unreadable_document_is_an_error_not_a_no() {
+        assert!(path_is_object("{ \"servers\": {", &["servers"]).is_err());
+        assert!(path_is_object("[]", &["servers"]).is_err());
+    }
+
     #[test]
     fn a_key_the_file_spelled_with_an_escape_is_still_found() {
         let src = r#"{"we\"ird": 1, "b": 2}"#;
