@@ -243,3 +243,24 @@ describe('an index that is mid-conflict or damaged', () => {
     expect(message).not.toMatch(/header signature/i)
   })
 })
+
+describe('a remote that has no credentials yet', () => {
+  // Verbatim from GITWYRM-BACKEND-4.
+  const RAW =
+    'Command failed: git fetch failed: Sign-in needed for https://github.com. Connect the account, then try again.'
+
+  it('is a warning, not a crash: nothing is broken yet', () => {
+    expect(classifyError(new Error(RAW)).severity).toBe('warning')
+  })
+
+  it('wins over the generic auth rule, which would call it an error', () => {
+    const { severity, message } = classifyError(new Error(RAW))
+    expect(severity).not.toBe('error')
+    expect(message).toMatch(/connect your account/i)
+  })
+
+  it('leaves a genuinely rejected credential as an error', () => {
+    const raw = 'git error: authentication failed for https://github.com'
+    expect(classifyError(new Error(raw)).severity).toBe('error')
+  })
+})

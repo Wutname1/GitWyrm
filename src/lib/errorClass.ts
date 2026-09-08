@@ -198,6 +198,15 @@ const RULES: Rule[] = [
     message: 'That ran into a conflict. Check the changed files and resolve the markers.',
   },
   {
+    // A remote with no credentials yet. Ahead of the generic auth rule below,
+    // which would file this as an error and replace a sentence the backend
+    // already wrote for users. Nothing is broken; the account just needs
+    // connecting, so it is a warning.
+    match: (r) => r.includes('sign-in needed for'),
+    severity: 'warning',
+    message: 'Connect your account for this remote, then try again.',
+  },
+  {
     match: (r) =>
       r.includes('authentication') ||
       r.includes('credential') ||

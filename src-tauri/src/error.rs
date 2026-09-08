@@ -69,6 +69,11 @@ const EXPECTED: &[&str] = &[
     // conflict -- the answer is to finish resolving, not anything we could fix.
     "not fully merged index",
     "sign-in is no longer valid",
+    // The same "connect an account" answer via the git shell rather than the
+    // API. remote.rs translates git's "could not read username/password" into
+    // this sentence, so the wording here is our own and already plain: nothing
+    // is broken, the remote simply has no credentials yet.
+    "sign-in needed for",
     "rate limit reached",
     "review is required",
     "not mergeable",
@@ -160,6 +165,26 @@ mod tests {
         ));
         assert!(is_expected(
             "working tree has changes; commit or stash before rewriting history"
+        ));
+    }
+
+    /// A remote with no credentials yet, in our own words rather than the API's.
+    ///
+    /// Verbatim from GITWYRM-BACKEND-4. remote.rs translates git's "could not
+    /// read username/password" into this sentence; the API transport's wording
+    /// for a DEAD sign-in was already covered, this one for a MISSING sign-in
+    /// was not.
+    #[test]
+    fn a_remote_needing_sign_in_is_expected() {
+        assert!(is_expected(
+            "Command failed: git fetch failed: Sign-in needed for https://github.com. Connect the account, then try again."
+        ));
+        assert!(is_expected(
+            "Sign-in needed for this remote. Connect the account, then try again."
+        ));
+        // The API transport's wording for the same family, already covered.
+        assert!(is_expected(
+            "GitHub sign-in is no longer valid; connect GitHub again"
         ));
     }
 
