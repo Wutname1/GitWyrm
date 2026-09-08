@@ -360,3 +360,11 @@ competing sub-agents, the answer names the losing option too.
 | 351 | 2026-09-30 | Does a brand new settings file still work? | Yes -- an absent file arrives as an empty one, which reads fine and genuinely has no list yet. |
 | 352 | 2026-09-30 | Did the test for the refusal prove anything? | No -- it passed with the refusal removed, because the write refuses the same unreadable file a moment later anyway. |
 | 353 | 2026-09-30 | Why keep the refusal then? | Because the two checks share one gate today and may not always, and swallowing the error would put the same defect back. |
+| 354 | 2026-10-01 | Could GitWyrm read the VS Code settings file it writes to? | No -- writing accepted the notes and trailing commas VS Code puts there, and reading refused the same file. |
+| 355 | 2026-10-01 | What did that break? | The list of installed connectors showed a read error, and copying one could not show whether it would replace something. |
+| 356 | 2026-10-01 | Why does that matter when deciding? | Because replacing an existing connector looked exactly like adding a new one on the screen where you approve it. |
+| 357 | 2026-10-01 | Why strip the notes rather than read the file the same way the write does? | Because what the reader produces is what gets checked for passwords, and a reader that mis-split a line could show one. |
+| 358 | 2026-10-01 | How is the stripping proved safe? | By checking that any file already readable means exactly the same afterwards, including web addresses containing slashes. |
+| 359 | 2026-10-01 | Is a genuinely damaged file still reported? | Yes -- accepting notes is not the same as accepting anything, and could-not-read stays a real answer. |
+| 360 | 2026-10-01 | Did the two sides agree on where VS Code keeps its connectors? | No -- the reading side kept its own list of names, in a different order and missing the one the writing side tries first. |
+| 361 | 2026-10-01 | What did that look like? | A file using that name showed no connectors, while writing to the same file found them and added to that very list. |
