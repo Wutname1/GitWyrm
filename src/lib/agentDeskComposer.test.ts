@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   READ_ONLY_REASON,
   MODE_NOTES,
+  TEAM_NEEDS_MODE_REASON,
   canSendComposerDraft,
   isModeBlocked,
+  isTeamBlocked,
   modeToExecutionMode,
   teamToExecutionTeam } from './agentDeskComposer'
 
@@ -121,5 +123,48 @@ describe('isModeBlocked', () => {
   it('always leaves Ask available', () => {
     expect(isModeBlocked('Ask', true)).toBe(false)
     expect(isModeBlocked('Ask', false)).toBe(false)
+  })
+})
+
+/**
+ * A team of helpers is only real in Plan and Auto.
+ *
+ * The backend adds the instruction that lets a lead hand work out only for
+ * those two modes; in Ask it adds nothing, so the run is solo whatever was
+ * chosen. Three separate controls offered a team without asking the mode --
+ * the new-chat card, the composer's own line, and the team popover -- and the
+ * team defaults to a team, so this was the state every read-only chat opened
+ * in rather than one someone had to go looking for.
+ */
+describe('isTeamBlocked', () => {
+  it('refuses a team in Ask, where helpers cannot exist', () => {
+    expect(isTeamBlocked('Ask')).toBe(true)
+  })
+
+  it('allows a team in the modes that can actually hand work out', () => {
+    expect(isTeamBlocked('Plan')).toBe(false)
+    expect(isTeamBlocked('Auto')).toBe(false)
+  })
+
+  // The condition is the mode, not whether the chat may change files. A
+  // read-only chat is covered because `isModeBlocked` already pins it to Ask,
+  // but a chat that CAN write and is simply in Ask has the same problem --
+  // gating on write permission would have left that one lying.
+  it('covers a writable chat that is merely in Ask', () => {
+    expect(isModeBlocked('Ask', true)).toBe(false)
+    expect(isTeamBlocked('Ask')).toBe(true)
+  })
+
+  it('every read-only chat is covered, because it can only be in Ask', () => {
+    for (const mode of ['Ask', 'Plan', 'Auto'] as const) {
+      const reachable = !isModeBlocked(mode, false)
+      if (reachable) expect(isTeamBlocked(mode)).toBe(true)
+    }
+  })
+
+  it('says which modes to pick instead, in plain words', () => {
+    expect(TEAM_NEEDS_MODE_REASON).toMatch(/Plan/)
+    expect(TEAM_NEEDS_MODE_REASON).toMatch(/Auto/)
+    expect(TEAM_NEEDS_MODE_REASON).not.toMatch(/mode-blocked|ExecutionTeam|graph instruction/)
   })
 })

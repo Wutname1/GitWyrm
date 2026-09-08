@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
 import {
   canSendComposerDraft,
+  isTeamBlocked,
   modeToExecutionMode,
   teamToExecutionTeam,
   type ComposerMode,
@@ -521,12 +522,19 @@ export function SessionComposer({
               name -- the session carries no agent identity, and hardcoding one
               claims something untrue about whichever provider is really
               answering. State the shape of the team instead, which is real. */}
+          {/*
+            Reads the mode as well as the team, because the team alone does not
+            decide it. Ask mode gets no helpers whatever the team says, so this
+            line used to promise "a lead agent, up to 3 helpers" for a run that
+            would have neither -- and the team defaults to a team, so that was
+            the ordinary case on every read-only chat rather than a rare one.
+          */}
           <span className="flex flex-none items-center gap-1 text-2xs text-muted-foreground">
             <Sparkles size={12} className="text-accent-text" />
-            {team === 'solo' ? 'One agent' : 'A lead agent, up to 3 helpers'}
+            {team === 'solo' || isTeamBlocked(mode) ? 'One agent' : 'A lead agent, up to 3 helpers'}
           </span>
 
-          <TeamShapeControl team={team} onChange={changeTeam} open={teamOpen} onOpenChange={setTeamOpen} />
+          <TeamShapeControl team={team} mode={mode} onChange={changeTeam} open={teamOpen} onOpenChange={setTeamOpen} />
 
           {/* Whether this chat is read-only is answered by the backend, not
               worked out here: the rule depends on the session's intent and

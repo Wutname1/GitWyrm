@@ -80,3 +80,28 @@ export function isModeBlocked(mode: ComposerMode, canWrite: boolean): boolean {
 }
 
 export const READ_ONLY_REASON = 'This chat only reads and explains, so it cannot change files.'
+
+/**
+ * Whether picking a team of helpers would do anything, given the mode.
+ *
+ * It would not, in Ask. Helpers are proposed by an instruction the backend
+ * only adds for Plan and Auto -- in Ask it adds nothing, so a lead has no way
+ * to hand work out and the run is solo whatever this says. `MODE_NOTES.Ask`
+ * says as much on the card directly above ("no helpers"), which is the screen
+ * contradicting itself in text a person can read without scrolling.
+ *
+ * The condition is the mode, not whether the chat may write. A read-only chat
+ * is covered because `isModeBlocked` already pins it to Ask -- but a perfectly
+ * writable chat whose owner picked Ask has exactly the same problem, and
+ * gating on `canWrite` would leave that one lying.
+ *
+ * It is not a rare state. The team defaults to `helpers`, so every read-only
+ * chat opened showing a team selected, and the composer beside it read "A lead
+ * agent, up to 3 helpers", for a run that could never have one.
+ */
+export function isTeamBlocked(mode: ComposerMode): boolean {
+  return mode === 'Ask'
+}
+
+export const TEAM_NEEDS_MODE_REASON =
+  'Ask mode works alone. Pick Plan or Auto to use a team.'

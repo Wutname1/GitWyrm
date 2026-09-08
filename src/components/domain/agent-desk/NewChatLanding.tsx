@@ -1,7 +1,13 @@
 import { Bot, Check, ChevronDown, FolderGit2, GitFork, Link2, User } from 'lucide-react'
 import type { SessionSource } from '@/lib/bindings'
 import type { ComposerMode, ComposerTeam } from '@/lib/agentDeskComposer'
-import { MODE_NOTES, READ_ONLY_REASON, isModeBlocked } from '@/lib/agentDeskComposer'
+import {
+  MODE_NOTES,
+  READ_ONLY_REASON,
+  TEAM_NEEDS_MODE_REASON,
+  isModeBlocked,
+  isTeamBlocked,
+} from '@/lib/agentDeskComposer'
 import { sourceKindLabel } from '@/lib/agentSessionGrouping'
 import { adapterDisplayName } from '@/lib/agentImportDisplay'
 import { cn } from '@/lib/utils'
@@ -71,6 +77,7 @@ export function NewChatLanding({
   source: SessionSource | null
 }) {
   const startedFrom = describeSource(source)
+  const teamBlocked = isTeamBlocked(mode)
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-6 px-6 py-8">
       <div className="flex flex-col items-center gap-1.5 text-center">
@@ -180,11 +187,25 @@ export function NewChatLanding({
               detail="One agent does the whole job."
               icon={<User size={14} aria-hidden />}
             />
+            {/*
+              The same defect the mode cards above were fixed for, eight lines
+              down and left alone. In Ask mode the backend adds no instruction
+              for handing work to helpers, so a team is a solo run whatever is
+              picked here -- and the card above already says "no helpers" in
+              its own note. This lit up on click and changed nothing.
+
+              Worse than a choice nobody makes: the team defaults to a team, so
+              every read-only chat opened with this selected and the composer
+              below reading "A lead agent, up to 3 helpers".
+            */}
             <Choice
-              selected={team === 'helpers'}
-              onClick={() => onTeamChange('helpers')}
+              selected={team === 'helpers' && !teamBlocked}
+              blocked={teamBlocked}
+              onClick={() => {
+                if (!teamBlocked) onTeamChange('helpers')
+              }}
               title="A team"
-              detail="A lead splits safe work between helpers."
+              detail={teamBlocked ? TEAM_NEEDS_MODE_REASON : 'A lead splits safe work between helpers.'}
               icon={<GitFork size={14} aria-hidden />}
             />
           </div>

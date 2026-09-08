@@ -1,6 +1,11 @@
 import { ChevronUp, GitFork, User } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import type { ComposerTeam } from '@/lib/agentDeskComposer'
+import {
+  TEAM_NEEDS_MODE_REASON,
+  isTeamBlocked,
+  type ComposerMode,
+  type ComposerTeam,
+} from '@/lib/agentDeskComposer'
 import { cn } from '@/lib/utils'
 
 /**
@@ -14,15 +19,26 @@ import { cn } from '@/lib/utils'
  */
 export function TeamShapeControl({
   team,
+  mode,
   onChange,
   open,
   onOpenChange,
 }: {
   team: ComposerTeam
+  /**
+   * The operating mode, because it decides whether helpers can exist at all.
+   *
+   * This control's own description already says so -- "Plan lets you approve
+   * the split first; Auto starts it when useful" names two modes and not the
+   * third. Ask gets no helper instruction from the backend, so choosing a
+   * team there changed nothing and the trigger still read "Lead + helpers".
+   */
+  mode: ComposerMode
   onChange: (team: ComposerTeam) => void
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
+  const blocked = isTeamBlocked(mode)
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>
@@ -31,7 +47,7 @@ export function TeamShapeControl({
           className="flex flex-none items-center gap-1 rounded px-1.5 py-0.5 text-2xs font-semibold text-sub hover:bg-panel3 hover:text-foreground"
         >
           <GitFork size={12} />
-          {team === 'solo' ? 'Solo agent' : 'Lead + helpers'}
+          {team === 'solo' || blocked ? 'Solo agent' : 'Lead + helpers'}
           <ChevronUp size={11} />
         </button>
       </PopoverTrigger>
@@ -64,20 +80,29 @@ export function TeamShapeControl({
           </button>
           <button
             type="button"
+            // `aria-disabled` rather than `disabled`, the way every other
+            // refused control in this workspace does it: a real `disabled`
+            // button leaves the tab order, so the reason it cannot be used is
+            // never read aloud to the people who most need it. Click guarded.
+            aria-disabled={blocked}
             onClick={() => {
+              if (blocked) return
               onChange('helpers')
               onOpenChange(false)
             }}
             className={cn(
               'flex items-start gap-2 rounded-md border border-border px-2 py-1.5 text-left',
-              team === 'helpers' ? 'border-primary/50 bg-soft' : 'hover:bg-panel3'
+              blocked && 'cursor-not-allowed opacity-70',
+              team === 'helpers' && !blocked ? 'border-primary/50 bg-soft' : !blocked && 'hover:bg-panel3'
             )}
           >
             <GitFork size={14} className="mt-0.5 flex-none text-muted-foreground" />
             <span className="min-w-0 flex-1">
               <strong className="block text-2xs font-semibold text-foreground">Lead + helpers</strong>
               <span className="block text-2xs leading-snug text-muted-foreground">
-                The lead splits safe work between helpers. Plan lets you approve the split first; Auto starts it when useful.
+                {blocked
+                  ? TEAM_NEEDS_MODE_REASON
+                  : 'The lead splits safe work between helpers. Plan lets you approve the split first; Auto starts it when useful.'}
               </span>
             </span>
             <span className="flex-none font-mono text-2xs text-muted-foreground">up to 3</span>
