@@ -336,3 +336,11 @@ competing sub-agents, the answer names the losing option too.
 | 327 | 2026-09-27 | Was the copy button already there? | Yes, but only when updating a pull request that already exists; it is now always there, since that is the way a description travels whenever the link cannot carry it. |
 | 328 | 2026-09-27 | Did the first version of the fix work? | No -- it claimed the description had travelled to hosts GitWyrm does not recognise, which drop it from the link entirely. |
 | 329 | 2026-09-27 | What is the risk when undoing a change to check a test? | The comment explaining it can be left behind above unrelated code, which leaves a false claim in the source. |
+| 330 | 2026-09-28 | Could you give a chat a team of agents that could never have one? | Yes -- the team question ignored the answer to the question directly above it about how much the agent may do. |
+| 331 | 2026-09-28 | When does a team do nothing? | In Ask mode, where nothing underneath can hand work out, and the card above already says "no helpers" in as many words. |
+| 332 | 2026-09-28 | Was that a rare state? | No -- a team is what a new chat starts with, so every chat opened to explain or review something started that way. |
+| 333 | 2026-09-28 | How many places said a team was running? | Three -- the new-chat card, the line above the message box, and the popover asking who works on this chat. |
+| 334 | 2026-09-28 | Should the block depend on whether the chat can change files? | No -- that would fix chats that can only read and leave a normal chat sitting in Ask saying the same untrue thing. |
+| 335 | 2026-09-28 | Does switching to Ask throw away a team you had picked? | No -- the choice stays and is shown as unavailable, so switching back to Plan or Auto gives it straight back. |
+| 336 | 2026-09-28 | Was the note about which tests run correct? | No -- it said only one folder was covered while ten test files elsewhere were already running. |
+| 337 | 2026-09-28 | Did that matter? | Yes -- anyone writing a test beside the thing it tests would have read that note and assumed it would never run. |
