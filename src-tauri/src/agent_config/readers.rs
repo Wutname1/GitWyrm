@@ -13,6 +13,143 @@ use sha2::{Digest, Sha256};
 use super::model::{ClientId, ConfigLocation, ExtraFields, ItemKind, JsonValue, RawItem};
 use super::redact::find_secret_fields;
 
+/// Read a JSON config that may be JSONC, the way its own application does.
+///
+/// VS Code's `settings.json` permits `//` and block comments and trailing
+/// commas, and VS Code writes them into it. Strict `serde_json` therefore
+/// fails on an ordinary settings file -- `json_patch::check_editable` records
+/// finding one that failed at line 7, on a trailing comma the editor had put
+/// there itself.
+///
+/// The write side was taught this and the read side was not, so GitWyrm could
+/// write to a file it refused to read. That is not a cosmetic split: the
+/// inventory showed a parse error where the connectors should be, and the
+/// apply plan warned it "cannot show what this would replace" -- so replacing
+/// an existing connector looked exactly like adding a new one, on the screen
+/// where a person decides whether to go ahead.
+///
+/// Applied to every JSON client, not only VS Code. The three readers differ
+/// in which key they look under, not in which dialect they accept, and a
+/// hand-edited `settings.json` with a note in it is the same file whichever
+/// application owns it. Being more forgiving on read can only turn "could not
+/// parse" into real data; it can never invent a connector that is not there.
+fn parse_json_permissively(text: &str) -> Result<Value, serde_json::Error> {
+    serde_json::from_str(&strip_jsonc(text))
+}
+
+/// JSONC text as plain JSON: comments and trailing commas removed, everything
+/// else byte-for-byte.
+///
+/// Comments are replaced with spaces rather than deleted so every byte offset
+/// in a `serde_json` error still points at the same place in the real file --
+/// an error message naming line 7 should mean line 7 of what the person has
+/// open.
+///
+/// Tracks strings and escapes for the same reason `json_patch`'s own walkers
+/// do: `"https://example.com"` contains `//` and is not a comment, and a `,`
+/// before a `}` inside a string is not a trailing comma. That is the one way
+/// this can go wrong, so `stripping_never_changes_a_readable_document` checks
+/// it against every fixture rather than trusting the reasoning.
+fn strip_jsonc(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    let mut in_string = false;
+    let mut escape = false;
+
+    while i < bytes.len() {
+        let c = bytes[i] as char;
+
+        if in_string {
+            out.push(c);
+            if escape {
+                escape = false;
+            } else if c == '\\' {
+                escape = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        if c == '"' {
+            in_string = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+
+        // A line comment, blanked to its end so offsets survive.
+        if c == '/' && bytes.get(i + 1) == Some(&b'/') {
+            while i < bytes.len() && bytes[i] != b'\n' {
+                out.push(' ');
+                i += 1;
+            }
+            continue;
+        }
+
+        // A block comment. Newlines inside it are kept so line numbers in a
+        // later parse error still match the file.
+        if c == '/' && bytes.get(i + 1) == Some(&b'*') {
+            out.push_str("  ");
+            i += 2;
+            while i < bytes.len() {
+                if bytes[i] == b'*' && bytes.get(i + 1) == Some(&b'/') {
+                    out.push_str("  ");
+                    i += 2;
+                    break;
+                }
+                out.push(if bytes[i] == b'\n' { '\n' } else { ' ' });
+                i += 1;
+            }
+            continue;
+        }
+
+        // A comma with nothing but space and comments between it and a closing
+        // bracket is a trailing comma. Looked for here rather than in a second
+        // pass so the string state above is the only place that decides what
+        // is inside a string.
+        if c == ',' && next_meaningful_is_close(bytes, i + 1) {
+            out.push(' ');
+            i += 1;
+            continue;
+        }
+
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
+/// Whether the next thing that is not whitespace or a comment closes a
+/// bracket.
+fn next_meaningful_is_close(bytes: &[u8], mut i: usize) -> bool {
+    while i < bytes.len() {
+        match bytes[i] {
+            b' ' | b'\t' | b'\n' | b'\n' => i += 1,
+            b'/' if bytes.get(i + 1) == Some(&b'/') => {
+                while i < bytes.len() && bytes[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            b'/' if bytes.get(i + 1) == Some(&b'*') => {
+                i += 2;
+                while i < bytes.len() {
+                    if bytes[i] == b'*' && bytes.get(i + 1) == Some(&b'/') {
+                        i += 2;
+                        break;
+                    }
+                    i += 1;
+                }
+            }
+            b'}' | b']' => return true,
+            _ => return false,
+        }
+    }
+    false
+}
+
 fn content_hash(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
@@ -97,7 +234,7 @@ pub enum ReadError {
 /// this JSON reader) -- only MCP connectors are read from this location.
 fn read_claude_code(location: &ConfigLocation, raw: &[u8]) -> Result<Vec<RawItem>, ReadError> {
     let text = String::from_utf8_lossy(raw);
-    let value: Value = serde_json::from_str(&text).map_err(|e| ReadError::Parse {
+    let value: Value = parse_json_permissively(&text).map_err(|e| ReadError::Parse {
         path: location.path.clone(),
         detail: e.to_string(),
     })?;
@@ -118,7 +255,7 @@ fn read_claude_code(location: &ConfigLocation, raw: &[u8]) -> Result<Vec<RawItem
 /// under `mcp`.
 fn read_opencode(location: &ConfigLocation, raw: &[u8]) -> Result<Vec<RawItem>, ReadError> {
     let text = String::from_utf8_lossy(raw);
-    let value: Value = serde_json::from_str(&text).map_err(|e| ReadError::Parse {
+    let value: Value = parse_json_permissively(&text).map_err(|e| ReadError::Parse {
         path: location.path.clone(),
         detail: e.to_string(),
     })?;
@@ -135,21 +272,26 @@ fn read_opencode(location: &ConfigLocation, raw: &[u8]) -> Result<Vec<RawItem>, 
     Ok(items)
 }
 
-/// Generic reader for any JSON config that keeps MCP servers under a
-/// `mcpServers` or `mcp.servers` key, used for clients whose shape has not
-/// been independently proven yet (VS Code Copilot). Read-only:
-/// no writer exists for these until their schema is proven (task 4.4, 4.5).
+/// Generic reader for a JSON config whose MCP servers live under one of
+/// several possible keys, used for VS Code Copilot.
+///
+/// The candidate keys and their order come from the registry row -- the same
+/// list the writer follows. They used to be spelled out again here, in a
+/// different order, and one key short: the writer looks under `servers` and
+/// the reader never did. So a file keeping its connectors there showed none,
+/// while a write to the same file found them and joined that map.
+///
+/// A rule about where a client keeps its servers has one place to live.
 fn read_generic_json_mcp(location: &ConfigLocation, raw: &[u8]) -> Result<Vec<RawItem>, ReadError> {
     let text = String::from_utf8_lossy(raw);
-    let value: Value = serde_json::from_str(&text).map_err(|e| ReadError::Parse {
+    let value: Value = parse_json_permissively(&text).map_err(|e| ReadError::Parse {
         path: location.path.clone(),
         detail: e.to_string(),
     })?;
 
-    let servers = value
-        .get("mcpServers")
-        .or_else(|| value.get("mcp").and_then(|m| m.get("servers")))
-        .or_else(|| value.pointer("/github.copilot.chat.mcp.servers"));
+    let servers = server_map_candidates(location.client)
+        .iter()
+        .find_map(|path| lookup_path(&value, path));
 
     let mut items = Vec::new();
     if let Some(Value::Object(servers)) = servers {
@@ -161,6 +303,23 @@ fn read_generic_json_mcp(location: &ConfigLocation, raw: &[u8]) -> Result<Vec<Ra
         }
     }
     Ok(items)
+}
+
+/// Where this client may keep its server map, in the order the writer tries.
+fn server_map_candidates(client: ClientId) -> &'static [&'static [&'static str]] {
+    match super::registry::spec(client).writer {
+        Some(super::registry::WriterKind::JsonMcpMapFirstPresent { candidates, .. }) => candidates,
+        _ => &[],
+    }
+}
+
+/// Follow a key path into a parsed document.
+fn lookup_path<'a>(value: &'a Value, path: &[&str]) -> Option<&'a Value> {
+    let mut node = value;
+    for segment in path {
+        node = node.get(*segment)?;
+    }
+    node.is_object().then_some(node)
 }
 
 /// Minimal, read-only TOML reader for Codex's `config.toml`, sufficient to
@@ -252,6 +411,126 @@ mod tests {
             scope: ConfigScope::Personal,
             path: path.to_string_lossy().into_owned(),
         }
+    }
+
+    /// The invariant that makes the stripper safe to trust.
+    ///
+    /// For anything `serde_json` can already read, stripping must not change
+    /// what it means. A `//` inside a URL mistaken for a comment, or a comma
+    /// inside a string mistaken for a trailing one, shows up here -- these are
+    /// the shapes that would otherwise be argued about rather than checked.
+    #[test]
+    fn stripping_never_changes_a_readable_document() {
+        let readable = [
+            r#"{}"#,
+            r#"{ "a": 1 }"#,
+            r#"{ "url": "https://example.com//path" }"#,
+            r#"{ "note": "a, b, c" }"#,
+            r#"{ "ends": "trailing," }"#,
+            r#"{ "slash": "/* not a comment */" }"#,
+            r#"{ "quoted": "he said \" then // still inside" }"#,
+            r#"{ "nested": { "deep": [1, 2, { "x": "y//z" }] } }"#,
+            r#"{ "backslash": "ends with \\" }"#,
+            r#"{ "empty": "" , "after": 1 }"#,
+        ];
+        for source in readable {
+            let before: Value = serde_json::from_str(source).expect("fixture must be readable");
+            let after: Value =
+                serde_json::from_str(&strip_jsonc(source)).expect("stripping must keep it readable");
+            assert_eq!(before, after, "stripping changed this document: {source}");
+        }
+    }
+
+    /// Byte offsets survive, so a parse error still names the right line.
+    #[test]
+    fn stripping_keeps_the_document_the_same_length() {
+        let source = "{\n  // a note\n  \"a\": 1,\n}\n";
+        assert_eq!(strip_jsonc(source).len(), source.len());
+        assert_eq!(strip_jsonc(source).lines().count(), source.lines().count());
+    }
+
+    /// The file this was written for: comments and a trailing comma, which
+    /// VS Code writes into its own settings and strict parsing refuses.
+    ///
+    /// The write side was taught to accept this and the read side was not, so
+    /// GitWyrm could write to a file it reported as unreadable -- and the
+    /// apply plan then could not show whether a copy would replace something.
+    #[test]
+    fn a_settings_file_with_comments_is_read_rather_than_refused() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(
+            &path,
+            concat!(
+                "{\n",
+                "  // Copilot's connectors\n",
+                "  \"mcpServers\": {\n",
+                "    \"fetch\": { \"command\": \"npx\" },\n",
+                "  },\n",
+                "  /* editor settings below */\n",
+                "  \"editor.fontSize\": 13\n",
+                "}\n"
+            ),
+        )
+        .unwrap();
+
+        let items = read_items(&loc(ClientId::VsCodeCopilot, &path))
+            .expect("an ordinary settings file must be readable");
+        assert_eq!(items.len(), 1, "the connector should be found: {items:?}");
+        assert_eq!(items[0].identity, "fetch");
+    }
+
+    /// A genuinely damaged file is still an error. Tolerating JSONC is not the
+    /// same as accepting anything, and "could not read this" has to stay a
+    /// real answer.
+    #[test]
+    fn a_damaged_file_is_still_reported_as_unreadable() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, "{ \"mcpServers\": { \"a\": { \"command\": \"npx\" }\n").unwrap();
+        assert!(read_items(&loc(ClientId::VsCodeCopilot, &path)).is_err());
+    }
+
+    /// The reader looks everywhere the writer does.
+    ///
+    /// It used to keep its own list, in a different order and one key short:
+    /// the writer follows `servers` and the reader never looked there. So a
+    /// settings file keeping its connectors under that key showed none in the
+    /// inventory, while a write to the same file found them and joined that
+    /// very map -- GitWyrm adding to a list it was telling the person was
+    /// empty.
+    #[test]
+    fn the_reader_looks_under_every_key_the_writer_follows() {
+        let dir = TempDir::new().unwrap();
+        for (i, key) in ["servers", "mcpServers"].iter().enumerate() {
+            let path = dir.path().join(format!("settings-{i}.json"));
+            std::fs::write(
+                &path,
+                format!("{{ \"{key}\": {{ \"fetch\": {{ \"command\": \"npx\" }} }} }}"),
+            )
+            .unwrap();
+            let items = read_items(&loc(ClientId::VsCodeCopilot, &path)).unwrap();
+            assert_eq!(items.len(), 1, "a connector under {key} should be found");
+            assert_eq!(items[0].identity, "fetch");
+        }
+    }
+
+    /// Nested keys still work, and a key holding something other than an
+    /// object is not a server map.
+    #[test]
+    fn a_nested_map_is_found_and_a_non_object_is_not_a_map() {
+        let dir = TempDir::new().unwrap();
+        let nested = dir.path().join("nested.json");
+        std::fs::write(
+            &nested,
+            "{ \"mcp\": { \"servers\": { \"fetch\": { \"command\": \"npx\" } } } }",
+        )
+        .unwrap();
+        assert_eq!(read_items(&loc(ClientId::VsCodeCopilot, &nested)).unwrap().len(), 1);
+
+        let wrong = dir.path().join("wrong.json");
+        std::fs::write(&wrong, "{ \"servers\": 3 }").unwrap();
+        assert!(read_items(&loc(ClientId::VsCodeCopilot, &wrong)).unwrap().is_empty());
     }
 
     #[test]
