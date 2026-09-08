@@ -75,7 +75,16 @@ pub fn personal_locations(client: ClientId) -> Vec<ConfigLocation> {
     let Some(home) = home_dir() else {
         return Vec::new();
     };
-    locations_under(client, ConfigScope::Personal, &home, registry::spec(client).personal_paths)
+    let spec = registry::spec(client);
+    // The root is declared by the row, not assumed to be home. VS Code keeps
+    // its settings under the per-user application-data folder instead, and
+    // joining its components onto home looked in a folder that does not exist
+    // on Windows -- which reads as "this app is not installed" rather than as
+    // "GitWyrm looked in the wrong place".
+    let Some(root) = spec.personal_root.resolve(&home) else {
+        return Vec::new();
+    };
+    locations_under(client, ConfigScope::Personal, &root, spec.personal_paths)
 }
 
 /// Repository-scoped locations, when the client supports project-local
@@ -155,6 +164,67 @@ mod tests {
         let prev = std::env::var_os("GITWYRM_TEST_HOME");
         std::env::set_var("GITWYRM_TEST_HOME", dir.path());
         HomeGuard { _dir: dir, prev, _lock: lock }
+    }
+
+    /// VS Code's settings file is looked for where VS Code actually puts it.
+    ///
+    /// The row declared `~/.config/Code/User/settings.json` -- the Linux shape
+    /// -- and it was joined onto the home folder on every platform. On Windows
+    /// that folder does not exist, so `detect_clients` reported Copilot as not
+    /// installed, its connectors never appeared, and a copy aimed at it would
+    /// have created a settings file somewhere the editor never reads.
+    #[test]
+    fn vs_code_settings_are_looked_for_under_the_application_data_folder() {
+        let locations = personal_locations(ClientId::VsCodeCopilot);
+        assert_eq!(locations.len(), 1, "{locations:?}");
+        let path = locations[0].path.replace('\\', "/");
+
+        assert!(
+            path.ends_with("Code/User/settings.json"),
+            "the tail is the same on every platform: {path}"
+        );
+
+        #[cfg(windows)]
+        assert!(
+            path.contains("AppData/Roaming"),
+            "on Windows this lives under the roaming profile: {path}"
+        );
+        #[cfg(all(unix, not(target_os = "macos")))]
+        assert!(path.contains("/.config/"), "{path}");
+        #[cfg(target_os = "macos")]
+        assert!(path.contains("Library/Application Support"), "{path}");
+    }
+
+    /// Where a client keeps its per-user files is known in two places, and
+    /// they must not disagree.
+    ///
+    /// This module's own header records that it deliberately did not reuse the
+    /// chat-import adapters' detection while both were being built, and that
+    /// the two "should be unified in a follow-up... so client detection has
+    /// one implementation instead of two that can drift apart." They drifted:
+    /// the adapter resolved VS Code's directory correctly on all three
+    /// platforms while this side used the Linux shape everywhere.
+    ///
+    /// Unifying them outright is the wrong shape -- the two ask different
+    /// questions of different directories, and OpenCode proves it: its adapter
+    /// reads a database under `~/.local/share/opencode` while this side reads
+    /// configuration under `~/.config/opencode`. So the agreement that matters
+    /// is asserted rather than assumed, for the one client whose root is not
+    /// simply home.
+    #[test]
+    fn the_settings_folder_agrees_with_the_chat_importers_own_answer() {
+        let ours = personal_locations(ClientId::VsCodeCopilot);
+        let ours = std::path::PathBuf::from(&ours[0].path);
+        // `<root>/Code/User/settings.json` -> `<root>/Code/User`
+        let ours_dir = ours.parent().expect("a settings file has a folder");
+
+        let theirs = crate::agentdesk::adapters::vscode_copilot::user_dir_for_tests()
+            .expect("the importer resolves a folder on this platform");
+
+        assert_eq!(
+            ours_dir, theirs,
+            "the two sides must look in the same folder for VS Code"
+        );
     }
 
     #[test]

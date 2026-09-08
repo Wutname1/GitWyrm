@@ -81,6 +81,73 @@ pub enum WriterKind {
 /// inventory's source-selection tie-break sorts by `ClientId as u8`, so the
 /// declaration order below is load-bearing for which client is picked as an
 /// item's source when the same item exists in several. Reordering rows
+/// Which directory a client's personal paths hang off.
+///
+/// Almost every client here keeps its settings straight under the user's home
+/// folder, and did so on every platform -- so the root was simply assumed to
+/// be home, and the components in a row were joined onto it.
+///
+/// VS Code does not. It keeps `Code/User/settings.json` under the per-user
+/// application-data directory, which is a different place on each platform:
+/// `%APPDATA%` on Windows, `~/Library/Application Support` on macOS, and
+/// `~/.config` elsewhere. The row declared the last of those three and it was
+/// used everywhere, so on Windows GitWyrm looked for the settings file in a
+/// folder VS Code has never written to.
+///
+/// The effect was not a missing feature but a wrong answer: the client read
+/// as *not installed*, its connectors never appeared, and -- since a
+/// destination that does not exist yet is created -- copying one to it would
+/// have written a brand new settings file somewhere the editor never reads,
+/// and reported that as a success.
+///
+/// Declared per row rather than decided in code, for the reason this whole
+/// module exists: a client is a row here, not an arm in a match somewhere
+/// else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PathRoot {
+    /// The user's home directory.
+    Home,
+    /// The per-user application-data directory, which differs by platform.
+    AppData,
+}
+
+impl PathRoot {
+    /// This root on the machine GitWyrm is running on, or `None` when the
+    /// environment does not say where it is.
+    pub fn resolve(self, home: &std::path::Path) -> Option<std::path::PathBuf> {
+        match self {
+            PathRoot::Home => Some(home.to_path_buf()),
+            PathRoot::AppData => app_data_dir(home),
+        }
+    }
+}
+
+/// The per-user application-data directory.
+///
+/// Kept beside `PathRoot` rather than in the location code, so the one place
+/// that knows this differs by platform is the one place that names it.
+fn app_data_dir(home: &std::path::Path) -> Option<std::path::PathBuf> {
+    #[cfg(windows)]
+    {
+        // `%APPDATA%` is the roaming profile, which is where VS Code writes.
+        // Falling back to the home-relative shape is deliberate: it keeps a
+        // test harness that only overrides the home directory working.
+        return std::env::var_os("APPDATA")
+            .map(std::path::PathBuf::from)
+            .or_else(|| Some(home.join("AppData").join("Roaming")));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        return Some(home.join("Library").join("Application Support"));
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        return std::env::var_os("XDG_CONFIG_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| Some(home.join(".config")));
+    }
+}
+
 /// changes what people see; adding a row at the end does not.
 #[derive(Debug, Clone)]
 pub struct ClientSpec {
@@ -94,7 +161,11 @@ pub struct ClientSpec {
     pub key: &'static str,
     /// Short name shown to people. Plain product names, nothing technical.
     pub display_name: &'static str,
-    /// Personal configuration files, relative to the user's home directory.
+    /// Which directory `personal_paths` hang off. Almost always the user's
+    /// home folder; see [`PathRoot`] for the one that is not, and why getting
+    /// it wrong reads as "this app is not installed".
+    pub personal_root: PathRoot,
+    /// Personal configuration files, relative to [`Self::personal_root`].
     /// More than one entry means the client reads several files; they are
     /// searched in the order given.
     pub personal_paths: &'static [&'static [&'static str]],
@@ -161,6 +232,7 @@ pub const CLIENTS: &[ClientSpec] = &[
         id: ClientId::Codex,
         key: "codex",
         display_name: "Codex",
+        personal_root: PathRoot::Home,
         personal_paths: &[&[".codex", "config.toml"]],
         // Codex has no project-local config file GitWyrm reads today.
         repo_paths: &[],
@@ -180,6 +252,7 @@ pub const CLIENTS: &[ClientSpec] = &[
         id: ClientId::ClaudeCode,
         key: "claude-code",
         display_name: "Claude",
+        personal_root: PathRoot::Home,
         personal_paths: &[&[".claude", "settings.json"], &[".claude.json"]],
         repo_paths: &[&[".claude", "settings.json"]],
         // The only client whose skills folder has been checked against a real
@@ -205,6 +278,7 @@ pub const CLIENTS: &[ClientSpec] = &[
         // config.json -> opencode.json -> opencode.jsonc, and project paths
         // opencode.json -> opencode.jsonc -> .opencode/opencode.json ->
         // .opencode/opencode.jsonc.
+        personal_root: PathRoot::Home,
         personal_paths: &[
             &[".config", "opencode", "config.json"],
             &[".config", "opencode", "opencode.json"],
@@ -233,7 +307,13 @@ pub const CLIENTS: &[ClientSpec] = &[
         id: ClientId::VsCodeCopilot,
         key: "vs-code-copilot",
         display_name: "Copilot",
-        personal_paths: &[&[".config", "Code", "User", "settings.json"]],
+        // VS Code keeps this under the per-user application-data folder,
+        // not the home folder -- `%APPDATA%\Code\User` on Windows. The row
+        // used to spell the Linux shape and have it joined onto home
+        // everywhere, so on Windows GitWyrm looked somewhere VS Code has
+        // never written and reported Copilot as not installed.
+        personal_root: PathRoot::AppData,
+        personal_paths: &[&["Code", "User", "settings.json"]],
         repo_paths: &[&[".vscode", "settings.json"]],
         readable_kinds: &[ItemKind::McpConnector],
         // The editor's settings file holds far more than agent configuration,

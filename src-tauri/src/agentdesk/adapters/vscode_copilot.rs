@@ -54,6 +54,16 @@ impl Default for VsCodeCopilotAdapter {
     }
 }
 
+/// This adapter's answer for where VS Code keeps its per-user files.
+///
+/// Exposed so `agent_config::locations` can assert the two sides agree. They
+/// are deliberately NOT merged: this side asks whether Copilot Chat has been
+/// used, that side asks where the settings file is, and for OpenCode the two
+/// are different directories entirely. Only the answer is compared.
+pub fn user_dir_for_tests() -> Option<PathBuf> {
+    VsCodeCopilotAdapter::default().user_dir()
+}
+
 impl VsCodeCopilotAdapter {
     pub fn at(user_dir: PathBuf) -> Self {
         Self {
