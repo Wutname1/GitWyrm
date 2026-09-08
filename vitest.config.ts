@@ -9,10 +9,17 @@ import path from 'node:path'
  * headless logic test needs, and one of which talks to the network when a token
  * is present.
  *
- * Scope is `src/lib` because that is where the testable logic lives -- diffing,
- * branch trees, graph columns, version compare. Components are not covered:
- * that would need a DOM environment and a testing library, which is a larger
- * decision than this. The app is still verified by running it.
+ * `include` is every `*.test.ts` under `src`, not only `src/lib`. Most of the
+ * testable logic does live there -- diffing, branch trees, graph columns,
+ * version compare -- but stores and a few components export pure functions
+ * worth pinning beside themselves, and ten test files already sit outside
+ * `src/lib` on that basis. This comment used to say the scope was `src/lib`,
+ * which would have told the next person their colocated test was never run.
+ *
+ * What is still not covered is anything needing a DOM: rendering, events,
+ * hooks. That would need an environment and a testing library, which is a
+ * larger decision than this. Note the `.ts` extension in the pattern -- a
+ * `.test.tsx` is not picked up, which is the line between the two.
  */
 export default defineConfig({
   resolve: {
