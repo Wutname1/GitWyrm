@@ -57,10 +57,36 @@ pub fn find_secret_fields(extra: &ExtraFields) -> Vec<SecretFieldRef> {
     found
 }
 
+/// Where in an item a value counts as a secret, by the shape of the path
+/// rather than by what the value looks like.
+///
+/// The three cases below are matched on the path's LAST segment, so they hold
+/// wherever they appear rather than only at the top of an entry. `args`
+/// always did this; `env` matched only at the top or under `env.`, and
+/// `headers` only as an exact top-level key.
+///
+/// That mattered more than an inconsistency usually would. Every header value
+/// is meant to be secret precisely because a name is not evidence of what a
+/// value holds -- see `HISTORICALLY_KNOWN_SECRET_HEADERS`. One level down,
+/// that rule stopped applying and header values were judged by their names
+/// again: `remote.headers.Authorization` was caught only because "auth" is a
+/// substring of it, while `X-Session` was not caught at all. The allowlist
+/// this module deleted had not gone away, it had moved one level down, where
+/// nothing tested it.
+///
+/// GitWyrm's own writer always puts `headers` at the top of an entry, so this
+/// is not a shape it produces. It is a shape it can be handed: `extra` comes
+/// straight out of a file someone else's application wrote, or that a person
+/// hand-edited, and a nested map is preserved and copied verbatim.
+///
+/// Guarded on the value being an object, so a field that merely shares the
+/// name -- `headers: ["accept"]`, say -- is not swept up. Over-marking is not
+/// free: it costs a line of the disclosure screen and, repeated, the meaning
+/// of the marker itself.
 fn walk(path: &str, value: &Value, out: &mut Vec<SecretFieldRef>) {
     let leaf = path.rsplit('.').next().unwrap_or(path);
 
-    if path == "env" || path.starts_with("env.") {
+    if leaf == "env" || path == "env" || path.starts_with("env.") {
         if let Value::Object(map) = value {
             for (k, v) in map {
                 out.push(SecretFieldRef {
@@ -79,17 +105,15 @@ fn walk(path: &str, value: &Value, out: &mut Vec<SecretFieldRef>) {
         }
     }
 
-    if path == "headers" {
+    if leaf == "headers" {
         if let Value::Object(map) = value {
             for (k, v) in map {
                 // Every header value, not a known-names list. See
                 // `HISTORICALLY_KNOWN_SECRET_HEADERS` for why.
-                {
-                    out.push(SecretFieldRef {
-                        field_path: format!("{path}.{k}"),
-                        reason: SecretReason::HeaderValue,
-                    });
-                }
+                out.push(SecretFieldRef {
+                    field_path: format!("{path}.{k}"),
+                    reason: SecretReason::HeaderValue,
+                });
                 walk(&format!("{path}.{k}"), v, out);
             }
             return;
@@ -292,6 +316,74 @@ mod tests {
 
     fn extra_from(pairs: &[(&str, Value)]) -> ExtraFields {
         pairs.iter().map(|(k, v)| (k.to_string(), JsonValue(v.clone()))).collect()
+    }
+
+    /// A header map keeps its meaning wherever it sits.
+    ///
+    /// `headers` used to be recognised only as an exact top-level key. One
+    /// level down, header values were judged by their names again -- which is
+    /// the allowlist this module deleted, moved rather than removed. Nothing
+    /// caught it because every test here used a top-level `headers`.
+    #[test]
+    fn a_nested_header_map_is_still_secret() {
+        let extra = extra_from(&[(
+            "remote",
+            json!({ "headers": { "X-Session": "abc", "X-Trace-Id": "t-1" } }),
+        )]);
+        let found = find_secret_fields(&extra);
+        let paths: Vec<&str> = found.iter().map(|f| f.field_path.as_str()).collect();
+        assert!(
+            paths.contains(&"remote.headers.X-Session"),
+            "a header value one level down is still a header value: {paths:?}"
+        );
+        assert!(
+            paths.contains(&"remote.headers.X-Trace-Id"),
+            "every header value, not the ones whose names look like secrets: {paths:?}"
+        );
+        assert!(
+            found.iter().all(|f| f.reason == SecretReason::HeaderValue
+                || f.reason == SecretReason::NamedSecretField),
+            "reported as header values: {found:?}"
+        );
+    }
+
+    /// Same for an environment map that is not at the top of the entry.
+    #[test]
+    fn a_nested_environment_map_is_still_secret() {
+        let extra = extra_from(&[("server", json!({ "env": { "API_HOST": "x" } }))]);
+        let paths: Vec<String> = find_secret_fields(&extra)
+            .into_iter()
+            .map(|f| f.field_path)
+            .collect();
+        assert!(paths.contains(&"server.env.API_HOST".to_string()), "{paths:?}");
+    }
+
+    /// Inside an array too, which the path builder already handles.
+    #[test]
+    fn a_header_map_inside_an_array_is_still_secret() {
+        let extra = extra_from(&[(
+            "servers",
+            json!([{ "headers": { "X-Session": "abc" } }]),
+        )]);
+        let paths: Vec<String> = find_secret_fields(&extra)
+            .into_iter()
+            .map(|f| f.field_path)
+            .collect();
+        assert!(paths.contains(&"servers[0].headers.X-Session".to_string()), "{paths:?}");
+    }
+
+    /// A field that merely shares the name is not swept up.
+    ///
+    /// Over-marking is not free: it costs a line of the screen whose job is
+    /// disclosing what will be written, and repeated it costs the marker its
+    /// meaning. So the match is on a header *map*, not on the word.
+    #[test]
+    fn a_field_named_headers_that_is_not_a_map_is_left_alone() {
+        let extra = extra_from(&[("headers", json!(["accept", "content-type"]))]);
+        assert!(
+            find_secret_fields(&extra).is_empty(),
+            "a list of header names carries no values to hide"
+        );
     }
 
     #[test]
