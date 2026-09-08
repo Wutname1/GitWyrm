@@ -384,3 +384,11 @@ competing sub-agents, the answer names the losing option too.
 | 375 | 2026-10-03 | Had anyone seen this coming? | Yes -- a note in the code said this part and the chat importer would drift apart unless they were brought together, and they did. |
 | 376 | 2026-10-03 | Should the two have been merged? | No -- they look at different folders for other tools, so merging them would have forced a wrong answer somewhere else. |
 | 377 | 2026-10-03 | What stops them drifting again? | A check that fails the build if the two ever disagree about where VS Code keeps its files. |
+| 378 | 2026-10-04 | How does GitWyrm decide an AI tool is installed? | By looking for its settings file, which is also where connectors are read from, so those two always agree. |
+| 379 | 2026-10-04 | Why do skills break that? | They live in a different folder, so a tool can have skills to list while its settings file is genuinely absent. |
+| 380 | 2026-10-04 | What did the screen show then? | The tool skills on one line and, on the same row, that the tool was not detected on this machine at all. |
+| 381 | 2026-10-04 | Was there already a rule preventing that? | Yes, but only by accident -- nothing said so, and the one case that could expose it had no test. |
+| 382 | 2026-10-04 | Should a skills folder count as proof the tool is installed? | No -- a folder can be left behind by an uninstall, and that answer decides whether the tool is offered as somewhere to copy a connector. |
+| 383 | 2026-10-04 | Does that answer actually block anything? | Yes -- a tool marked not detected cannot be chosen as a destination, so widening it would remove a real safeguard. |
+| 384 | 2026-10-04 | Was the wording right elsewhere? | No -- the list of detected apps said not found on this machine when all that was checked is whether a settings file is there. |
+| 385 | 2026-10-04 | Did every missing folder turn out to be a bug? | No -- two declared folders are absent here simply because one tool has no skills and another is not installed. |
