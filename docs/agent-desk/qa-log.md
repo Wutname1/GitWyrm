@@ -344,3 +344,11 @@ competing sub-agents, the answer names the losing option too.
 | 335 | 2026-09-28 | Does switching to Ask throw away a team you had picked? | No -- the choice stays and is shown as unavailable, so switching back to Plan or Auto gives it straight back. |
 | 336 | 2026-09-28 | Was the note about which tests run correct? | No -- it said only one folder was covered while ten test files elsewhere were already running. |
 | 337 | 2026-09-28 | Did that matter? | Yes -- anyone writing a test beside the thing it tests would have read that note and assumed it would never run. |
+| 338 | 2026-09-29 | What happened to Keep when GitWyrm could not read the agent folder? | It disappeared, so work sitting in that folder had no way to be kept and no explanation given. |
+| 339 | 2026-09-29 | Was there already a message written for that situation? | Yes -- naming the problem and suggesting closing whatever is using the folder, and nothing could ever reach it. |
+| 340 | 2026-09-29 | What did the throw-away box say? | That the agent made no file changes, nine lines under a line on the same screen saying what changed there is unknown. |
+| 341 | 2026-09-29 | Should the rule live in the backend and be sent to the screen? | No -- the backend already decides by reading one plain note on the record, so the screen reading that same note is the same rule rather than a second copy. |
+| 342 | 2026-09-29 | Which other buttons needed changing? | None -- every other one depends on what state the work is in, not on how many files were found. |
+| 343 | 2026-09-29 | Is it risky to show a button that will refuse? | No -- the refusal is the only way the person learns the folder could not be read, and hiding it turned that into silence. |
+| 344 | 2026-09-29 | Why did the sentence move to a different file? | The review screen cannot be loaded by a test at all, because something it pulls in expects a browser. |
+| 345 | 2026-09-29 | How was this found? | By listing every exported helper on that screen that no test used, which came back with exactly one. |
