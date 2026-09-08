@@ -368,3 +368,11 @@ competing sub-agents, the answer names the losing option too.
 | 359 | 2026-10-01 | Is a genuinely damaged file still reported? | Yes -- accepting notes is not the same as accepting anything, and could-not-read stays a real answer. |
 | 360 | 2026-10-01 | Did the two sides agree on where VS Code keeps its connectors? | No -- the reading side kept its own list of names, in a different order and missing the one the writing side tries first. |
 | 361 | 2026-10-01 | What did that look like? | A file using that name showed no connectors, while writing to the same file found them and added to that very list. |
+| 362 | 2026-10-02 | Which values does GitWyrm hide when copying a connector? | Every value under headers, deliberately, because the name of a header says nothing about what it holds. |
+| 363 | 2026-10-02 | Did that rule always apply? | No -- only when headers sat at the very top of an entry; one level deeper, values were judged by their names again. |
+| 364 | 2026-10-02 | What did that mean in practice? | A session token under a name like X-Session was shown in full with no warning that it would be copied. |
+| 365 | 2026-10-02 | Had this been fixed before? | Yes -- the same name-based approach was removed once, but it had only moved one level down, where no test looked. |
+| 366 | 2026-10-02 | Does GitWyrm ever write a file shaped that way? | No -- but it reads files other tools wrote and files people edited by hand, and copies whatever it finds. |
+| 367 | 2026-10-02 | Is hiding more always better? | No -- it costs a line of the screen that exists to show what will be written, and repeated it costs the warning its meaning. |
+| 368 | 2026-10-02 | So what is the test now? | Whether the field actually holds a set of values, not merely whether it is called headers. |
+| 369 | 2026-10-02 | Was environment affected too? | Yes, in a milder way, and it is fixed by the same single change rather than a patch to one case. |
