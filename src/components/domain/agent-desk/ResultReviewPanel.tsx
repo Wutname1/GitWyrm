@@ -37,6 +37,7 @@ import {
   explainUndoOutcome,
   hasFailingCheck,
   resultActionAvailability,
+  undoCountLine,
   resultStateLabel,
   runOutcomeLabel,
   sortResultsNewestFirst,
@@ -714,7 +715,7 @@ export function ResultReviewPanel({
         title="Throw away this work?"
         description={
           <>
-            {undoCountLine(record.changedPaths.length)} Your own files outside this work are not touched.
+            {undoCountLine(record.changedPaths.length, record.changedPathsUnreadable)} Your own files outside this work are not touched.
           </>
         }
         confirmLabel="Throw it away"
@@ -732,13 +733,6 @@ export function ResultReviewPanel({
       />
     </div>
   )
-}
-
-/** States what Undo is about to discard, in files rather than in Git terms. */
-export function undoCountLine(changedCount: number): string {
-  if (changedCount === 0) return 'The agent made no file changes, so there is nothing to keep.'
-  if (changedCount === 1) return 'The 1 file the agent changed goes back to how it was.'
-  return `All ${changedCount} files the agent changed go back to how they were.`
 }
 
 /** Renders a changed file's outcome as a coloured word rather than a raw code. */

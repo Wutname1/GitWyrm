@@ -43,6 +43,7 @@ import {
   explainUndoOutcome,
   hasFailingCheck,
   resultActionAvailability,
+  undoCountLine,
   resultNeedsReview,
   resultStateLabel,
   shouldShowResultPanel,
@@ -119,6 +120,33 @@ describe('resultActionAvailability', () => {
     const wt = { worktreePath: 'C:/wt', changedPaths: [path('M')] }
     expect(resultActionAvailability({ state: 'kept', ...wt }).canTellSpec).toBe(true)
     expect(resultActionAvailability({ state: 'committed', ...wt }).canTellSpec).toBe(true)
+  })
+
+  // A folder GitWyrm could not read is not a folder with nothing in it.
+  //
+  // Keep used to be hidden here, because the file list is empty when the
+  // folder cannot be read. So the person was shown a result with no way to
+  // keep it and no reason given -- while the backend had a refusal written
+  // for exactly this, naming the problem and what to do about it, that
+  // nothing could ever reach.
+  it('still offers Keep when the folder could not be read', () => {
+    const a = resultActionAvailability({
+      state: 'reviewing',
+      worktreePath: 'C:/wt',
+      changedPaths: [],
+      changedPathsUnreadable: 'could not open worktree',
+    })
+    expect(a.canKeep).toBe(true)
+  })
+
+  it('does not offer Keep when the folder really was empty', () => {
+    const a = resultActionAvailability({
+      state: 'reviewing',
+      worktreePath: 'C:/wt',
+      changedPaths: [],
+      changedPathsUnreadable: null,
+    })
+    expect(a.canKeep).toBe(false)
   })
 
   it('a reviewing result with changes can be kept and undone', () => {
@@ -976,5 +1004,43 @@ describe('a sentence written once is available everywhere it is needed', () => {
     }
     const bare = ANSWERED_FAILURES.filter((k) => describeOutcomeKind(k) === raw(k))
     expect(bare, 'these render as a code word despite having a sentence elsewhere').toEqual([])
+  })
+})
+
+/**
+ * The sentence inside "Throw away this work?" -- the dialog for the most
+ * destructive action in the workspace. It had no test at all, which is how it
+ * kept saying "the agent made no file changes" about a folder GitWyrm had
+ * failed to open.
+ */
+describe('undoCountLine', () => {
+  it('counts one file and many files properly', () => {
+    expect(undoCountLine(1)).toContain('1 file')
+    expect(undoCountLine(4)).toContain('All 4 files')
+  })
+
+  it('says there is nothing to keep when nothing was changed', () => {
+    expect(undoCountLine(0)).toContain('no file changes')
+  })
+
+  // The defect. An unreadable folder counts zero files, and zero used to mean
+  // "measured nothing" -- so the dialog asserted the agent had changed nothing
+  // about a folder nobody had managed to look inside.
+  it('does not claim nothing changed when it could not look', () => {
+    const line = undoCountLine(0, 'could not open worktree')
+    expect(line).not.toContain('no file changes')
+    expect(line.toLowerCase()).toContain('could not read')
+  })
+
+  // The reason wins over the count: a list is not trustworthy when what made
+  // it short is that nobody read it.
+  it('trusts the reason over the count', () => {
+    const line = undoCountLine(3, 'could not open worktree')
+    expect(line).not.toContain('3 files')
+    expect(line.toLowerCase()).toContain('could not read')
+  })
+
+  it('behaves as before when there is nothing wrong', () => {
+    expect(undoCountLine(2, null)).toContain('All 2 files')
   })
 })

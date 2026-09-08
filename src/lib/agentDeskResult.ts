@@ -69,8 +69,22 @@ export interface ResultActionAvailability {
   canTellSpec: boolean
 }
 
-export function resultActionAvailability(record: Pick<ResultRecord, 'state' | 'worktreePath' | 'changedPaths'>): ResultActionAvailability {
-  const hasChanges = record.worktreePath != null && record.changedPaths.length > 0
+export function resultActionAvailability(
+  record: Pick<ResultRecord, 'state' | 'worktreePath' | 'changedPaths' | 'changedPathsUnreadable'>
+): ResultActionAvailability {
+  // A folder GitWyrm could not read has an empty list for a reason that is not
+  // emptiness, so it counts as "there may be something here". Without this,
+  // Keep was hidden altogether and the person never learned the folder was
+  // unreadable -- the backend writes a refusal saying exactly that, naming the
+  // problem and suggesting closing whatever is holding the folder, and it was
+  // unreachable because the button that would ask for it was never drawn.
+  //
+  // The same direction the backend takes for the same question, reading the
+  // same field it reads: `keep_result_at` asks `changed_paths_unreadable`
+  // before it asks whether the list is empty.
+  const hasChanges =
+    record.worktreePath != null &&
+    (record.changedPaths.length > 0 || record.changedPathsUnreadable != null)
   // The named predicate above, not a second copy of it. Both existed; the
   // named one had no caller, which is how a rule ends up with two definitions
   // that can drift.
@@ -90,6 +104,32 @@ export function resultActionAvailability(record: Pick<ResultRecord, 'state' | 'w
     // place a mistake outlives the session.
     canTellSpec: record.state === 'kept' || record.state === 'committed',
   }
+}
+
+/**
+ * States what Undo is about to discard, in files rather than in Git terms.
+ *
+ * `unreadable` is why the file list could not be read, when it could not be.
+ * Without it this counted an empty list as a measurement and told the person
+ * "the agent made no file changes" about a folder GitWyrm never managed to
+ * open -- inside a dialog asking whether to throw that folder's contents
+ * away, and nine lines under a summary on the same panel correctly saying
+ * that what changed there is unknown.
+ *
+ * Lives here rather than beside the dialog it feeds. `ResultReviewPanel`
+ * cannot be imported by a test at all: its import chain reaches
+ * `settingsSync`, which touches `window` when the module loads, so a test
+ * that only wants this one sentence brings a browser with it. Moving the
+ * decision to where it can be reached is the shape this repo already uses
+ * for exactly that constraint.
+ */
+export function undoCountLine(changedCount: number, unreadable?: string | null): string {
+  if (unreadable) {
+    return 'GitWyrm could not read this folder, so it cannot say what would be thrown away.'
+  }
+  if (changedCount === 0) return 'The agent made no file changes, so there is nothing to keep.'
+  if (changedCount === 1) return 'The 1 file the agent changed goes back to how it was.'
+  return `All ${changedCount} files the agent changed go back to how they were.`
 }
 
 /** One line per changed file, grouped by status for a compact summary. */
