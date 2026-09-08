@@ -352,3 +352,11 @@ competing sub-agents, the answer names the losing option too.
 | 343 | 2026-09-29 | Is it risky to show a button that will refuse? | No -- the refusal is the only way the person learns the folder could not be read, and hiding it turned that into silence. |
 | 344 | 2026-09-29 | Why did the sentence move to a different file? | The review screen cannot be loaded by a test at all, because something it pulls in expects a browser. |
 | 345 | 2026-09-29 | How was this found? | By listing every exported helper on that screen that no test used, which came back with exactly one. |
+| 346 | 2026-09-30 | Where does GitWyrm put a connector it copies into VS Code? | Into whichever list the settings file already uses, read from the file, so it never starts a second one. |
+| 347 | 2026-09-30 | What went wrong reading the file? | It was read strictly, so the notes and trailing commas VS Code writes itself made an ordinary file unreadable. |
+| 348 | 2026-09-30 | What happened then? | GitWyrm fell back to the name a brand new file would use, so the connector went somewhere the editor never looks. |
+| 349 | 2026-09-30 | Would anyone have noticed? | Only by the connector not working -- GitWyrm reported the copy as successful. |
+| 350 | 2026-09-30 | Should an unreadable file be guessed at or refused? | Refused -- a file GitWyrm cannot read is not a file with nothing in it, and defaulting on that is how the wrong place gets written. |
+| 351 | 2026-09-30 | Does a brand new settings file still work? | Yes -- an absent file arrives as an empty one, which reads fine and genuinely has no list yet. |
+| 352 | 2026-09-30 | Did the test for the refusal prove anything? | No -- it passed with the refusal removed, because the write refuses the same unreadable file a moment later anyway. |
+| 353 | 2026-09-30 | Why keep the refusal then? | Because the two checks share one gate today and may not always, and swallowing the error would put the same defect back. |
