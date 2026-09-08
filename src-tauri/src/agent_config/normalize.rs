@@ -95,6 +95,28 @@ fn client_state(
     let existing = occurrences.iter().find(|i| i.location.client == client);
 
     match existing {
+        // This client HAS the item, and that outranks `detected`.
+        //
+        // `detected` asks whether one of the client's declared config files
+        // exists. Holding one of its items means a file belonging to it was
+        // read off disk -- direct evidence, and stronger than the question
+        // `detected` answers. Saying "not detected on this machine at all"
+        // while listing something found on this machine would be the panel
+        // contradicting itself.
+        //
+        // Not a hypothetical gap between the two. Connectors are read from the
+        // very files `detected` tests, so for them the two always agree. Skills
+        // are not: they are scanned out of `<client>/skills` folders, which are
+        // nowhere in the declared config paths. Someone with
+        // `~/.claude/skills/foo/SKILL.md` and no `~/.claude/settings.json` has
+        // skills to show for a client whose config file is genuinely absent.
+        //
+        // Deliberately not fixed by widening `detected` to count skill
+        // folders. A folder can be left behind by an uninstall, or copied in
+        // by hand, and `detected` gates whether this client is offered as a
+        // destination for CONNECTORS -- whose config file really would be
+        // missing. Treating a stray folder as an installation would trade a
+        // visible contradiction for a quiet one.
         Some(item) => {
             if item.extra == source_item.extra {
                 ClientSyncState::Same
@@ -192,6 +214,76 @@ mod tests {
                 also_used_by: Vec::new(),
             })
             .collect()
+    }
+
+    /// A client GitWyrm has read something from is never reported absent.
+    ///
+    /// This held by accident and nothing said so. Connectors come out of the
+    /// very files detection tests, so for them the two answers always agree
+    /// and no test could tell the difference. Skills do not: they are scanned
+    /// out of `<client>/skills`, which is nowhere in the declared config
+    /// paths, so someone with `~/.claude/skills/foo/SKILL.md` and no
+    /// `~/.claude/settings.json` reaches exactly this state -- an item in hand
+    /// for a client whose config file is genuinely missing.
+    ///
+    /// Reporting "not detected on this machine at all" while listing something
+    /// found on this machine is the panel contradicting itself.
+    #[test]
+    fn a_client_with_an_item_is_not_called_absent_even_when_undetected() {
+        // Codex sorts first, so it becomes the group's source and Claude
+        // Code stays an ordinary peer -- which is the row under test.
+        let source = item(ClientId::Codex, ConfigScope::Personal, "fetch", "npx");
+        let theirs = item(ClientId::ClaudeCode, ConfigScope::Personal, "fetch", "npx");
+
+        let mut detections = all_detected();
+        // No config file for Claude Code -- only a skills folder, which
+        // detection does not look at.
+        detections
+            .iter_mut()
+            .find(|d| d.client == ClientId::ClaudeCode)
+            .unwrap()
+            .present = false;
+
+        let entries = build_inventory(&[source, theirs], &detections);
+        let claude = entries[0]
+            .per_client
+            .iter()
+            .find(|s| s.client == ClientId::ClaudeCode)
+            .expect("a row for every client");
+
+        assert_ne!(
+            claude.state,
+            ClientSyncState::ClientNotDetected,
+            "GitWyrm read this client's item, so it cannot also say the client is not here"
+        );
+        assert_eq!(claude.state, ClientSyncState::Same);
+    }
+
+    /// The other half of the same rule: with nothing found and no config file,
+    /// absent is the honest answer and must stay reachable.
+    ///
+    /// It gates whether this client is offered as a place to copy a connector
+    /// to, so widening it -- counting a stray skills folder as an install, say
+    /// -- would offer a destination whose config file really is missing.
+    #[test]
+    fn a_client_with_nothing_found_and_no_config_file_is_still_absent() {
+        let source = item(ClientId::Codex, ConfigScope::Personal, "fetch", "npx");
+
+        let mut detections = all_detected();
+        detections
+            .iter_mut()
+            .find(|d| d.client == ClientId::ClaudeCode)
+            .unwrap()
+            .present = false;
+
+        let entries = build_inventory(&[source], &detections);
+        let claude = entries[0]
+            .per_client
+            .iter()
+            .find(|s| s.client == ClientId::ClaudeCode)
+            .expect("a row for every client");
+
+        assert_eq!(claude.state, ClientSyncState::ClientNotDetected);
     }
 
     #[test]

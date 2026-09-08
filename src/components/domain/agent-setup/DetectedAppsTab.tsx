@@ -72,7 +72,13 @@ export function DetectedAppsTab({
           <div className="flex flex-1 flex-col gap-0.5">
             <span className="text-xs font-medium text-foreground">{clientLabel(d.client)}</span>
             <span className="text-2xs text-muted-foreground">
-              {d.present ? 'Configuration found' : 'Not found on this machine'}
+              {/* Says what was checked, which is whether this app's settings
+                  file is there. "Not found on this machine" claimed more than
+                  that: skills are read from a different folder entirely, so an
+                  app can have skills listed on the next tab while its settings
+                  file is genuinely absent -- and the two sentences would then
+                  disagree about whether the app is even installed. */}
+              {d.present ? 'Configuration found' : 'No settings file found'}
               {/* Some apps read another app's settings rather than keeping
                   their own, so they get no row. Naming them here stops
                   someone looking for their own app by name from deciding
