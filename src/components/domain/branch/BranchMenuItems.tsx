@@ -195,7 +195,7 @@ export function BranchMenuItems({
       {canFastForwardToCurrent && (
         <PendingMenuItem
           icon={<Zap />}
-          label={`Fast-forward ${branch.name} to ${currentBranch || 'current'}`}
+          label={`Catch ${branch.name} up to ${currentBranch || 'current'}`}
           pendingLabel={`Catching ${branch.name} up…`}
           pending={isFastForwarding}
           disabled={opInProgress || m.fastForwardBranch.isPending}

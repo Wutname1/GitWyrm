@@ -117,3 +117,34 @@ describe('graph geometry', () => {
     expect(lane.gap).toBe(28)
   })
 })
+
+describe('a drop between two local branches', () => {
+  // GITWYRM-FRONTEND-13: the button offered to "Send 22 changes up" and the
+  // result then said "Caught v1 up to main". No cloud is involved either way.
+  const names = { source: 'v1', target: 'main' }
+
+  it('says which branch catches up, matching the toast that follows', () => {
+    const c = modeCopy('send', { ours: 22, theirs: 0 }, names)
+    expect(c.action).toBe('Catch v1 up')
+    expect(c.label).toBe('Catch up')
+  })
+
+  it('names the other branch when the drop goes the other way', () => {
+    const c = modeCopy('get', { ours: 0, theirs: 22 }, names)
+    expect(c.action).toBe('Catch main up')
+  })
+
+  it('never mentions the cloud or sending for a local pair', () => {
+    for (const mode of ['get', 'send'] as const) {
+      const c = modeCopy(mode, { ours: 3, theirs: 3 }, names)
+      const all = `${c.action} ${c.caption} ${c.note.text}`
+      expect(all).not.toMatch(/cloud/i)
+      expect(all).not.toMatch(/\bsent?\b|\bup to date\b/i)
+    }
+  })
+
+  it('leaves the cloud wording alone when no names are given', () => {
+    expect(modeCopy('send', { ours: 22, theirs: 0 }).action).toBe('Send 22 changes up')
+    expect(modeCopy('get', { ours: 0, theirs: 1 }).action).toBe('Get 1 change')
+  })
+})

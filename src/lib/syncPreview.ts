@@ -60,7 +60,26 @@ export function modesFor(d: Divergence): PreviewMode[] {
  * in one place -- the copy is the part that decides whether someone understands
  * they are about to delete work.
  */
-export function modeCopy(mode: PreviewMode, d: Divergence): ModeCopy {
+/**
+ * `names` turns the copy from cloud language into branch language.
+ *
+ * The same preview drives two different operations. Dropping a branch on its
+ * own upstream syncs with the cloud; dropping one local branch on another moves
+ * a branch locally and never touches a remote. Reusing the cloud wording for the
+ * second read as nonsense: the button offered to "Send 22 changes up" and the
+ * result then said "Caught v1 up to main", describing opposite things
+ * (GITWYRM-FRONTEND-13).
+ *
+ * Pass the two branch names for a local pair; leave it out for the cloud.
+ */
+export interface PairNames {
+  /** The branch commits come FROM. */
+  source: string
+  /** The branch that moves to match. */
+  target: string
+}
+
+export function modeCopy(mode: PreviewMode, d: Divergence, names?: PairNames): ModeCopy {
   const ours = plural(d.ours, 'change')
   const theirs = plural(d.theirs, 'change')
 
@@ -124,6 +143,18 @@ export function modeCopy(mode: PreviewMode, d: Divergence): ModeCopy {
         danger: false,
       }
     case 'get':
+      // Local pair: the branch dropped ON is the one that moves, so name it.
+      if (names)
+        return {
+          mode,
+          label: 'Catch up',
+          sub: 'clean',
+          action: `Catch ${names.target} up`,
+          caption: `${names.target} moves forward ${theirs} to match ${names.source}.`,
+          pill: { tone: 'good', text: 'nothing lost' },
+          note: { tone: 'plain', text: `Nothing is rewritten. ${names.target} simply moves up to where ${names.source} already is.` },
+          danger: false,
+        }
       return {
         mode,
         label: 'Get',
@@ -135,6 +166,19 @@ export function modeCopy(mode: PreviewMode, d: Divergence): ModeCopy {
         danger: false,
       }
     case 'send':
+      // Local pair: the DRAGGED branch catches up to the one it was dropped on,
+      // so this direction moves `source`. Nothing is sent anywhere.
+      if (names)
+        return {
+          mode,
+          label: 'Catch up',
+          sub: 'clean',
+          action: `Catch ${names.source} up`,
+          caption: `${names.source} moves forward ${ours} to match ${names.target}.`,
+          pill: { tone: 'good', text: 'nothing lost' },
+          note: { tone: 'plain', text: `Nothing is rewritten. ${names.source} simply moves up to where ${names.target} already is.` },
+          danger: false,
+        }
       return {
         mode,
         label: 'Send up',

@@ -242,7 +242,14 @@ export function RemoteSyncModal() {
     m.pushBranch.mutate(pair.branch.name, done)
   }
 
-  const copy = active && divergence ? modeCopy(active, divergence) : null
+  // Two local branches move a branch locally and never reach a remote, so the
+  // preview has to drop the cloud wording. Undefined for a tracking pair keeps
+  // the cloud copy exactly as it was.
+  const pairNames = branchPair
+    ? { source: branchPair.source.name, target: branchPair.target.name }
+    : undefined
+
+  const copy = active && divergence ? modeCopy(active, divergence, pairNames) : null
   // Reset is an extra option on branch pairs, not one of the three the
   // divergence implies, so it is appended rather than returned by modesFor.
   const shown: PreviewMode[] = canReset && modes.length === 3 ? [...modes, 'reset'] : modes
@@ -324,7 +331,7 @@ export function RemoteSyncModal() {
               style={{ gridTemplateColumns: `repeat(${shown.length}, minmax(0, 1fr))` }}
             >
               {shown.map((k) => {
-                const c = modeCopy(k, divergence)
+                const c = modeCopy(k, divergence, pairNames)
                 const Icon = MODE_ICON[k]
                 const on = k === active
                 return (
