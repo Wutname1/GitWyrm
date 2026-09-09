@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Bug, Check, Copy, ExternalLink, ImagePlus, Lightbulb, Send, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -39,6 +39,38 @@ const COPY: Record<
     needsText: 'Write your feedback first',
   },
 }
+
+/**
+ * The log and timings the report will carry.
+ *
+ * Split out and memoized because these hold up to 200 KB of text
+ * (REPORT_LOG_BYTES). Left inline they were re-diffed on every keystroke while
+ * someone typed a description, which is what made the box lag behind the
+ * keyboard on slower webviews (GITWYRM-FRONTEND-14). Taking no props that
+ * change while typing is what makes the memo hold.
+ */
+const LogPreview = memo(function LogPreview({
+  perfTrail,
+  logTail,
+}: {
+  perfTrail?: string
+  logTail?: string
+}) {
+  return (
+    <>
+      {perfTrail && (
+        <pre className="mt-2.5 max-h-32 overflow-auto rounded border border-border bg-background p-2 font-mono text-[10px] leading-[1.5] text-sub">
+          {perfTrail}
+        </pre>
+      )}
+      {logTail && (
+        <pre className="mt-2.5 max-h-56 overflow-auto rounded border border-border bg-background p-2 font-mono text-[10px] leading-[1.5] text-sub">
+          {logTail}
+        </pre>
+      )}
+    </>
+  )
+})
 
 /**
  * Bug reports and feedback, in one dialog.
@@ -164,10 +196,20 @@ export function ReportProblemModal({
     void import('@tauri-apps/plugin-opener').then(({ openUrl }) => openUrl(url))
   }
 
-  const logLines = diagnostics?.logTail ? diagnostics.logTail.split('\n').length : 0
+  // Memoized because the log tail runs to 200 KB (REPORT_LOG_BYTES) and typing a
+  // description re-renders this component on every keystroke. Splitting a string
+  // that size per character is enough to make the box lag behind the keyboard,
+  // which is what GITWYRM-FRONTEND-14 reported.
+  const logLines = useMemo(
+    () => (diagnostics?.logTail ? diagnostics.logTail.split('\n').length : 0),
+    [diagnostics?.logTail]
+  )
   // Recent durations ride along with the log. Counted so the panel can say so:
   // the point of this box is that nothing is sent the user was not shown.
-  const timingLines = diagnostics?.perfTrail ? diagnostics.perfTrail.split('\n').length : 0
+  const timingLines = useMemo(
+    () => (diagnostics?.perfTrail ? diagnostics.perfTrail.split('\n').length : 0),
+    [diagnostics?.perfTrail]
+  )
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -407,15 +449,8 @@ export function ReportProblemModal({
                     </button>
                   )}
                 </div>
-                {includeLog && showLog && diagnostics?.perfTrail && (
-                  <pre className="mt-2.5 max-h-32 overflow-auto rounded border border-border bg-background p-2 font-mono text-[10px] leading-[1.5] text-sub">
-                    {diagnostics.perfTrail}
-                  </pre>
-                )}
-                {includeLog && showLog && diagnostics?.logTail && (
-                  <pre className="mt-2.5 max-h-56 overflow-auto rounded border border-border bg-background p-2 font-mono text-[10px] leading-[1.5] text-sub">
-                    {diagnostics.logTail}
-                  </pre>
+                {includeLog && showLog && (
+                  <LogPreview perfTrail={diagnostics?.perfTrail} logTail={diagnostics?.logTail} />
                 )}
               </div>
             </>
