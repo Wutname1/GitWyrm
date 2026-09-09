@@ -392,3 +392,13 @@ competing sub-agents, the answer names the losing option too.
 | 383 | 2026-10-04 | Does that answer actually block anything? | Yes -- a tool marked not detected cannot be chosen as a destination, so widening it would remove a real safeguard. |
 | 384 | 2026-10-04 | Was the wording right elsewhere? | No -- the list of detected apps said not found on this machine when all that was checked is whether a settings file is there. |
 | 385 | 2026-10-04 | Did every missing folder turn out to be a bug? | No -- two declared folders are absent here simply because one tool has no skills and another is not installed. |
+| 386 | 2026-10-05 | What was the finding carried unchanged since pass 64? | That a check's pass or fail is the agent's own word for it, which is true but describes a weakness in a feature that works. |
+| 387 | 2026-10-05 | Does that feature work? | No -- nothing in the running app ever records which checks an agent ran, so a condition of that shape can never be satisfied. |
+| 388 | 2026-10-05 | What happened to a helper given one? | It was marked failed, told the user it never ran the check, and had its work thrown away, however well it had done the job. |
+| 389 | 2026-10-05 | Was the lead encouraged to ask for it? | Yes -- its own instructions offered it and a test made sure they kept offering it. |
+| 390 | 2026-10-05 | Could the answer be recovered from what the agent tool reports? | No -- that report says the tool call finished, not that the command succeeded, so a failing test run would very likely be read as a pass. |
+| 391 | 2026-10-05 | Why is guessing wrong worse in that direction? | Because a met condition is silent and merges the work, so a wrong pass ships a broken build quietly while a wrong failure at least says something. |
+| 392 | 2026-10-05 | So what shipped? | The lead is no longer offered that condition, and where one already exists the app now says it cannot see the answer instead of blaming the helper. |
+| 393 | 2026-10-05 | Does the app still refuse to merge in that case? | Yes -- deliberately unchanged, because nothing should be folded in on a guess. |
+| 394 | 2026-10-05 | Was there already a right answer to copy? | Yes -- the neighbouring rule about files already says the app could not look, rather than saying the helper did nothing. |
+| 395 | 2026-10-05 | What is still missing? | Any real way for the app to learn whether a check passed, which the review agent that reads the actual changes is currently the only substitute for. |
