@@ -154,11 +154,7 @@ const SUBMODULE_SWITCH_HINT: &str = "a submodule points to a different commit th
 /// the caller is identifiable from one report. The refusal is deliberately worded
 /// as our own sentence rather than libgit2's -- it is a genuine refusal once it
 /// reads this way, unlike the raw git error it replaces.
-pub(crate) fn reject_remote_qualified(
-    repo: &git2::Repository,
-    name: &str,
-    command: &str,
-) -> Result<(), AppError> {
+fn reject_remote_qualified(repo: &git2::Repository, name: &str, command: &str) -> Result<(), AppError> {
     // Only a name git itself knows as a remote branch counts. A local branch may
     // legitimately contain a slash (`feature/x`), and those must pass through.
     if repo.find_branch(name, BranchType::Remote).is_err() {

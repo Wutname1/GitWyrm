@@ -87,9 +87,9 @@ const EXPECTED: &[&str] = &[
     // connect the host in Settings > Integrations. Nothing is broken.
     "not signed in to",
     // A remote-qualified name reaching a local-only command (delete, rename,
-    // fast-forward, link). reject_remote_qualified turns libgit2's "cannot
-    // locate local branch" into this sentence, which names the local branch to
-    // use instead -- a refusal the user can act on, not a fault.
+    // fast-forward). reject_remote_qualified turns libgit2's "cannot locate
+    // local branch" into this sentence, which names the local branch to use
+    // instead -- a refusal the user can act on, not a fault.
     "is a branch on the remote",
     "rate limit reached",
     "review is required",

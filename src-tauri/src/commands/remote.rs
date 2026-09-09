@@ -812,12 +812,27 @@ pub async fn set_branch_upstream(
             Some(r) => r,
             None => default_remote(&repo)?,
         };
-        // A remote-qualified name here would ask for refs/heads/origin/<name>
-        // below and come back as libgit2's "cannot locate local branch", which
-        // reads as a fault. The bulk copy-from-remote flow calls this per branch,
-        // so one wrong name arrives as a burst of identical reports
-        // (GITWYRM-BACKEND-2/6). Same refusal the local-only branch commands use.
-        crate::commands::branch::reject_remote_qualified(&repo, branch.trim(), "link")?;
+        // Callers disagree about the shape of `branch`, so accept both rather
+        // than refuse one of them.
+        //
+        // This command's contract is a LOCAL name plus a remote, and it builds
+        // the qualified form itself. A caller that sends `origin/development`
+        // with remote `origin` used to produce `origin/origin/development` --
+        // which fails as "doesn't exist" -- or, where the prefix named no
+        // remote, reached the local lookup below and came back as libgit2's
+        // "cannot locate local branch", reading as a fault rather than a
+        // mistaken argument (GITWYRM-BACKEND-2/6, 4 machines).
+        //
+        // Stripping is safe precisely because it is verified: only a prefix git
+        // itself knows as this remote is removed, so a local branch legitimately
+        // named `feature/x` is never touched.
+        let branch = match branch.trim().split_once('/') {
+            Some((prefix, rest)) if prefix == remote && !rest.is_empty() => {
+                log::warn!("link received remote-qualified branch name '{branch}'");
+                rest.to_string()
+            }
+            _ => branch.trim().to_string(),
+        };
         let upstream = format!("{remote}/{branch}");
         // The remote-tracking ref must exist, else the link would point nowhere
         // and push/pull would fail later with a much worse message.
