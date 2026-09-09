@@ -422,3 +422,13 @@ competing sub-agents, the answer names the losing option too.
 | 413 | 2026-10-07 | Were the other places reading that file also wrong? | No -- one is genuinely correct, because a survey of every session must not go blind over one bad file. |
 | 414 | 2026-10-07 | Why extract the shared refusal code first? | Because two hand-written copies of how you tell someone their work was dropped will eventually say different things. |
 | 415 | 2026-10-07 | Was the fix proved rather than assumed? | Yes -- the old behaviour was put back and the new test failed, printing the false sentence word for word. |
+| 416 | 2026-10-08 | What did this pass work on? | The one thing the previous pass found and left unfixed, before it could become another item copied forward for twenty reviews. |
+| 417 | 2026-10-08 | What was wrong? | A chat whose record of leftover folders could not be read was treated exactly like a chat with no leftovers at all. |
+| 418 | 2026-10-08 | Should the startup scan give up over one bad chat? | No -- that would hide every other chat's real leftovers, so it carries on exactly as before. |
+| 419 | 2026-10-08 | Then what changed for it? | It now writes a line to the log naming the chat it skipped, instead of skipping in complete silence. |
+| 420 | 2026-10-08 | Why does silence matter if the behaviour is right? | Because that chat drops out of every future scan, and nobody can tell that from a chat that genuinely had nothing. |
+| 421 | 2026-10-08 | What about asking after a single chat? | There is nothing else to carry on to, so it now says the record could not be read rather than answering "nothing left behind". |
+| 422 | 2026-10-08 | Was there already an example of the right behaviour? | Yes -- three lines away, a folder that cannot be opened is deliberately kept visible so the person gets a note about it. |
+| 423 | 2026-10-08 | Is a chat that never produced a result affected? | No -- that is an ordinary empty record, and a test now tells the two apart. |
+| 424 | 2026-10-08 | Did the new test hold up? | Not at first -- it passed even with an undamaged file, because its safety check sat at the end where it could not gate anything. |
+| 425 | 2026-10-08 | What did fixing that reveal? | That a check which fails to fail can be the fixture's fault rather than the fix's, so the parser's real requirements had to be read. |
