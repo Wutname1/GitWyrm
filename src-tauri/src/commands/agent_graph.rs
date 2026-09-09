@@ -5561,7 +5561,10 @@ mod tests {
         store::write_session(&root, &session).unwrap();
         let session = store::read_session(&root, "sess-1").unwrap();
 
-        // It never ran the check, so the condition is unmet.
+        // No `RunStep::Check` rows exist -- as in every live run, since
+        // nothing in production writes one. The condition is unmet because
+        // GitWyrm cannot see the answer, and the reason must say that rather
+        // than accuse the helper of skipping a check.
         let outcome = enforce_completion_condition(&locks, &root, "sess-1", "helper-1", session);
         assert!(
             matches!(outcome, CompletionCheck::Refused),
@@ -5576,7 +5579,8 @@ mod tests {
             .unwrap();
         assert_eq!(helper.state, SessionState::Failed);
         let summary = helper.output_summary.clone().unwrap_or_default();
-        assert!(summary.contains("never ran that check"), "{summary}");
+        assert!(summary.contains("does not record"), "{summary}");
+        assert!(!summary.contains("never ran"), "{summary}");
         // And the chat says so, naming the helper.
         assert!(
             after

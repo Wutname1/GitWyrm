@@ -107,6 +107,36 @@ pub fn judge(
                 .filter(|c| check_matches(&c.command_name, command))
                 .collect();
             if matching.is_empty() {
+                // Two very different things arrive here as the same empty
+                // list, and they must not be reported the same way.
+                //
+                // `checks` is built by `checks_for_execution`, which re-reads
+                // `RunStep::Check` rows out of the transcript. NOTHING in
+                // production writes one: a live tool call becomes
+                // `RunStep::Activity` (`airun::cli_run`'s `Incoming::ToolCall`
+                // arm), and the outcome the tool reported is not carried --
+                // Codex only subscribes to `item/started`, which fires before
+                // the tool has run, and the ACP adapter drops `toolCallId`, so
+                // a later status could not be tied back to the call anyway.
+                //
+                // So an empty list is GitWyrm's blindness, not the helper's
+                // idleness. Saying "it never ran that check" of a helper that
+                // ran it and passed is the interface stating a fact it does
+                // not have -- and it stops the work and marks the helper
+                // Failed on that basis.
+                //
+                // Refused either way: a condition nobody could check is not a
+                // condition met, and nothing should be merged on a guess.
+                // That is exactly the stance the `FilesChanged` arm below
+                // already takes for an unreadable worktree. Only the sentence
+                // differs, and the sentence is the part that was wrong.
+                if checks.is_empty() {
+                    return CompletionVerdict::Unmet {
+                        reason: format!(
+                            "GitWyrm does not record which checks an agent runs, so it cannot tell whether \"{command}\" passed."
+                        ),
+                    };
+                }
                 return CompletionVerdict::Unmet {
                     reason: format!(
                         "It was asked to make \"{command}\" pass, but it never ran that check."
@@ -319,18 +349,46 @@ mod tests {
 
     /// The failure this whole module exists for: a helper asked to make the
     /// tests pass, which stopped without ever running them, used to count as
-    /// finished.
+    /// finished. Some check was seen -- just not this one -- so the helper's
+    /// own conduct is what the sentence describes.
     #[test]
     fn a_check_that_was_never_run_is_not_a_pass() {
         let condition = CompletionCondition::ChecksPass {
             command: "cargo test".into(),
         };
-        let verdict = judge(Some(&condition), &[], None);
+        let verdict = judge(
+            Some(&condition),
+            &[check("npm run lint", CheckRunOutcome::Passed)],
+            None,
+        );
         assert_eq!(
             verdict,
             CompletionVerdict::Unmet {
                 reason: "It was asked to make \"cargo test\" pass, but it never ran that check.".into()
             }
+        );
+    }
+
+    /// With NO checks recorded at all, the same empty list means something
+    /// else entirely: nothing in production writes a `RunStep::Check`, so
+    /// GitWyrm saw nothing rather than the helper doing nothing.
+    ///
+    /// Still unmet -- nothing should be merged on a guess, exactly as the
+    /// unreadable-worktree case decides -- but it must not tell the person
+    /// the helper skipped a check it may well have run and passed.
+    #[test]
+    fn no_checks_recorded_blames_gitwyrms_blindness_not_the_helper() {
+        let condition = CompletionCondition::ChecksPass {
+            command: "cargo test".into(),
+        };
+        let CompletionVerdict::Unmet { reason } = judge(Some(&condition), &[], None) else {
+            panic!("a condition GitWyrm cannot check is not a condition met");
+        };
+        assert!(reason.contains("does not record"), "{reason}");
+        assert!(reason.contains("cargo test"), "{reason}");
+        assert!(
+            !reason.contains("never ran"),
+            "must not accuse the helper of skipping it: {reason}"
         );
     }
 
