@@ -1288,11 +1288,19 @@ pub async fn agent_result_find_orphaned(
 ) -> Result<Vec<OrphanedResult>, AppError> {
     let root = resolve_root(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let records = result::read_results(&root, &session_id).unwrap_or_default();
-        find_orphaned_worktrees_at(&records)
+        // One session, asked for by name: a caller that named it is owed the
+        // reason it got nothing back, rather than an empty list that reads as
+        // "no orphans here". The whole-store sweep below has to keep going
+        // past a damaged session; this one has nothing else to go on.
+        let records = result::read_results(&root, &session_id).map_err(|e| {
+            AppError::Other(format!(
+                "GitWyrm could not read this chat's record of what its agents left behind: {e}"
+            ))
+        })?;
+        Ok(find_orphaned_worktrees_at(&records))
     })
     .await
-    .map_err(|e| AppError::Other(e.to_string()))
+    .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 /// One agent copy still on disk, named to the chat it belongs to.
@@ -1491,6 +1499,33 @@ pub struct OrphanedResultInSession {
     pub orphan: OrphanedResult,
 }
 
+/// One session's results for the whole-store sweep: its records, or an empty
+/// list when they cannot be read.
+///
+/// Skipping a damaged session is right for a fan-out -- one bad sidecar must
+/// never hide every other session's real orphans. Skipping it *silently* is
+/// not. That session drops out of every future sweep, and the only reading
+/// the caller has of an empty list is "no orphans", which is a claim about
+/// the world rather than about what could be read.
+///
+/// So the skip stays and a warning goes to the log, for the same reason
+/// `inspect_worktree_on_disk` keeps an unopenable folder visible: the person
+/// gets a note rather than a record that quietly ceased to exist. A missing
+/// sidecar is NOT that case -- `read_results` returns an empty list for a
+/// session that has simply produced no results yet, which is ordinary and
+/// says nothing.
+fn orphan_records_for_sweep(root: &SessionStoreRoot, session_id: &str) -> Vec<ResultRecord> {
+    match result::read_results(root, session_id) {
+        Ok(records) => records,
+        Err(e) => {
+            log::warn!(
+                "agent desk: session {session_id} skipped in the orphan scan, its record of results could not be read: {e}"
+            );
+            Vec::new()
+        }
+    }
+}
+
 /// P1-C wiring 3 ("orphan-result detection is registered but not called at
 /// startup"): [`agent_result_find_orphaned`] existed, was registered, and
 /// worked correctly for one session, but nothing ever called it -- a run
@@ -1525,7 +1560,7 @@ pub async fn agent_result_find_orphaned_all(app: AppHandle) -> Result<Vec<Orphan
             .into_iter()
             .filter(|h| !h.archived)
             .flat_map(|header| {
-                let records = result::read_results(&root, &header.session_id).unwrap_or_default();
+                let records = orphan_records_for_sweep(&root, &header.session_id);
                 find_orphaned_worktrees_at(&records)
                     .into_iter()
                     .map(move |orphan| OrphanedResultInSession {
@@ -2512,6 +2547,37 @@ mod tests {
         let orphaned = find_orphaned_worktrees_at(&records);
         assert_eq!(orphaned.len(), 1);
         assert_eq!(orphaned[0].execution_id, "exec-1");
+    }
+
+    /// A session with no results file yet is ordinary, not damaged: the sweep
+    /// reads it as an empty list and says nothing about it.
+    #[test]
+    fn a_session_with_no_results_yet_is_swept_without_complaint() {
+        let (_dir, root) = temp_root();
+        assert!(orphan_records_for_sweep(&root, "sess-never-ran").is_empty());
+    }
+
+    /// A damaged sidecar still yields an empty list -- the sweep must not
+    /// abandon every other session over one bad file -- but it is a different
+    /// event from the case above, and the warning is what makes it one.
+    #[test]
+    fn a_damaged_results_file_does_not_stop_the_sweep() {
+        let (_dir, root) = temp_root();
+        let results_dir = root.root_path().join("results");
+        std::fs::create_dir_all(&results_dir).unwrap();
+        std::fs::write(results_dir.join("sess-1.json"), "{ not json at all").unwrap();
+
+        // Asserted FIRST: without it this test passes for a file that is
+        // merely empty, which is the case above and proves nothing about
+        // damage. Written the other way round once, and it did exactly that.
+        assert!(
+            result::read_results(&root, "sess-1").is_err(),
+            "the fixture must actually be unreadable"
+        );
+
+        // Empty, and the sweep carries on: the whole point is that the next
+        // session's real orphans are still found.
+        assert!(orphan_records_for_sweep(&root, "sess-1").is_empty());
     }
 
     #[test]
