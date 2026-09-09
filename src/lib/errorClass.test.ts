@@ -264,3 +264,29 @@ describe('a remote that has no credentials yet', () => {
     expect(classifyError(new Error(raw)).severity).toBe('error')
   })
 })
+
+describe('a host that was never connected', () => {
+  // Verbatim from GITWYRM-BACKEND-4.
+  const RAW = 'Command failed: not signed in to GitHub; connect GitHub first'
+
+  it('is a warning: connecting an account is setup, not a fault', () => {
+    expect(classifyError(new Error(RAW)).severity).toBe('warning')
+  })
+
+  it('points at Settings instead of repeating the backend sentence', () => {
+    const { message } = classifyError(new Error(RAW))
+    expect(message).toMatch(/not connected yet/i)
+    expect(message).toMatch(/Settings/i)
+  })
+
+  it('covers every host the helper phrases, not just GitHub', () => {
+    for (const host of ['GitLab', 'Bitbucket', 'Azure DevOps']) {
+      const raw = `not signed in to ${host}; connect ${host} first`
+      expect(classifyError(new Error(raw)).severity).toBe('warning')
+    }
+  })
+
+  it('still reports a real authentication failure as an error', () => {
+    expect(classifyError(new Error('git error: authentication failed')).severity).toBe('error')
+  })
+})

@@ -207,6 +207,14 @@ const RULES: Rule[] = [
     message: 'Connect your account for this remote, then try again.',
   },
   {
+    // A host that has never been connected. Ahead of the generic auth rule
+    // below, which would call a one-time setup step an error. The backend names
+    // the host (GitHub, GitLab, Bitbucket, Azure DevOps); say where to fix it.
+    match: (r) => r.includes('not signed in to'),
+    severity: 'warning',
+    message: 'That account is not connected yet. Add it in Settings, then try again.',
+  },
+  {
     match: (r) =>
       r.includes('authentication') ||
       r.includes('credential') ||

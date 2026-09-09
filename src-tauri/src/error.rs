@@ -80,6 +80,12 @@ const EXPECTED: &[&str] = &[
     // this sentence, so the wording here is our own and already plain: nothing
     // is broken, the remote simply has no credentials yet.
     "sign-in needed for",
+    // The third wording in this family, and the one for a host that was never
+    // connected at all. hosting::not_connected builds it for GitHub, GitLab,
+    // Bitbucket and Azure DevOps alike, so match the part that does not carry
+    // the host name. Its own doc comment says the fix is always the same:
+    // connect the host in Settings > Integrations. Nothing is broken.
+    "not signed in to",
     "rate limit reached",
     "review is required",
     "not mergeable",
@@ -217,6 +223,23 @@ mod tests {
             "git error: invalid data in index - incorrect header signature; class=Index (10)"
         ));
         assert!(!is_expected("git fetch failed: fatal: index file corrupt"));
+    }
+
+    /// A host that was never connected at all - the third wording in this
+    /// family, after a DEAD sign-in and a MISSING one on a git remote.
+    ///
+    /// Verbatim from GITWYRM-BACKEND-4. hosting::not_connected interpolates the
+    /// host name, so the needle matches the part that does not.
+    #[test]
+    fn a_host_that_was_never_connected_is_expected() {
+        assert!(is_expected(
+            "Command failed: not signed in to GitHub; connect GitHub first"
+        ));
+        for host in ["GitLab", "Bitbucket", "Azure DevOps"] {
+            assert!(is_expected(&format!(
+                "not signed in to {host}; connect {host} first"
+            )));
+        }
     }
 
     /// A host that will not admit the repo exists, in git's own words.
