@@ -136,6 +136,37 @@ pub async fn branch_relation(
 /// move that also collides with the target branch.
 const SUBMODULE_SWITCH_HINT: &str = "a submodule points to a different commit than this branch expects. Commit the submodule change or reset the submodule to its recorded commit, then switch.";
 
+/// Reject a remote-qualified name before it reaches a local-branch lookup.
+///
+/// `find_branch(name, BranchType::Local)` looks under `refs/heads/`, so a name
+/// like `origin/development` asks for `refs/heads/origin/development` -- a path
+/// normal git layout never creates. libgit2 answers "cannot locate local branch
+/// 'origin/development'", which reads as a git fault and files a Sentry issue,
+/// when the real story is that a remote name reached a local-only command.
+///
+/// That was 554 reports on one alpha machine (GITWYRM-BACKEND-2/6), and it stayed
+/// unexplained because nothing in the message says WHICH command received the
+/// name. `checkout_branch` normalizes via resolve_switch_target; delete, rename
+/// and fast-forward did not, and they are local-only operations for which
+/// stripping the prefix would be a guess at intent rather than a fix.
+///
+/// So: refuse, in plain words the user can act on, and log the command name so
+/// the caller is identifiable from one report. The refusal is deliberately worded
+/// as our own sentence rather than libgit2's -- it is a genuine refusal once it
+/// reads this way, unlike the raw git error it replaces.
+fn reject_remote_qualified(repo: &git2::Repository, name: &str, command: &str) -> Result<(), AppError> {
+    // Only a name git itself knows as a remote branch counts. A local branch may
+    // legitimately contain a slash (`feature/x`), and those must pass through.
+    if repo.find_branch(name, BranchType::Remote).is_err() {
+        return Ok(());
+    }
+    let short = name.split_once('/').map(|(_, s)| s).unwrap_or(name);
+    log::warn!("{command} received remote-qualified branch name '{name}'");
+    Err(AppError::Other(format!(
+        "'{name}' is a branch on the remote. To {command} the local copy, use '{short}'."
+    )))
+}
+
 /// Resolve the branch a switch should actually land on.
 ///
 /// Checking out a remote-tracking ref like `origin/feature` directly would
@@ -559,6 +590,7 @@ pub async fn delete_branch(
     tauri::async_runtime::spawn_blocking(move || {
         let repo = open.repo.lock().unwrap();
         let name = name.trim();
+        reject_remote_qualified(&repo, name, "delete")?;
         let mut branch = repo.find_branch(name, BranchType::Local)?;
         if branch.is_head() {
             return Err(AppError::Other(
@@ -605,6 +637,7 @@ pub async fn rename_branch(
                 "A branch named {new_name} already exists."
             )));
         }
+        reject_remote_qualified(&repo, name.trim(), "rename")?;
         let mut branch = repo.find_branch(name.trim(), BranchType::Local)?;
         // `force = false`: never clobber an existing ref, checked above for a
         // clearer message than git2's.
@@ -833,6 +866,7 @@ fn fast_forward_branch_to(
     target: &str,
 ) -> Result<RefMove, AppError> {
     {
+        reject_remote_qualified(repo, branch.trim(), "fast-forward")?;
         let branch_ref = repo.find_branch(branch.trim(), BranchType::Local)?;
         let branch_oid = branch_ref
             .get()
