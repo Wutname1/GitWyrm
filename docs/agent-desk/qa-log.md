@@ -412,3 +412,13 @@ competing sub-agents, the answer names the losing option too.
 | 403 | 2026-10-06 | What was actually fixed? | The conflict resolver's progress messages now come from the backend's own published shape instead of a copy typed into the view. |
 | 404 | 2026-10-06 | What would have gone wrong if they drifted? | A long conflict resolve would show no progress at all and look exactly like the app having hung. |
 | 405 | 2026-10-06 | Was the new coverage proved rather than assumed? | Yes -- the hand-written copy was put back and the check failed, naming the file and the shape. |
+| 406 | 2026-10-07 | What question started this pass? | Whether the mistake fixed last time in one branch also lived in the branch four lines below it. |
+| 407 | 2026-10-07 | Did it? | Yes -- with the failed read arriving from a file GitWyrm could not open rather than from a missing recorder. |
+| 408 | 2026-10-07 | What does GitWyrm keep in that file? | Its own record of which files each agent changed, which is what a "you are done when these files change" instruction is checked against. |
+| 409 | 2026-10-07 | What happened when the file was damaged? | It was treated as a record saying the agent changed nothing, so the agent was failed and its work dropped. |
+| 410 | 2026-10-07 | Was the reading code at fault? | No -- it deliberately tells a missing file apart from a damaged one, and the caller threw that distinction away with one word. |
+| 411 | 2026-10-07 | Does the work get merged now? | No, and deliberately so -- nothing should be folded in while GitWyrm cannot tell whether it is right. |
+| 412 | 2026-10-07 | So what changed for the person? | The message now says GitWyrm could not read its record, instead of telling them their agent did nothing. |
+| 413 | 2026-10-07 | Were the other places reading that file also wrong? | No -- one is genuinely correct, because a survey of every session must not go blind over one bad file. |
+| 414 | 2026-10-07 | Why extract the shared refusal code first? | Because two hand-written copies of how you tell someone their work was dropped will eventually say different things. |
+| 415 | 2026-10-07 | Was the fix proved rather than assumed? | Yes -- the old behaviour was put back and the new test failed, printing the false sentence word for word. |
