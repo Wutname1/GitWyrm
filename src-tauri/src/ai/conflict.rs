@@ -16,7 +16,7 @@ use crate::error::AppError;
 ///
 /// `path` scopes the event: the conflict view only shows updates for the file
 /// it currently has open, so switching files mid-run cannot mix two streams.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct AiResolveProgress {
     pub path: String,
     /// `starting`, `thinking`, or `answer`.

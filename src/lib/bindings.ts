@@ -4271,6 +4271,21 @@ export type AiCommitProgressPayload = { repo_id: string; kind: AiCommitProgressK
 export type AiCreatedCommit = { sha: string; summary: string; description: string; files: string[] }
 export type AiProviderStatus = { id: string; configured: boolean }
 /**
+ * A live update from a running AI resolve, sent to the window as it happens.
+ * 
+ * `path` scopes the event: the conflict view only shows updates for the file
+ * it currently has open, so switching files mid-run cannot mix two streams.
+ */
+export type AiResolveProgress = { path: string; 
+/**
+ * `starting`, `thinking`, or `answer`.
+ */
+kind: string; 
+/**
+ * The chunk to append. Empty for `starting`.
+ */
+text: string }
+/**
  * Whether an approval reached a live gate. R6.6's other half: an approval
  * must reach ONLY the execution that actually asked for it -- a helper's
  * gate can never be answered by a click meant for the lead's, or a

@@ -418,6 +418,11 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         // up in an icon table with no fallback, so a step it does not know
         // renders `undefined` as a component and throws mid-run.
         .typ::<commands::ai_commits::AiCommitProgressPayload>()
+        // Emitted as `ai-resolve-progress` while a conflict is being
+        // resolved. Registered for the same reason as the row above:
+        // the conflict view declared this shape by hand, so the two
+        // sides could drift with nothing comparing them.
+        .typ::<crate::ai::conflict::AiResolveProgress>()
 }
 
 const SENTRY_DSN: &str = "https://543d8fb8597dad94c5d0bef310ad046f@o4511760230907904.ingest.us.sentry.io/4511924397735936";

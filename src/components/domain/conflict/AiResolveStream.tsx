@@ -2,12 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { Sparkles } from 'lucide-react'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
-
-interface AiResolveProgress {
-  path: string
-  kind: string
-  text: string
-}
+import type { AiResolveProgress } from '@/lib/bindings'
 
 /**
  * What the model is doing, while it is still doing it.

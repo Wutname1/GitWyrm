@@ -24,22 +24,27 @@ import { fileURLToPath } from 'node:url'
  * declared locally rather than imported from `bindings` is that same
  * unguarded state, so it fails here with the fix spelled out.
  *
- * **Scope.** Agent Desk, plus repo watching and git progress. Three cases
- * outside `ROOTS` are still hand-written and are left that way deliberately:
+ * **Scope.** Agent Desk, repo watching, git progress, and the two AI progress
+ * streams. Two cases outside `ROOTS` are still hand-written and are left that
+ * way deliberately:
  *
  * - `useUpdater`'s `UpdateProgress` **cannot** be generated. Its byte counts
  *   are `u64`, and specta refuses to export a 64-bit integer because it
  *   cannot know the deserializer handles one -- registering it makes
  *   `export_bindings` fail outright, which was confirmed by trying it.
  *   Widening that type is an updater decision.
- * - `AiResolveProgress` and `AiCommitProgressPayload` derive `Serialize` but
- *   not `specta::Type`, so there is nothing to import yet. Adding the derive
- *   is a small change to those surfaces, not to this one.
  * - `settingsSync`'s payload has no Rust counterpart at all -- it is emitted
  *   by one window and read by another, both on this side -- so there is
  *   nothing for it to drift from.
  *
- * Add a path to `ROOTS` as each is cleared.
+ * The third case is now closed. `AiCommitProgressPayload` had in fact carried
+ * `specta::Type` for some time and was already imported from `bindings` --
+ * only this list had not caught up, so the guard was off for a payload that
+ * did not need it to be. `AiResolveProgress` was the genuine one: it now
+ * derives `specta::Type` too, is registered in `lib.rs`, and its component
+ * imports the generated shape instead of declaring its own.
+ *
+ * Add a path to `ROOTS` as each remaining case is cleared.
  */
 
 /**
@@ -48,6 +53,8 @@ import { fileURLToPath } from 'node:url'
 const ROOTS = [
   'components/domain/agent-desk',
   'components/domain/agent-setup',
+  'components/domain/commit-form/GenerateCommitsDialog.tsx',
+  'components/domain/conflict/AiResolveStream.tsx',
   'components/modals/RepoPickerModal.tsx',
   'hooks/useAgentDeskSourceListener.ts',
   'hooks/useAgentResultDiff.ts',
