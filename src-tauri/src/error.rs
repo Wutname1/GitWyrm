@@ -86,6 +86,11 @@ const EXPECTED: &[&str] = &[
     // the host name. Its own doc comment says the fix is always the same:
     // connect the host in Settings > Integrations. Nothing is broken.
     "not signed in to",
+    // A remote-qualified name reaching a local-only command (delete, rename,
+    // fast-forward, link). reject_remote_qualified turns libgit2's "cannot
+    // locate local branch" into this sentence, which names the local branch to
+    // use instead -- a refusal the user can act on, not a fault.
+    "is a branch on the remote",
     "rate limit reached",
     "review is required",
     "not mergeable",
@@ -223,6 +228,19 @@ mod tests {
             "git error: invalid data in index - incorrect header signature; class=Index (10)"
         ));
         assert!(!is_expected("git fetch failed: fatal: index file corrupt"));
+    }
+
+    /// The guard that replaces libgit2's "cannot locate local branch" when a
+    /// remote-qualified name reaches a local-only command. The refusal is
+    /// expected; the raw git error it replaces is NOT, and must keep reporting.
+    #[test]
+    fn a_remote_qualified_name_refusal_is_expected() {
+        assert!(is_expected(
+            "'origin/development' is a branch on the remote. To link the local copy, use 'development'."
+        ));
+        assert!(!is_expected(
+            "git error: cannot locate local branch 'origin/development'; class=Reference (4); code=NotFound (-3)"
+        ));
     }
 
     /// A host that was never connected at all - the third wording in this

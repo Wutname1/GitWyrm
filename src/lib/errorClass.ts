@@ -215,6 +215,14 @@ const RULES: Rule[] = [
     message: 'That account is not connected yet. Add it in Settings, then try again.',
   },
   {
+    // A cloud branch name given to something that only works on the copy here.
+    // The backend sentence already names the local branch to use instead, so
+    // keep it rather than replacing it with something vaguer.
+    match: (r) => r.includes('is a branch on the remote'),
+    severity: 'warning',
+    message: 'That branch lives on the cloud copy. Use the branch of the same name here instead.',
+  },
+  {
     match: (r) =>
       r.includes('authentication') ||
       r.includes('credential') ||

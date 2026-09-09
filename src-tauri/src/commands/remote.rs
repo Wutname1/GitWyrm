@@ -812,6 +812,12 @@ pub async fn set_branch_upstream(
             Some(r) => r,
             None => default_remote(&repo)?,
         };
+        // A remote-qualified name here would ask for refs/heads/origin/<name>
+        // below and come back as libgit2's "cannot locate local branch", which
+        // reads as a fault. The bulk copy-from-remote flow calls this per branch,
+        // so one wrong name arrives as a burst of identical reports
+        // (GITWYRM-BACKEND-2/6). Same refusal the local-only branch commands use.
+        crate::commands::branch::reject_remote_qualified(&repo, branch.trim(), "link")?;
         let upstream = format!("{remote}/{branch}");
         // The remote-tracking ref must exist, else the link would point nowhere
         // and push/pull would fail later with a much worse message.

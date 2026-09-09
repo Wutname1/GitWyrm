@@ -290,3 +290,23 @@ describe('a host that was never connected', () => {
     expect(classifyError(new Error('git error: authentication failed')).severity).toBe('error')
   })
 })
+
+describe('a cloud branch name given to a local-only command', () => {
+  // reject_remote_qualified's wording, from GITWYRM-BACKEND-2/6.
+  const RAW = "'origin/development' is a branch on the remote. To link the local copy, use 'development'."
+
+  it('is a warning: the guard refusing is not a fault', () => {
+    expect(classifyError(new Error(RAW)).severity).toBe('warning')
+  })
+
+  it('explains which copy to use without git wording', () => {
+    const { message } = classifyError(new Error(RAW))
+    expect(message).toMatch(/cloud copy/i)
+    expect(message).not.toMatch(/refs\/|libgit2/i)
+  })
+
+  it('still reports the raw libgit2 failure it replaced', () => {
+    const raw = "git error: cannot locate local branch 'origin/development'; class=Reference (4)"
+    expect(classifyError(new Error(raw)).severity).toBe('error')
+  })
+})
