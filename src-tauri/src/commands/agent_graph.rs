@@ -2297,7 +2297,41 @@ fn enforce_completion_condition(
     }
 
     let checks = crate::commands::agent_result::checks_for_execution(&session, helper_execution_id);
-    let results = crate::agentdesk::result::read_results(root, session_id).unwrap_or_default();
+
+    // `read_results` is careful to separate "no results file yet" (ordinary,
+    // returns an empty list) from a file that is damaged, unreadable, or
+    // written by a newer version (an error). `unwrap_or_default()` here threw
+    // that distinction away, and the empty list it produced is the exact
+    // input `judge` reads as "this helper changed nothing" -- so a corrupt
+    // sidecar told the person "It was asked to change specific files, but it
+    // left no changes at all" about a helper that may have changed every one
+    // of them, then marked it Failed and dropped its work.
+    //
+    // Same shape as the `changed_paths_unreadable` case `judge` already
+    // handles one branch below, and the same answer: still refused, because
+    // nothing should be merged on a guess, but the sentence says GitWyrm
+    // could not read the record rather than accusing the helper.
+    let results = match crate::agentdesk::result::read_results(root, session_id) {
+        Ok(records) => records,
+        Err(err) => {
+            let title = session
+                .executions
+                .iter()
+                .find(|e| e.execution_id == helper_execution_id)
+                .and_then(|e| e.job_title.clone())
+                .unwrap_or_else(|| "A helper".to_string());
+            return refuse_completion(
+                locks,
+                root,
+                session_id,
+                helper_execution_id,
+                &title,
+                &format!(
+                    "GitWyrm could not read this session's record of what changed ({err}), so it cannot tell whether this helper did what it was asked."
+                ),
+            );
+        }
+    };
     let result = results.iter().find(|r| r.execution_id == helper_execution_id);
 
     let verdict = judge(condition.as_ref(), &checks, result);
@@ -2329,11 +2363,30 @@ fn enforce_completion_condition(
         .job_title
         .clone()
         .unwrap_or_else(|| "A helper".to_string());
+    refuse_completion(locks, root, session_id, helper_execution_id, &title, &reason)
+}
+
+/// Marks one helper `Failed`, records why on the execution, and says so in
+/// the chat.
+///
+/// Shared by the two ways a condition goes unmet: the helper did not do what
+/// it was asked, and GitWyrm could not read enough to tell. Both end the same
+/// way -- nothing is merged on a guess -- so both must leave the same trail,
+/// and a second hand-written copy of this is how the two drift into saying
+/// different things about the same outcome.
+fn refuse_completion(
+    locks: &crate::agentdesk::SessionLocks,
+    root: &SessionStoreRoot,
+    session_id: &str,
+    helper_execution_id: &str,
+    title: &str,
+    reason: &str,
+) -> CompletionCheck {
     let _ = update_session_at(locks, root, session_id, |s| {
         if let Some(helper) = s.executions.iter_mut().find(|e| e.execution_id == helper_execution_id) {
             helper.state = SessionState::Failed;
             helper.ended_at = Some(now_rfc3339());
-            helper.output_summary = Some(reason.clone());
+            helper.output_summary = Some(reason.to_string());
         }
     });
     append_system_note(locks, root, session_id, &format!("\"{title}\" stopped without finishing its job. {reason}"));
@@ -5588,6 +5641,67 @@ mod tests {
                 .iter()
                 .any(|m| m.plain_content.contains("Fix the parser") && m.plain_content.contains("cargo test")),
             "the transcript should explain why"
+        );
+    }
+
+    /// A damaged results sidecar is not a helper that changed nothing.
+    ///
+    /// `read_results` separates "no file yet" from "file unreadable"; the
+    /// caller used to flatten both to an empty list with `unwrap_or_default`,
+    /// and an empty list is exactly what `judge` reads as "it left no changes
+    /// at all". So a corrupt file blamed the helper for GitWyrm's own failure
+    /// to read, marked it Failed, and dropped work that may have been
+    /// complete.
+    #[test]
+    fn an_unreadable_results_file_blames_gitwyrm_not_the_helper() {
+        use crate::agentdesk::graph::CompletionCondition;
+
+        let (_dir, root) = temp_root();
+        let locks = crate::agentdesk::SessionLocks::new();
+        seed_session(&root, "sess-1");
+
+        let mut session = store::read_session(&root, "sess-1").unwrap();
+        let mut helper = ExecutionRecord::minimal(
+            "helper-1".into(),
+            "sess-1".into(),
+            Some("lead-1".into()),
+            SessionState::Finished,
+            now_rfc3339(),
+            Some(now_rfc3339()),
+            2,
+        );
+        helper.job_title = Some("Fix the parser".into());
+        helper.completion = Some(CompletionCondition::FilesChanged {
+            paths: vec!["src/parser.rs".into()],
+        });
+        session.executions.push(helper);
+        store::write_session(&root, &session).unwrap();
+
+        // Not absent -- present and unreadable. Absent is the ordinary
+        // "nothing recorded yet" state and must keep its own behaviour.
+        let results_dir = root.root_path().join("results");
+        std::fs::create_dir_all(&results_dir).unwrap();
+        std::fs::write(results_dir.join("sess-1.json"), "{ this is not json").unwrap();
+
+        let session = store::read_session(&root, "sess-1").unwrap();
+        let outcome = enforce_completion_condition(&locks, &root, "sess-1", "helper-1", session);
+        assert!(
+            matches!(outcome, CompletionCheck::Refused),
+            "a condition GitWyrm cannot check is not a condition met"
+        );
+
+        let after = store::read_session(&root, "sess-1").unwrap();
+        let helper = after
+            .executions
+            .iter()
+            .find(|e| e.execution_id == "helper-1")
+            .unwrap();
+        assert_eq!(helper.state, SessionState::Failed);
+        let summary = helper.output_summary.clone().unwrap_or_default();
+        assert!(summary.contains("could not read"), "{summary}");
+        assert!(
+            !summary.contains("left no changes"),
+            "must not accuse the helper of doing nothing: {summary}"
         );
     }
 
