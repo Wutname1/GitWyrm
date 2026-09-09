@@ -402,3 +402,13 @@ competing sub-agents, the answer names the losing option too.
 | 393 | 2026-10-05 | Does the app still refuse to merge in that case? | Yes -- deliberately unchanged, because nothing should be folded in on a guess. |
 | 394 | 2026-10-05 | Was there already a right answer to copy? | Yes -- the neighbouring rule about files already says the app could not look, rather than saying the helper did nothing. |
 | 395 | 2026-10-05 | What is still missing? | Any real way for the app to learn whether a check passed, which the review agent that reads the actual changes is currently the only substitute for. |
+| 396 | 2026-10-06 | What was checked this time? | The list of still-open items itself, which every review has copied forward without re-reading the code behind it. |
+| 397 | 2026-10-06 | Was the registry problem real? | No -- it was written down 27 reviews ago as a deliberate decision, under a heading saying the area had been checked and was sound. |
+| 398 | 2026-10-06 | Does that decision still hold today? | Yes -- nothing that can fail sits between claiming a slot and starting the work, and two of the three places say so in a comment. |
+| 399 | 2026-10-06 | Why does it matter that it was listed as open? | Because a decision parked in a list of unfinished work gets argued again by whoever reads the list next. |
+| 400 | 2026-10-06 | What is the check on message shapes for? | It fails when a screen writes out its own copy of a shape the backend already defines, so the two cannot quietly drift apart. |
+| 401 | 2026-10-06 | Were the screens excluded from it still rightly excluded? | Two of four were; one had been fixed elsewhere long ago and nobody updated the list, and one was genuinely still hand-written. |
+| 402 | 2026-10-06 | How did the stale one survive? | Its reason was written in the same sentence as a true one, so the true half kept the false half looking plausible. |
+| 403 | 2026-10-06 | What was actually fixed? | The conflict resolver's progress messages now come from the backend's own published shape instead of a copy typed into the view. |
+| 404 | 2026-10-06 | What would have gone wrong if they drifted? | A long conflict resolve would show no progress at all and look exactly like the app having hung. |
+| 405 | 2026-10-06 | Was the new coverage proved rather than assumed? | Yes -- the hand-written copy was put back and the check failed, naming the file and the shape. |
