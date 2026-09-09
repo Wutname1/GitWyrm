@@ -130,6 +130,15 @@ function BranchNode({
     )
   }
 
+  // set_upstream wants the QUALIFIED name (`origin/development`), but
+  // `node.branch` is built from RemoteBranchInfo.name, which is documented as
+  // having the `<remote>/` prefix already stripped (src-tauri/src/git/types.rs).
+  // Sending the bare name made the upstream lookup fail for every branch here;
+  // the sibling path (firstBranchUpstream in lib/remoteAdd.ts) qualifies it the
+  // same way. Hoisted so the click and the pending-state comparisons below can
+  // never drift apart - `upstreamTarget` holds whatever was sent.
+  const upstreamName = node.branch ? `${remote.name}/${node.branch}` : null
+
   const row = (
     <div
       style={{ paddingLeft: pad + 16 }}
@@ -138,15 +147,15 @@ function BranchNode({
       <GitBranch size={11} className="flex-none text-muted-foreground" />
       <span className="truncate font-mono text-2xs text-foreground">{node.name}</span>
       <TooltipButton
-        onClick={() => node.branch && onSetUpstream(node.branch)}
+        onClick={() => upstreamName && onSetUpstream(upstreamName)}
         tooltip="Track this branch"
         disabled={upstreamPending}
         className={cn(
           'ml-auto flex-none rounded p-0.5 text-muted-foreground opacity-0 hover:text-accent-text disabled:pointer-events-none group-hover/branch:opacity-100',
-          upstreamTarget === node.branch && 'text-accent-text opacity-100'
+          upstreamTarget === upstreamName && 'text-accent-text opacity-100'
         )}
       >
-        {upstreamTarget === node.branch ? <PendingIndicator className="size-3" /> : <Target size={12} />}
+        {upstreamTarget === upstreamName ? <PendingIndicator className="size-3" /> : <Target size={12} />}
       </TooltipButton>
     </div>
   )
