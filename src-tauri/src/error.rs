@@ -113,6 +113,17 @@ const EXPECTED: &[&str] = &[
     // updater plugin on a flavor we do not publish (a dev or WSL/Linux run
     // against a Windows-only manifest); nothing is wrong with the app.
     "were found in the response `platforms` object",
+    // A checkout could not replace files because something outside GitWyrm holds
+    // them open on Windows - a running build, a debugger, an editor indexing the
+    // folder, antivirus. Genuinely the user's to sort out, and the one action
+    // that fixes it is in the message.
+    //
+    // Matched on OUR wording (windows_lock_hint in commands/branch.rs), not
+    // libgit2's. The raw text is class=Os, which also carries permission
+    // failures and full disks - those are real and must keep reporting, so a
+    // needle broad enough to reach them would be exactly the over-broad match
+    // this list warns against.
+    "another program is holding files open",
 ];
 
 fn is_expected(message: &str) -> bool {
@@ -332,6 +343,22 @@ mod tests {
     /// The filter must not swallow real faults. Anything matched here stops
     /// being reported, so a needle broad enough to catch a genuine bug would
     /// hide exactly what the reporting exists to surface.
+    /// A file lock during checkout is the user's to clear (close the build, the
+    /// debugger, the editor), so it is a refusal rather than a fault - but only
+    /// in OUR wording. See windows_lock_hint in commands/branch.rs.
+    #[test]
+    fn a_windows_file_lock_is_expected() {
+        assert!(is_expected(
+            "another program is holding files open in C:/Code/EmailService/, so they could not be replaced. Close anything using that folder - a running build, debugger, editor or antivirus scan - then try again."
+        ));
+        // The RAW libgit2 text must NOT match: it is class=Os, which also covers
+        // permission failures and full disks. Only the translated message is a
+        // refusal, and the translation happens at exactly one call site.
+        assert!(!is_expected(
+            "git error: could not rmdir 'C:/Code/EmailService/': The process cannot access the file because it is being used by another process.; class=Os (2)"
+        ));
+    }
+
     #[test]
     fn real_failures_are_still_reported() {
         assert!(!is_expected("io error: permission denied (os error 5)"));
