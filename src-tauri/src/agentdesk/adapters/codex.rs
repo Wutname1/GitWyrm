@@ -211,7 +211,7 @@ impl AgentClientAdapter for CodexAdapter {
             });
         }
 
-        summaries.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        super::sort_newest_first(&mut summaries);
         Ok(summaries)
     }
 

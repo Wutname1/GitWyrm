@@ -333,6 +333,50 @@ pub fn open_read_only(path: &Path) -> Result<std::fs::File, AdapterError> {
     })
 }
 
+/// What the adapters substitute when a conversation records no date of its
+/// own.
+///
+/// A sentinel, not a reading. It was already spelled out as a literal at
+/// every substitution site and named in only one place, at the import
+/// boundary that swaps it for something real before a person sees it.
+///
+/// Named here too because a second consumer needs it: the newest-first sort
+/// each adapter applies to its own listing. String-compared, this value is
+/// guaranteed to fall below every genuine RFC 3339 date, so an undated
+/// conversation is pushed to the very end of the picker on the strength of a
+/// date nobody measured -- a second, silent output channel the sentinel was
+/// never meant to reach. [`sort_newest_first`] is what stops it.
+pub const NO_RECORDED_DATE: &str = "1970-01-01T00:00:00Z";
+
+/// Order one adapter's listing newest first, keeping undated conversations
+/// out of the comparison rather than letting the sentinel stand in for a
+/// date.
+///
+/// Undated rows still land after every dated one -- with nothing to order
+/// them by, that is the only honest place -- but they are put there by a
+/// rule that knows it is guessing, and are ordered by title among
+/// themselves so the list is at least stable and scannable rather than
+/// arbitrary.
+///
+/// Deliberately NOT solved by giving `updated_at` a filesystem fallback. A
+/// file's modified time is rewritten by a restored backup, a sync client, or
+/// simply copying the folder to a new machine -- which is the very thing
+/// somebody browsing an import picker has often just done -- and it would
+/// arrive as a plain `String` indistinguishable from a date the transcript
+/// really recorded. That trades a loud unknown for a quiet, plausible
+/// falsehood, and it would silently defeat the import boundary's guard,
+/// which recognises "no date" by comparing against the constant above.
+pub fn sort_newest_first(summaries: &mut [ExternalSessionSummary]) {
+    summaries.sort_by(|a, b| {
+        let a_undated = a.updated_at == NO_RECORDED_DATE;
+        let b_undated = b.updated_at == NO_RECORDED_DATE;
+        a_undated
+            .cmp(&b_undated)
+            .then_with(|| b.updated_at.cmp(&a.updated_at))
+            .then_with(|| a.title.cmp(&b.title))
+    });
+}
+
 /// Read a foreign file fully into a string, read-only, bounding how much is
 /// ever pulled into memory for one file so a single enormous or adversarial
 /// session file cannot exhaust memory during a scan.
@@ -521,6 +565,62 @@ fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
+
+    fn summary(id: &str, title: &str, updated_at: &str) -> ExternalSessionSummary {
+        ExternalSessionSummary {
+            external_session_id: id.into(),
+            title: title.into(),
+            updated_at: updated_at.into(),
+            project_path: None,
+            message_count: 0,
+            model: None,
+        }
+    }
+
+    /// A conversation that recorded no date must not be ordered as though it
+    /// happened in 1970.
+    ///
+    /// String-compared, the sentinel falls below every real RFC 3339 date, so
+    /// the old comparator put undated rows last by treating a placeholder as
+    /// a measurement. They still come last -- with nothing to order them by
+    /// there is nowhere honest to put them -- but by a rule that knows it is
+    /// guessing, and the difference shows the moment a date is old enough to
+    /// sort near the sentinel.
+    #[test]
+    fn an_undated_conversation_is_not_ordered_as_if_it_were_from_1970() {
+        // The case that tells the two rules apart. A date BEFORE 1970 is
+        // still a real recorded date, and string-compares below the
+        // sentinel -- so the old comparator ranked it under a conversation
+        // it knew nothing about. Every date after 1970 sorts the same way
+        // under both rules, which is why a test built only from those would
+        // pass with the fix removed.
+        let mut rows = vec![
+            summary("undated", "b undated", NO_RECORDED_DATE),
+            summary("ancient", "a ancient", "1969-07-20T20:17:00Z"),
+            summary("recent", "c recent", "2026-01-05T00:00:00Z"),
+        ];
+        sort_newest_first(&mut rows);
+        let order: Vec<&str> = rows.iter().map(|r| r.external_session_id.as_str()).collect();
+        assert_eq!(
+            order,
+            vec!["recent", "ancient", "undated"],
+            "a recorded date must outrank a date GitWyrm was never told"
+        );
+    }
+
+    /// With nothing to order them by, undated rows are at least stable and
+    /// scannable rather than in whatever order the filesystem yielded them.
+    #[test]
+    fn undated_conversations_are_ordered_by_title_among_themselves() {
+        let mut rows = vec![
+            summary("z", "Zebra", NO_RECORDED_DATE),
+            summary("a", "Apple", NO_RECORDED_DATE),
+            summary("m", "Mango", NO_RECORDED_DATE),
+        ];
+        sort_newest_first(&mut rows);
+        let order: Vec<&str> = rows.iter().map(|r| r.external_session_id.as_str()).collect();
+        assert_eq!(order, vec!["a", "m", "z"]);
+    }
 
     /// One unreadable byte must not discard a whole conversation.
     ///

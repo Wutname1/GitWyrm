@@ -615,7 +615,7 @@ fn record_import_logged(
 /// that is roughly seventeen substitution sites across four adapters plus
 /// every sort, and this is the one boundary where the value stops being an
 /// adapter's internal placeholder and becomes text a person reads.
-const NO_RECORDED_DATE: &str = "1970-01-01T00:00:00Z";
+use crate::agentdesk::adapters::NO_RECORDED_DATE;
 
 /// The date to show for an imported conversation.
 ///
