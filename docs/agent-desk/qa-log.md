@@ -432,3 +432,14 @@ competing sub-agents, the answer names the losing option too.
 | 423 | 2026-10-08 | Is a chat that never produced a result affected? | No -- that is an ordinary empty record, and a test now tells the two apart. |
 | 424 | 2026-10-08 | Did the new test hold up? | Not at first -- it passed even with an undamaged file, because its safety check sat at the end where it could not gate anything. |
 | 425 | 2026-10-08 | What did fixing that reveal? | That a check which fails to fail can be the fixture's fault rather than the fix's, so the parser's real requirements had to be read. |
+| 426 | 2026-10-09 | What did the sweep find? | The long-carried question about missing dates, which turned out to be a settled decision with one gap in its reasoning. |
+| 427 | 2026-10-09 | What was the gap? | Its reasoning said the placeholder date only reached one place a person sees, but the list of chats is also sorted by it. |
+| 428 | 2026-10-09 | Why does sorting matter if no date is shown? | Because the order is then the only hint of a date anyone gets, and it is put there by a placeholder nobody measured. |
+| 429 | 2026-10-09 | Was every undated chat mis-sorted? | No -- only against a chat genuinely dated before 1970, which was pushed below one GitWyrm knew nothing about. |
+| 430 | 2026-10-09 | What changed? | Undated chats now come last because they have no date rather than because of the date they were given, and are listed by name among themselves. |
+| 431 | 2026-10-09 | Why not date them from the file last-changed time? | Because restoring a backup, a sync app, or copying the folder to a new computer all rewrite it, and it would look exactly like a real date. |
+| 432 | 2026-10-09 | Was that option seriously considered? | Yes -- it was fully built, tested and then thrown away, including undoing the one place that already worked that way. |
+| 433 | 2026-10-09 | What killed it? | It would have quietly stopped GitWyrm recognising a missing date where that still matters, with every existing test still passing. |
+| 434 | 2026-10-09 | Did the new tests hold up? | Not the first one -- it passed even with the fix removed, because the placeholder sorts last under the old rule anyway. |
+| 435 | 2026-10-09 | How was that fixed? | By testing a chat genuinely dated before 1970, which is the only case where the old and new rules disagree. |
+| 436 | 2026-10-09 | Anything still worth doing here? | Yes -- the list still never says a chat has no date, though the wording already exists one field over for a missing project. |
