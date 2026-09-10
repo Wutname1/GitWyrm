@@ -339,6 +339,65 @@ const SENTRY_DSN: &str = "https://543d8fb8597dad94c5d0bef310ad046f@o451176023090
 /// - `Full` adds performance traces on top.
 ///
 /// Mirrors the frontend `initSentry`, which makes the same split.
+/// Collapse a log message to the shape of the failure, for issue grouping.
+///
+/// Sentry groups on the fingerprint we hand it, so this decides what counts as
+/// "the same bug". Two competing failure modes to stay between:
+///
+///   - Too coarse and everything lands in one issue, which is the bug this
+///     exists to fix (one `log::error!` site for the whole app).
+///   - Too fine and one bug fragments into an issue per repo path, per url, per
+///     sha -- a queue nobody can read, and resolving any one of them means
+///     nothing.
+///
+/// So: drop the parts that vary between two reports of the SAME failure, keep
+/// the wording that distinguishes different failures. `could not rmdir '<path>'`
+/// and `cannot locate local branch '<name>'` stay distinct; the same rmdir
+/// against two different directories does not.
+fn fingerprint_key(message: &str) -> String {
+    let mut out = String::with_capacity(message.len());
+    let mut chars = message.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            // Quoted spans are almost always the variable subject (a path, a
+            // branch, a url, a model name). Keep the quotes so the shape of the
+            // sentence survives.
+            '\'' | '"' => {
+                out.push('\'');
+                for q in chars.by_ref() {
+                    if q == '\'' || q == '"' {
+                        break;
+                    }
+                }
+                out.push('\'');
+            }
+            // Any run of digits: line numbers, ports, status codes, counts. A 400
+            // and a 500 from the same endpoint are the same call site failing, and
+            // the status is preserved in the event body either way.
+            d if d.is_ascii_digit() => {
+                while chars.peek().is_some_and(|n| n.is_ascii_digit()) {
+                    chars.next();
+                }
+                out.push('#');
+            }
+            _ => out.push(c),
+        }
+    }
+    // Windows and posix paths reach here unquoted often enough to matter.
+    let collapsed: String = out
+        .split_whitespace()
+        .map(|word| {
+            if word.contains('/') || word.contains('\\') {
+                "<path>"
+            } else {
+                word
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    collapsed.to_lowercase()
+}
+
 fn init_sentry() -> Option<sentry::ClientInitGuard> {
     if cfg!(debug_assertions) {
         return None;
@@ -367,6 +426,29 @@ fn init_sentry() -> Option<sentry::ClientInitGuard> {
         // becomes a Sentry event via SentryLogger, and those messages embed repo
         // paths, author emails, and provider error bodies. Scrub on the way out.
         .before_send(|mut event: sentry::protocol::Event| {
+            // Group by WHAT failed, not by where it was logged.
+            //
+            // Every AppError in the app funnels through one Serialize impl
+            // (error.rs), which means one `log::error!` call site, and
+            // SentryLogger events carry no fingerprint of their own -- so Sentry
+            // fell back to the log origin and filed the entire application into a
+            // SINGLE issue. GITWYRM-BACKEND-2 held 555 events spanning git index
+            // corruption, Copilot RPC failures, Anthropic 400s, "no remote to push
+            // to", rebase conflicts and a locked directory, all under whichever
+            // title happened to arrive last.
+            //
+            // That is worse than noisy, it is actively misleading: resolving the
+            // issue for one of those bugs silences all the others, and the issue
+            // reopens on an unrelated failure. Both happened (see the triage notes
+            // on GITWYRM-BACKEND-2/6).
+            //
+            // Fingerprint on the NORMALIZED message so the variable parts -- paths,
+            // urls, shas, quoted names, numbers -- do not fragment one bug into
+            // hundreds of issues, which is the opposite failure and just as bad.
+            if let Some(message) = event.message.as_deref() {
+                event.fingerprint =
+                    std::borrow::Cow::Owned(vec![std::borrow::Cow::Owned(fingerprint_key(message))]);
+            }
             if let Some(message) = event.message.take() {
                 event.message = Some(scrub::scrub_text(&message));
             }
@@ -721,4 +803,75 @@ pub fn run() {
         .invoke_handler(builder.invoke_handler())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod fingerprint_tests {
+    use super::fingerprint_key;
+
+    /// The bug this fingerprint exists to fix: every AppError logs from one call
+    /// site, so without a fingerprint Sentry filed unrelated failures into a
+    /// single issue (GITWYRM-BACKEND-2 held 555 of them). These must not group.
+    #[test]
+    fn unrelated_failures_group_separately() {
+        let distinct = [
+            "Command failed: git error: cannot locate local branch 'origin/development'; class=Reference (4); code=NotFound (-3)",
+            "Command failed: git error: could not rmdir 'C:/Code/EmailService/': The process cannot access the file because it is being used by another process.",
+            "Command failed: git error: invalid data in index - incorrect header signature; class=Index (10)",
+            "Command failed: This repository has no remote to push to.",
+            "Command failed: working tree has changes; commit or stash before merging",
+            "Command failed: resolve all conflicts before continuing the rebase",
+        ];
+        for (i, a) in distinct.iter().enumerate() {
+            for b in distinct.iter().skip(i + 1) {
+                assert_ne!(
+                    fingerprint_key(a),
+                    fingerprint_key(b),
+                    "these must not share an issue:\n  {a}\n  {b}"
+                );
+            }
+        }
+    }
+
+    /// The opposite failure, and just as bad: one bug fragmenting into an issue
+    /// per path/branch/sha produces a queue nobody can read.
+    #[test]
+    fn same_failure_groups_despite_varying_subject() {
+        assert_eq!(
+            fingerprint_key("could not rmdir 'C:/Code/EmailService/'"),
+            fingerprint_key("could not rmdir 'D:/other/repo/'")
+        );
+        assert_eq!(
+            fingerprint_key("cannot locate local branch 'origin/development'"),
+            fingerprint_key("cannot locate local branch 'origin/main'")
+        );
+    }
+
+    /// Status codes and other numbers vary per occurrence of one call site
+    /// failing; the real value stays in the event body.
+    #[test]
+    fn numbers_do_not_fragment_a_group() {
+        assert_eq!(
+            fingerprint_key("AI request failed (400 Bad Request)"),
+            fingerprint_key("AI request failed (503 Bad Request)")
+        );
+    }
+
+    /// Unquoted paths appear often enough in git and OS errors to matter.
+    #[test]
+    fn unquoted_paths_collapse() {
+        assert_eq!(
+            fingerprint_key(r"failed to open C:\Code\one\.git"),
+            fingerprint_key(r"failed to open D:\src\two\.git")
+        );
+    }
+
+    /// Differing wording must survive normalization, or distinct bugs merge.
+    #[test]
+    fn wording_still_distinguishes() {
+        assert_ne!(
+            fingerprint_key("git push failed: repository not found"),
+            fingerprint_key("git fetch failed: repository not found")
+        );
+    }
 }
