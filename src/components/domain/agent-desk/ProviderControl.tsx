@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Bot, ChevronUp, CircleAlert, Download } from 'lucide-react'
+import { Bot, Check, ChevronUp } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { commands } from '@/lib/bindings'
 import type { AgentProvider } from '@/lib/bindings'
@@ -33,12 +33,26 @@ export function ProviderControl({
   onChange,
   open,
   onOpenChange,
+  trigger,
+  side = 'top',
 }: {
   sessionId: string | null
   provider: string | null
   onChange: (provider: string | null) => void
   open: boolean
   onOpenChange: (open: boolean) => void
+  /**
+   * The element the list hangs off, when it is not the compact pill.
+   *
+   * The new-chat screen has its own full-width "Which AI?" row in the middle
+   * of the pane. It used to open this list by reaching over and toggling the
+   * COMPOSER's copy, which is the only other place this control is mounted --
+   * so the list appeared anchored to the bottom bar, a long way from the
+   * button that had just been clicked, overlapping the composer. A popover
+   * has to hang off the thing you pressed.
+   */
+  trigger?: React.ReactNode
+  side?: 'top' | 'bottom'
 }) {
   const query = useQuery({
     queryKey: keys.agentProviders(sessionId),
@@ -48,28 +62,46 @@ export function ProviderControl({
     staleTime: 0,
   })
 
-  const rows = query.data?.providers ?? []
+  const allRows = query.data?.providers ?? []
   // Whether this chat may change files is the backend's answer, not one
   // re-derived here. An earlier version worked it out from the composer's
   // mode pill and got a different answer than the engine's own tool gate, so
   // the picker offered a tool for a Review chat that the launch then refused.
   const readOnly = query.data?.readOnly ?? false
-  const chosen = rows.find((r) => r.id === provider)
+  /**
+   * Only tools that can actually run this chat.
+   *
+   * This list used to show every tool GitWyrm knows about, disabled ones
+   * included, on the argument that "a tool missing from the list looks like a
+   * bug; a tool listed with 'not installed' beside it is an answer." That
+   * holds for a list of three or four. It does not hold here: most people
+   * have one or two of these installed, so the list was mostly rows that
+   * could not be picked, each carrying a sentence explaining why -- and the
+   * two or three real choices were the minority of what was on screen.
+   *
+   * A tool the chat cannot use is still named, once, in the line under the
+   * list, so nothing disappears without explanation.
+   */
+  const rows = usableProviders(allRows, readOnly)
+  const hiddenCount = allRows.length - rows.length
+  const chosen = allRows.find((r) => r.id === provider)
   const label = chosen?.displayName ?? (provider ?? 'Default AI')
 
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>
-        <button
-          type="button"
-          className="flex flex-none items-center gap-1 rounded px-1.5 py-0.5 text-2xs font-semibold text-sub hover:bg-panel3 hover:text-foreground"
-        >
-          <Bot size={12} />
-          {label}
-          <ChevronUp size={11} />
-        </button>
+        {trigger ?? (
+          <button
+            type="button"
+            className="flex flex-none items-center gap-1 rounded px-1.5 py-0.5 text-2xs font-semibold text-sub hover:bg-panel3 hover:text-foreground"
+          >
+            <Bot size={12} />
+            {label}
+            <ChevronUp size={11} />
+          </button>
+        )}
       </PopoverTrigger>
-      <PopoverContent side="top" align="start" className="w-80 p-2">
+      <PopoverContent side={side} align="start" className="w-80 p-2">
         <div className="mb-2 flex items-center gap-2">
           <Bot size={13} className="text-accent-text" />
           <strong className="text-xs font-semibold">Which AI does this chat use?</strong>
@@ -100,38 +132,58 @@ export function ProviderControl({
             This build of GitWyrm has no AI tools set up.
           </p>
         ) : (
-          <div className="flex flex-col gap-1.5" role="listbox" aria-label="AI tool">
+          <div className="flex flex-col gap-0.5" role="listbox" aria-label="AI tool">
             <ProviderRow
               label="Default AI"
-              detail="Use whichever tool GitWyrm is set up to use."
               selected={provider === null}
               onSelect={() => {
                 onChange(null)
                 onOpenChange(false)
               }}
             />
-            {rows.map((row) => {
-              const blocked = blockedReason(row, readOnly)
-              return (
-                <ProviderRow
-                  key={row.id}
-                  label={row.displayName}
-                  detail={detailFor(row, readOnly)}
-                  note={row.isDefault ? 'default' : row.version ?? undefined}
-                  selected={provider === row.id}
-                  blocked={blocked}
-                  onSelect={() => {
-                    onChange(row.id)
-                    onOpenChange(false)
-                  }}
-                />
-              )
-            })}
+            {rows.map((row) => (
+              <ProviderRow
+                key={row.id}
+                label={row.displayName}
+                note={row.isDefault ? 'default' : undefined}
+                selected={provider === row.id}
+                onSelect={() => {
+                  onChange(row.id)
+                  onOpenChange(false)
+                }}
+              />
+            ))}
+            {/* Named, not silently dropped. One quiet line is the difference
+                between a short list and a list that looks like it is missing
+                something. */}
+            {hiddenCount > 0 && (
+              <p className="px-2 pt-1 text-2xs text-muted-foreground">
+                {hiddenCount === 1
+                  ? '1 other AI tool cannot be used for this chat.'
+                  : `${hiddenCount} other AI tools cannot be used for this chat.`}
+              </p>
+            )}
           </div>
         )}
       </PopoverContent>
     </Popover>
   )
+}
+
+/**
+ * The tools this chat can actually be run with.
+ *
+ * The list used to include every tool GitWyrm knows about, disabled, each
+ * with a sentence explaining why it could not be used. For someone with one
+ * or two of these installed that is a list where the real choices are
+ * outnumbered by the ones that are not choices at all.
+ *
+ * Exported so the rule is testable on its own: which tools appear is the
+ * whole behaviour of this control, and it is decided here rather than in the
+ * markup.
+ */
+export function usableProviders(rows: AgentProvider[], readOnly: boolean): AgentProvider[] {
+  return rows.filter((row) => blockedReason(row, readOnly) === undefined)
 }
 
 /**
@@ -160,71 +212,42 @@ export function blockedReason(row: AgentProvider, readOnly: boolean): string | u
   return undefined
 }
 
-export function detailFor(row: AgentProvider, readOnly: boolean): string {
-  if (row.canDoReadOnlyWork) return 'Can be used for any kind of chat.'
-  // Only worth saying where it bites. On a chat that is allowed to change
-  // files this tool is a perfectly ordinary choice, and printing its
-  // limitation under an enabled row reads as a warning about picking it.
-  if (readOnly) return 'Can only be used for chats that are allowed to change files.'
-  return 'Can be used for this chat.'
-}
 
+/**
+ * One pickable tool: its name, and a marker if it is the default.
+ *
+ * No description line. Every row used to carry one ("Can be used for any kind
+ * of chat"), which said the same thing about nearly every row and tripled the
+ * height of a list whose whole job is to let someone pick a name they already
+ * know. Rows that could NOT be picked carried their reason here, which was
+ * worth reading -- and those rows are no longer in the list at all.
+ */
 function ProviderRow({
   label,
-  detail,
   note,
   selected,
-  blocked,
   onSelect,
 }: {
   label: string
-  detail: string
   note?: string
   selected: boolean
-  blocked?: string
   onSelect: () => void
 }) {
-  const disabled = blocked !== undefined
   return (
     <button
       type="button"
-      // `aria-disabled` rather than `disabled`: a real `disabled` button is
-      // removed from the tab order, so a keyboard or screen-reader user never
-      // reaches the row and never hears why it cannot be used -- which makes
-      // the explanation decorative for exactly the people who most need it
-      // read aloud. Focusable and announced, with the click guarded instead.
-      aria-disabled={disabled}
       role="option"
-      aria-selected={selected && !disabled}
-      onClick={() => {
-        if (!disabled) onSelect()
-      }}
-      // A disabled row still has to be readable: the reason it is disabled is
-      // the most useful thing on it, so the text stays legible and only the
-      // affordance is dimmed.
+      aria-selected={selected}
+      onClick={onSelect}
       className={cn(
-        'flex items-start gap-2 rounded-md border border-border px-2 py-1.5 text-left',
-        selected && !disabled && 'border-primary/50 bg-soft',
-        disabled ? 'cursor-not-allowed opacity-70' : 'hover:bg-panel3'
+        'flex items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-panel3',
+        selected && 'bg-soft'
       )}
     >
-      {disabled ? (
-        <CircleAlert size={14} className="mt-0.5 flex-none text-muted-foreground" aria-hidden />
-      ) : (
-        <Bot size={14} className="mt-0.5 flex-none text-muted-foreground" aria-hidden />
-      )}
-      <span className="min-w-0 flex-1">
-        <strong className="block text-2xs font-semibold text-foreground">{label}</strong>
-        <span className="block text-2xs leading-snug text-muted-foreground">
-          {blocked ?? detail}
-        </span>
-      </span>
-      {note && !disabled && (
-        <span className="flex-none font-mono text-2xs text-muted-foreground">{note}</span>
-      )}
-      {disabled && blocked?.startsWith('Not installed') && (
-        <Download size={12} className="mt-0.5 flex-none text-muted-foreground" aria-hidden />
-      )}
+      <Bot size={13} className="flex-none text-muted-foreground" aria-hidden />
+      <strong className="min-w-0 flex-1 truncate text-2xs font-semibold text-foreground">{label}</strong>
+      {note && <span className="flex-none font-mono text-2xs text-muted-foreground">{note}</span>}
+      {selected && <Check size={12} className="flex-none text-accent-text" aria-hidden />}
     </button>
   )
 }

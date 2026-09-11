@@ -103,6 +103,11 @@ export function SessionComposer({
   // default if it ever changes.
   const [provider, setProvider] = useState<string | null>(header?.preferredProvider ?? null)
   const [providerOpen, setProviderOpen] = useState(false)
+  // Its own flag. While a chat is empty BOTH the new-chat screen and the
+  // compact pill below it are mounted, each with a `ProviderControl`; one
+  // shared flag would have opened two copies of the list at once, in two
+  // different places.
+  const [landingProviderOpen, setLandingProviderOpen] = useState(false)
   // Source-kickoffs 2.4/5.3: the last failed start stays on screen as a card
   // until the person acts on it or closes it. A toast alone was gone before
   // anyone who stepped away could read it, leaving a saved message and no
@@ -444,7 +449,11 @@ export function SessionComposer({
           team={team}
           onTeamChange={changeTeam}
           providerLabel={providerLabel}
-          onOpenProviderPicker={() => setProviderOpen(true)}
+          sessionId={sessionId}
+          provider={provider}
+          onProviderChange={changeProvider}
+          providerOpen={landingProviderOpen}
+          onProviderOpenChange={setLandingProviderOpen}
           projectPath={header?.repoPath ?? ''}
           projectName={header?.repoName ?? 'Current project'}
           projects={projects}

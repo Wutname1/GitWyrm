@@ -8,6 +8,7 @@ import {
   isModeBlocked,
   isTeamBlocked,
 } from '@/lib/agentDeskComposer'
+import { ProviderControl } from './ProviderControl'
 import { sourceKindLabel } from '@/lib/agentSessionGrouping'
 import { adapterDisplayName } from '@/lib/agentImportDisplay'
 import { cn } from '@/lib/utils'
@@ -40,7 +41,11 @@ export function NewChatLanding({
   team,
   onTeamChange,
   providerLabel,
-  onOpenProviderPicker,
+  sessionId,
+  provider,
+  onProviderChange,
+  providerOpen,
+  onProviderOpenChange,
   projectPath,
   projectName,
   projects,
@@ -55,7 +60,11 @@ export function NewChatLanding({
   onTeamChange: (team: ComposerTeam) => void
   /** The chosen tool's name, or the default's, already resolved. */
   providerLabel: string
-  onOpenProviderPicker: () => void
+  sessionId: string | null
+  provider: string | null
+  onProviderChange: (provider: string | null) => void
+  providerOpen: boolean
+  onProviderOpenChange: (open: boolean) => void
   projectPath: string
   projectName: string
   projects: ChatProjectChoice[]
@@ -156,15 +165,28 @@ export function NewChatLanding({
         )}
 
         <Section label="Which AI?">
-          <button
-            type="button"
-            onClick={onOpenProviderPicker}
-            className="flex w-full items-center gap-2 rounded-md border border-border px-3 py-2 text-left hover:bg-panel3"
-          >
-            <Bot size={15} className="flex-none text-muted-foreground" aria-hidden />
-            <span className="flex-1 text-xs font-medium text-foreground">{providerLabel}</span>
-            <span className="text-2xs text-muted-foreground">Change</span>
-          </button>
+          {/* The list hangs off THIS button. It used to reach over and open
+              the composer's copy of the same control, so it appeared at the
+              bottom of the window, over the message box, nowhere near the
+              row that had just been pressed. */}
+          <ProviderControl
+            sessionId={sessionId}
+            provider={provider}
+            onChange={onProviderChange}
+            open={providerOpen}
+            onOpenChange={onProviderOpenChange}
+            side="bottom"
+            trigger={
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 rounded-md border border-border px-3 py-2 text-left hover:bg-panel3"
+              >
+                <Bot size={15} className="flex-none text-muted-foreground" aria-hidden />
+                <span className="flex-1 text-xs font-medium text-foreground">{providerLabel}</span>
+                <span className="text-2xs text-muted-foreground">Change</span>
+              </button>
+            }
+          />
         </Section>
 
         <Section label="How much can it do?">

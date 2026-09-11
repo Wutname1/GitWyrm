@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { blockedReason, detailFor } from './ProviderControl'
+import { blockedReason, usableProviders } from './ProviderControl'
 import type { AgentProvider } from '@/lib/bindings'
 
 const READY: AgentProvider = {
@@ -71,23 +71,6 @@ describe('blockedReason', () => {
   })
 })
 
-describe('detailFor', () => {
-  it('says a fully capable tool can be used anywhere', () => {
-    expect(detailFor(READY, true)).toContain('any kind of chat')
-    expect(detailFor(READY, false)).toContain('any kind of chat')
-  })
-
-  it('names the limit only on a chat where it actually bites', () => {
-    const limited = { ...READY, canDoReadOnlyWork: false }
-    // On a read-only chat the limit is the reason the row is disabled.
-    expect(detailFor(limited, true)).toContain('allowed to change files')
-    // On a chat that may write, this tool is an ordinary choice. Printing
-    // its limitation under an enabled row reads as a warning against
-    // picking something that is perfectly fine here.
-    expect(detailFor(limited, false)).not.toContain('only')
-  })
-})
-
 describe('blockedReason for a tool that did not answer', () => {
   it('does not tell you to install something already on the machine', () => {
     // The probe reports `installed: false` for an unresponsive tool, so
@@ -104,5 +87,30 @@ describe('blockedReason for a tool that did not answer', () => {
 
   it('lets too-old win, since that has a specific fix', () => {
     expect(blockedReason({ ...READY, installed: false, tooOld: true, unresponsive: true }, false)).toMatch(/too old/i)
+  })
+})
+
+describe('usableProviders', () => {
+  it('keeps only the tools this chat can actually run with', () => {
+    const missing = { ...READY, id: 'gemini', displayName: 'Gemini CLI', installed: false, version: null }
+    const old = { ...READY, id: 'codex', displayName: 'Codex', tooOld: true, version: '0.1.0' }
+    const kept = usableProviders([READY, missing, old], false)
+    expect(kept.map((r) => r.id)).toEqual(['copilot'])
+  })
+
+  it('drops a tool that cannot be trusted with a read-only chat, but only there', () => {
+    // opencode has no way to be told to leave files alone, so it is a real
+    // choice for a chat that may write and no choice at all for one that
+    // must not -- the same tool, filtered differently by the chat it is for.
+    const opencode = {
+      ...READY,
+      id: 'opencode',
+      displayName: 'opencode',
+      isDefault: false,
+      canDoReadOnlyWork: false,
+      readOnlyLimit: 'opencode has no way to be told to leave your files alone.',
+    }
+    expect(usableProviders([READY, opencode], true).map((r) => r.id)).toEqual(['copilot'])
+    expect(usableProviders([READY, opencode], false).map((r) => r.id)).toEqual(['copilot', 'opencode'])
   })
 })
