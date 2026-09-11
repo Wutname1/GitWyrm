@@ -103,11 +103,17 @@ pub fn collect_span_above<'r>(
 fn rewind_to(repo: &git2::Repository, previous_sha: &str) -> Result<(), AppError> {
     let start_oid = Oid::from_str(previous_sha).map_err(AppError::Git)?;
     let head_obj = repo.find_object(start_oid, None)?;
+    // A hard reset rewrites working files, so it can be refused by a Windows file
+    // lock exactly as a checkout is - see windows_lock_hint.
     repo.reset(
         &head_obj,
         ResetType::Hard,
         Some(CheckoutBuilder::new().force()),
-    )?;
+    )
+    .map_err(|e| match crate::error::windows_lock_hint(&e) {
+        Some(hint) => AppError::Other(hint),
+        None => e.into(),
+    })?;
     Ok(())
 }
 
@@ -364,7 +370,11 @@ pub fn squash_commits(
         new_tip.as_object(),
         ResetType::Hard,
         Some(CheckoutBuilder::new().force()),
-    )?;
+    )
+    .map_err(|e| match crate::error::windows_lock_hint(&e) {
+        Some(hint) => AppError::Other(hint),
+        None => e.into(),
+    })?;
     crate::git::submodule::sync_submodule_workdirs(repo);
     Ok(RefMove {
         branch,
@@ -413,7 +423,11 @@ pub fn drop_commits(repo: &git2::Repository, shas: &[String]) -> Result<RefMove,
         new_tip.as_object(),
         ResetType::Hard,
         Some(CheckoutBuilder::new().force()),
-    )?;
+    )
+    .map_err(|e| match crate::error::windows_lock_hint(&e) {
+        Some(hint) => AppError::Other(hint),
+        None => e.into(),
+    })?;
     crate::git::submodule::sync_submodule_workdirs(repo);
     Ok(RefMove {
         branch,

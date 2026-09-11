@@ -38,7 +38,13 @@ pub fn checkout_directional_target(
     }
 
     let (object, reference) = repo.revparse_ext(target)?;
-    repo.checkout_tree(&object, None)?;
+    // A merge checkout replaces working files, so it hits the same Windows file
+    // lock a branch switch does - see windows_lock_hint.
+    repo.checkout_tree(&object, None)
+        .map_err(|e| match crate::error::windows_lock_hint(&e) {
+            Some(hint) => AppError::Other(hint),
+            None => e.into(),
+        })?;
     match reference {
         Some(r) => repo.set_head(r.name().unwrap_or("HEAD"))?,
         None => repo.set_head_detached(object.id())?,

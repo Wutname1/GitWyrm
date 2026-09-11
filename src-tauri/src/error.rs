@@ -10,6 +10,50 @@ pub enum AppError {
     Other(String),
 }
 
+/// Turn a Windows file-lock refusal into something the user can act on.
+///
+/// A checkout that has to remove a directory fails when anything else holds a
+/// handle inside it, and Windows says so through libgit2 as
+/// `could not rmdir '<path>': The process cannot access the file because it is
+/// being used by another process.` (class=Os). That names the directory but not
+/// the cause, and the cause is always something outside GitWyrm: a running
+/// build, a debugger, an editor indexing the folder, or antivirus.
+///
+/// Reported from a .NET service directory (GITWYRM-BACKEND-2), which is the
+/// classic shape - MSBuild or an IDE holding bin/obj open while the working tree
+/// is rewritten. Nothing here is ours to fix, but the raw message reads like a
+/// git fault, so say what to do instead.
+///
+/// Lives here rather than beside one caller because EVERY path that rewrites
+/// working files can hit it: branch switch, merge checkout, and the hard resets
+/// behind history rewrites. It was originally applied only to the branch switch,
+/// and a recurrence on a pull/merge (a second repo, 2026-09-10) proved that gap
+/// real rather than theoretical.
+///
+/// Only the lock wording is rewritten. Other Os-class errors (permissions, a
+/// full disk, a missing path) are real and keep their own message.
+pub fn windows_lock_hint(e: &git2::Error) -> Option<String> {
+    if e.class() != git2::ErrorClass::Os {
+        return None;
+    }
+    let message = e.message();
+    if !message.contains("being used by another process") {
+        return None;
+    }
+    // Keep the path: it is the one genuinely useful part, and it tells the user
+    // which folder to go and close.
+    let subject = message
+        .split_once('\'')
+        .and_then(|(_, rest)| rest.split_once('\''))
+        .map(|(path, _)| path);
+    Some(match subject {
+        Some(path) => format!(
+            "another program is holding files open in {path}, so they could not be replaced. Close anything using that folder - a running build, debugger, editor or antivirus scan - then try again."
+        ),
+        None => "another program is holding files open in this repository, so they could not be replaced. Close anything using the folder - a running build, debugger, editor or antivirus scan - then try again.".to_string(),
+    })
+}
+
 /// Conditions the app is expected to hit in normal use.
 ///
 /// These are refusals, not faults: the remote said no, or git declined an
@@ -118,7 +162,7 @@ const EXPECTED: &[&str] = &[
     // folder, antivirus. Genuinely the user's to sort out, and the one action
     // that fixes it is in the message.
     //
-    // Matched on OUR wording (windows_lock_hint in commands/branch.rs), not
+    // Matched on OUR wording (windows_lock_hint above), not
     // libgit2's. The raw text is class=Os, which also carries permission
     // failures and full disks - those are real and must keep reporting, so a
     // needle broad enough to reach them would be exactly the over-broad match
@@ -345,7 +389,7 @@ mod tests {
     /// hide exactly what the reporting exists to surface.
     /// A file lock during checkout is the user's to clear (close the build, the
     /// debugger, the editor), so it is a refusal rather than a fault - but only
-    /// in OUR wording. See windows_lock_hint in commands/branch.rs.
+    /// in OUR wording. See windows_lock_hint above.
     #[test]
     fn a_windows_file_lock_is_expected() {
         assert!(is_expected(
@@ -357,6 +401,34 @@ mod tests {
         assert!(!is_expected(
             "git error: could not rmdir 'C:/Code/EmailService/': The process cannot access the file because it is being used by another process.; class=Os (2)"
         ));
+    }
+
+    /// The lock hint must name the folder to close, and must leave other
+    /// Os-class errors (permissions, full disk) alone - those are real faults.
+    #[test]
+    fn a_file_lock_becomes_actionable_advice() {
+        let locked = git2::Error::new(
+            git2::ErrorCode::GenericError,
+            git2::ErrorClass::Os,
+            "could not rmdir 'C:/Code/EmailService/': The process cannot access the file because it is being used by another process.",
+        );
+        let hint = super::windows_lock_hint(&locked).expect("lock should be translated");
+        assert!(hint.contains("C:/Code/EmailService/"), "keeps the folder: {hint}");
+        assert!(hint.contains("try again"), "tells the user what to do: {hint}");
+
+        let denied = git2::Error::new(
+            git2::ErrorCode::GenericError,
+            git2::ErrorClass::Os,
+            "failed to write '.git/index': permission denied",
+        );
+        assert!(super::windows_lock_hint(&denied).is_none(), "a real Os fault must pass through");
+
+        let not_os = git2::Error::new(
+            git2::ErrorCode::NotFound,
+            git2::ErrorClass::Reference,
+            "cannot locate local branch 'x'; being used by another process",
+        );
+        assert!(super::windows_lock_hint(&not_os).is_none(), "class must gate the match");
     }
 
     #[test]
