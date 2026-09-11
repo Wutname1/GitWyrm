@@ -97,6 +97,24 @@ fn apply_gpg_env(cmd: &mut Command) {
         return;
     }
     if let Some(home) = managed_gnupg_home() {
+        // gpg treats a MISSING home as fatal, not empty: it refuses with
+        // `keyblock resource '<home>/pubring.kbx': No such file or directory`
+        // followed by `Fatal: <home>: directory does not exist!`, and that
+        // reaches the user as a raw gpg dump from the key picker
+        // (GITWYRM-BACKEND-2).
+        //
+        // Only ensure_bundled_gpg_configured created it, and that runs on the
+        // WRITE paths - creating or exporting a key. Every read
+        // (list_secret_keys behind the profile key picker and signing_status)
+        // pointed GNUPGHOME at a directory that need never have existed, so
+        // anyone who opened the picker before making a key hit it.
+        //
+        // Best-effort: a failure here is not worth refusing the command over,
+        // because gpg's own error is still the honest answer if the directory
+        // genuinely cannot be made. Creating it does NOT create a keyring -
+        // gpg is happy with an empty home and reports no keys, which is the
+        // truth for someone who has not made one.
+        let _ = std::fs::create_dir_all(&home);
         cmd.env("GNUPGHOME", to_cygdrive(&home));
     }
 }
