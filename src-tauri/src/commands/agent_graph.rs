@@ -1215,7 +1215,14 @@ fn launch_helper(
         true,
         std::path::PathBuf::from(&worktree_path),
     ) {
-        Ok(a) => a,
+        // A helper runs the chat's model and thinking level too: the lead and
+        // its helpers are one piece of work, and a helper quietly running a
+        // different model would make the combined result impossible to reason
+        // about.
+        Ok(a) => a.tuned(
+            session.header.preferred_model.clone(),
+            session.header.preferred_effort.clone(),
+        ),
         Err(e) => {
             record_helper_launch_failure(
                 locks,
@@ -3595,6 +3602,8 @@ mod tests {
             preferred_provider: None,
             preferred_mode: None,
             preferred_team: None,
+        preferred_model: None,
+        preferred_effort: None,
         };
         let session = AgentSession::new(header);
         store::write_session(root, &session).unwrap();
@@ -3790,6 +3799,8 @@ mod tests {
                 preferred_provider: None,
                 preferred_mode: None,
                 preferred_team: None,
+        preferred_model: None,
+        preferred_effort: None,
             };
             store::write_session(session_root, &AgentSession::new(header)).unwrap();
 

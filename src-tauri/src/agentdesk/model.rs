@@ -81,6 +81,20 @@ pub struct AgentSessionHeader {
     /// The last team shape chosen for this chat (`solo` or `helpers`).
     #[serde(default)]
     pub preferred_team: Option<String>,
+    /// The model this chat asks its tool for, as the tool spells it.
+    ///
+    /// `None` means "whatever the tool is set up to use" and is NOT the same
+    /// as naming the tool's current default: a default can change under the
+    /// user, and a chat that never expressed a preference should follow it
+    /// rather than pin the value it happened to have on the day it started.
+    /// A string rather than an enum for the same reason the two above are:
+    /// the list lives in the agent registry and grows without a schema bump.
+    #[serde(default)]
+    pub preferred_model: Option<String>,
+    /// How hard this chat asks its tool to think, as the tool spells it.
+    /// `None` means the tool decides, exactly as with `preferred_model`.
+    #[serde(default)]
+    pub preferred_effort: Option<String>,
 }
 
 /// The full session file on disk: the header plus everything the transcript,
@@ -1016,6 +1030,8 @@ mod tests {
             preferred_provider: None,
             preferred_mode: None,
             preferred_team: None,
+        preferred_model: None,
+        preferred_effort: None,
         }
     }
 

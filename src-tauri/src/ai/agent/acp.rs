@@ -181,6 +181,8 @@ impl AcpConnection {
             program,
             cwd,
             denied_tools,
+            None,
+            None,
         )
         .await
     }
@@ -206,9 +208,15 @@ impl AcpConnection {
         program: &std::path::Path,
         cwd: &std::path::Path,
         denied_tools: &[&str],
+        model: Option<&str>,
+        effort: Option<&str>,
     ) -> Result<Self, AgentError> {
         let mut cmd = Command::new(program);
-        cmd.args(spec.launch_args(denied_tools));
+        // Model and effort ride the same launch line as the denials, and are
+        // dropped by the registry when this tool does not know the value --
+        // an unrecognised argument makes these tools exit before the
+        // handshake, which reads as a chat that never answered.
+        cmd.args(spec.launch_args_tuned(denied_tools, model, effort));
         cmd.current_dir(cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

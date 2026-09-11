@@ -121,6 +121,8 @@ fn create_session_at(
         preferred_provider: None,
         preferred_mode: None,
         preferred_team: None,
+        preferred_model: None,
+        preferred_effort: None,
     };
     let session = AgentSession::new(header);
 
@@ -550,6 +552,12 @@ pub async fn agent_session_rename(
 /// Save the controls that belong to one chat. Keeping them beside the
 /// session, rather than in pane-local React state, prevents Split View from
 /// carrying one chat's authority or provider into another chat.
+///
+/// `model` and `effort` are `None` when the chat has expressed no preference,
+/// and are written through as-is rather than defaulted here: absent means
+/// "follow whatever the tool is set up for", which keeps following it when the
+/// tool's own default changes. Naming the current default instead would pin
+/// it silently.
 #[tauri::command]
 #[specta::specta]
 pub async fn agent_session_set_preferences(
@@ -559,6 +567,8 @@ pub async fn agent_session_set_preferences(
     mode: String,
     team: String,
     provider: Option<String>,
+    model: Option<String>,
+    effort: Option<String>,
 ) -> Result<UpdateSessionOutcome, AppError> {
     let root = resolve_root(&app)?;
     let locks = locks.inner().clone();
@@ -567,6 +577,8 @@ pub async fn agent_session_set_preferences(
             session.header.preferred_mode = Some(mode);
             session.header.preferred_team = Some(team);
             session.header.preferred_provider = provider;
+            session.header.preferred_model = model;
+            session.header.preferred_effort = effort;
         })
     })
     .await
@@ -1510,7 +1522,14 @@ pub(crate) fn start_execution_at(
         started,
         engine_root.clone(),
     ) {
-        Ok(a) => a,
+        // The chat's own model and thinking level, applied after discovery:
+        // discovery answers which tool can do this job, tuning is a property
+        // of the chat. A value this tool does not offer is dropped at the
+        // launch line rather than forwarded.
+        Ok(a) => a.tuned(
+            session.header.preferred_model.clone(),
+            session.header.preferred_effort.clone(),
+        ),
         Err(e) => {
             links.unlink(&execution_id);
             // P1-C wiring 4: this call provisioned `engine_root` as an
@@ -3507,6 +3526,8 @@ mod tests {
             preferred_provider: None,
             preferred_mode: None,
             preferred_team: None,
+        preferred_model: None,
+        preferred_effort: None,
         }
     }
 
@@ -3759,6 +3780,8 @@ mod tests {
             preferred_provider: None,
             preferred_mode: None,
             preferred_team: None,
+        preferred_model: None,
+        preferred_effort: None,
         });
         session.executions.push(crate::agentdesk::model::ExecutionRecord::minimal(
             "exec-1".into(),

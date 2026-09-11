@@ -192,6 +192,65 @@ pub struct AgentSpec {
     /// choosing a package manager for them and writing outside anywhere
     /// GitWyrm owns. Showing it lets them decide.
     pub install_hint: &'static str,
+    /// How this tool is told which model to use, if it can be.
+    pub model: ModelSupport,
+    /// How this tool is told how hard to think, if it can be.
+    pub effort: EffortSupport,
+}
+
+/// Whether a tool accepts a model at launch, and what to call the choices.
+///
+/// Like [`Denial`], this is a capability rather than a list of flags, because
+/// the shapes genuinely differ: one takes a short alias, one takes a
+/// `provider/model` pair, and one has no flag at all. Flattening them into
+/// "an optional arg" would hide the tool that cannot be told.
+///
+/// Every row was read out of the installed binary's own `--help`, per this
+/// module's rule that only the binary is authoritative.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelSupport {
+    /// A launch flag naming the model, e.g. `--model opus`.
+    Flag {
+        /// The flag itself. The model name is passed as the next argument.
+        flag: &'static str,
+        /// Models worth offering, best-known first.
+        ///
+        /// Deliberately a short list of names this tool documents rather than
+        /// an attempt at every model it might accept. The field is a menu, not
+        /// a validator: the tool itself rejects a name it does not know, and
+        /// inventing a longer list here would put names in front of people
+        /// that GitWyrm has never seen work.
+        choices: &'static [ModelChoice],
+    },
+    /// No way to choose at launch; the tool uses whatever it is configured for.
+    None,
+}
+
+/// One model a tool can be asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ModelChoice {
+    /// Exactly what is passed to the tool. Never shown as-is.
+    pub id: &'static str,
+    /// What the user sees, written the way the tool's makers write it.
+    pub display_name: &'static str,
+}
+
+/// How hard a tool can be asked to think before answering, if it can.
+///
+/// Separate from [`ModelSupport`] because the two are genuinely independent:
+/// a tool can offer models and no effort control, and the levels a tool
+/// accepts are its own list rather than a property of the model. Levels are
+/// carried as plain ids so a row can name exactly what its binary printed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EffortSupport {
+    /// A launch flag naming the level, e.g. `--effort high`.
+    Flag {
+        flag: &'static str,
+        /// Accepted levels, lowest first, exactly as the tool spells them.
+        levels: &'static [&'static str],
+    },
+    /// No way to ask; the tool decides for itself.
+    None,
 }
 
 impl AgentSpec {
@@ -239,7 +298,53 @@ impl AgentSpec {
     /// [`Denial::SessionMeta`] contributes nothing here: its denial rides in
     /// `session/new` instead (see [`Self::session_meta`]).
     pub fn launch_args(&self, denied: &[&str]) -> Vec<String> {
+        self.launch_args_with_model(denied, None)
+    }
+
+    /// [`Self::launch_args`], plus the model the user asked for.
+    ///
+    /// `None` means "whatever this tool is already set up to use" and adds no
+    /// flag at all -- which is not the same as naming the tool's default. A
+    /// default can change under the user, and a chat that never expressed a
+    /// preference should follow it rather than pin whatever it happened to be
+    /// on the day the chat started.
+    ///
+    /// A model this tool does not offer is dropped rather than passed through.
+    /// The list in each row is a menu, not a validator, but it is the only
+    /// evidence GitWyrm has that a name works; forwarding an unknown one would
+    /// make the tool exit at launch, which reads as a message that went
+    /// nowhere.
+    pub fn launch_args_with_model(&self, denied: &[&str], model: Option<&str>) -> Vec<String> {
+        self.launch_args_tuned(denied, model, None)
+    }
+
+    /// [`Self::launch_args`], plus the model and the thinking effort asked for.
+    ///
+    /// Both are `Option` and both mean the same thing when absent: add no flag,
+    /// and let the tool use whatever it is already set up for. Both are also
+    /// checked against this row's own list before being forwarded, for the same
+    /// reason -- an unknown value makes these tools exit at launch, which on a
+    /// chat screen looks like a message that went nowhere rather than like a
+    /// rejected argument.
+    pub fn launch_args_tuned(
+        &self,
+        denied: &[&str],
+        model: Option<&str>,
+        effort: Option<&str>,
+    ) -> Vec<String> {
         let mut args: Vec<String> = self.acp_args.iter().map(|a| (*a).to_string()).collect();
+        if let (ModelSupport::Flag { flag, choices }, Some(wanted)) = (self.model, model) {
+            if choices.iter().any(|c| c.id == wanted) {
+                args.push((*flag).to_string());
+                args.push(wanted.to_string());
+            }
+        }
+        if let (EffortSupport::Flag { flag, levels }, Some(wanted)) = (self.effort, effort) {
+            if levels.contains(&wanted) {
+                args.push((*flag).to_string());
+                args.push(wanted.to_string());
+            }
+        }
         match self.denial {
             Denial::LaunchFlags { deny_flag } => {
                 for tool in denied {
@@ -332,6 +437,24 @@ pub const AGENTS: &[AgentSpec] = &[
         },
         homepage_url: "https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli",
         install_hint: "npm install -g @github/copilot",
+        // `copilot --help` on 1.0.76: `--model <model> (use 'auto' to let
+        // Copilot pick automatically)`, with `--model gpt-5.4` as its own
+        // example. "Auto" is offered first because it is the tool's own
+        // default and the answer most people want.
+        model: ModelSupport::Flag {
+            flag: "--model",
+            choices: &[
+                ModelChoice { id: "auto", display_name: "Auto" },
+                ModelChoice { id: "claude-sonnet-4.5", display_name: "Claude Sonnet 4.5" },
+                ModelChoice { id: "gpt-5.4", display_name: "GPT-5.4" },
+            ],
+        },
+        // `copilot --help`: `--effort, --reasoning-effort <level>` with choices
+        // "none", "minimal", "low", "medium", "high", "xhigh", "max".
+        effort: EffortSupport::Flag {
+            flag: "--effort",
+            levels: &["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+        },
     },
     // Gemini CLI. `--acp` is the current flag; `--experimental-acp` still
     // works but is deprecated in favour of it.
@@ -354,6 +477,20 @@ pub const AGENTS: &[AgentSpec] = &[
         tool_names: NO_TOOL_NAMES,
         homepage_url: "https://github.com/google-gemini/gemini-cli#quickstart",
         install_hint: "npm install -g @google/gemini-cli",
+        // Gemini CLI takes `--model`/`-m`. Not installed on the machine this
+        // row was written on, so the flag is from the tool's published usage
+        // rather than from its own `--help` -- weaker evidence than every
+        // other row here, and worth re-checking against a real install.
+        model: ModelSupport::Flag {
+            flag: "--model",
+            choices: &[
+                ModelChoice { id: "gemini-2.5-pro", display_name: "Gemini 2.5 Pro" },
+                ModelChoice { id: "gemini-2.5-flash", display_name: "Gemini 2.5 Flash" },
+            ],
+        },
+        // Nothing in the published usage names a reasoning-effort flag, and the
+        // tool is not installed here to check. Absent rather than guessed.
+        effort: EffortSupport::None,
     },
     // Claude Code, reached through an adapter rather than directly: Claude
     // Code itself has no ACP mode. The adapter is npm
@@ -409,6 +546,27 @@ pub const AGENTS: &[AgentSpec] = &[
         // Code alone still ends up with nothing GitWyrm can drive.
         homepage_url: "https://www.npmjs.com/package/@agentclientprotocol/claude-agent-acp",
         install_hint: "npm install -g @agentclientprotocol/claude-agent-acp",
+        // `claude --help` on 2.1.260: "Provide an alias for the latest model
+        // (e.g. 'fable', 'opus', or 'sonnet') or a model's full name (e.g.
+        // 'claude-fable-5')". Aliases rather than full names, so the choice
+        // keeps following the latest of each family instead of pinning to a
+        // version that ages out.
+        model: ModelSupport::Flag {
+            flag: "--model",
+            choices: &[
+                ModelChoice { id: "sonnet", display_name: "Sonnet" },
+                ModelChoice { id: "opus", display_name: "Opus" },
+                ModelChoice { id: "fable", display_name: "Fable" },
+                ModelChoice { id: "haiku", display_name: "Haiku" },
+            ],
+        },
+        // `claude --help` on 2.1.260: `--effort <level>` with
+        // "(low, medium, high, xhigh, max)". No "none"/"minimal", unlike
+        // Copilot -- the lists are per-tool, which is why they are per-row.
+        effort: EffortSupport::Flag {
+            flag: "--effort",
+            levels: &["low", "medium", "high", "xhigh", "max"],
+        },
     },
     // opencode. ACP is a SUBCOMMAND (`opencode acp`), not a flag.
     //
@@ -429,6 +587,18 @@ pub const AGENTS: &[AgentSpec] = &[
         tool_names: NO_TOOL_NAMES,
         homepage_url: "https://opencode.ai/docs/",
         install_hint: "npm install -g opencode-ai",
+        // `opencode --help`: `-m, --model  model to use in the format of
+        // provider/model`. The pair is the whole identifier, so the ids below
+        // carry it verbatim.
+        model: ModelSupport::Flag {
+            flag: "--model",
+            choices: &[
+                ModelChoice { id: "anthropic/claude-sonnet-4-5", display_name: "Claude Sonnet 4.5" },
+                ModelChoice { id: "openai/gpt-5.4", display_name: "GPT-5.4" },
+            ],
+        },
+        // No reasoning-effort flag in `opencode --help`.
+        effort: EffortSupport::None,
     },
     // Codex, through an adapter. `codex` itself speaks its own app-server
     // JSON-RPC rather than ACP -- confirmed against 0.151.0, whose `--help`
@@ -454,6 +624,20 @@ pub const AGENTS: &[AgentSpec] = &[
         tool_names: NO_TOOL_NAMES,
         homepage_url: "https://developers.openai.com/codex/cli/",
         install_hint: "npm install -g @openai/codex",
+        // `codex --help` on 0.151.0: `-m, --model <MODEL>  Model the agent
+        // should use`. The long form is used here so the launch line reads the
+        // same shape as every other row.
+        model: ModelSupport::Flag {
+            flag: "--model",
+            choices: &[
+                ModelChoice { id: "gpt-5.4-codex", display_name: "GPT-5.4 Codex" },
+                ModelChoice { id: "gpt-5.4", display_name: "GPT-5.4" },
+            ],
+        },
+        // Codex exposes reasoning effort through `-c key=value` config rather
+        // than a dedicated flag -- a different shape from the other two, left
+        // unmodelled until a row can be written from the binary, not inferred.
+        effort: EffortSupport::None,
     },
 ];
 
@@ -526,6 +710,77 @@ fn home_dir() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A model or effort this tool does not offer never reaches its command
+    /// line.
+    ///
+    /// These tools exit on an argument they do not recognise, before the
+    /// handshake -- and with the process gone the chat simply never answers,
+    /// which reads as a broken app rather than a rejected setting. The row's
+    /// own list is the only evidence GitWyrm has that a value works, so it is
+    /// the gate.
+    #[test]
+    fn a_value_this_tool_does_not_offer_never_reaches_the_command_line() {
+        let claude = AGENTS.iter().find(|s| s.id == "claude").expect("claude row");
+        let ModelSupport::Flag { choices, .. } = claude.model else {
+            panic!("the claude row is expected to offer models");
+        };
+        let known = choices[0].id;
+
+        let with_known = claude.launch_args_tuned(&[], Some(known), None);
+        assert!(with_known.iter().any(|a| a == known), "{with_known:?}");
+
+        let with_unknown = claude.launch_args_tuned(&[], Some("no-such-model"), None);
+        assert!(
+            !with_unknown.iter().any(|a| a == "no-such-model"),
+            "an unknown model must be dropped, not forwarded: {with_unknown:?}"
+        );
+        assert_eq!(with_unknown, claude.launch_args(&[]));
+
+        // Effort is gated the same way, against its own per-tool list.
+        let with_bad_effort = claude.launch_args_tuned(&[], None, Some("ludicrous"));
+        assert_eq!(with_bad_effort, claude.launch_args(&[]));
+        assert!(claude
+            .launch_args_tuned(&[], None, Some("high"))
+            .iter()
+            .any(|a| a == "high"));
+    }
+
+    /// Asking for nothing adds nothing.
+    ///
+    /// "No preference" has to keep following whatever the tool is set up for,
+    /// which means adding no flag at all rather than naming the tool's current
+    /// default -- a default that would then be pinned silently.
+    #[test]
+    fn no_preference_adds_no_arguments() {
+        for spec in AGENTS {
+            assert_eq!(
+                spec.launch_args_tuned(&[], None, None),
+                spec.launch_args(&[]),
+                "{} added an argument for no preference",
+                spec.id
+            );
+        }
+    }
+
+    /// A tool that offers models must spell each one, and never twice.
+    #[test]
+    fn every_offered_model_is_named_once_and_shown_properly() {
+        for spec in AGENTS {
+            let ModelSupport::Flag { choices, .. } = spec.model else {
+                continue;
+            };
+            assert!(!choices.is_empty(), "{} offers an empty menu", spec.id);
+            let mut ids: Vec<&str> = choices.iter().map(|c| c.id).collect();
+            ids.sort_unstable();
+            let count = ids.len();
+            ids.dedup();
+            assert_eq!(ids.len(), count, "{} lists a model twice", spec.id);
+            for choice in choices {
+                assert!(!choice.display_name.trim().is_empty(), "{} has a nameless model", spec.id);
+            }
+        }
+    }
 
     #[test]
     fn every_agent_has_a_distinct_lower_case_id() {

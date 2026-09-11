@@ -54,6 +54,25 @@ pub struct AgentProvider {
     /// binary name and a product name are routinely three different strings.
     /// When detection is wrong this is the line that explains why.
     pub binary_name: String,
+    /// Models this tool can be asked for, best-known first.
+    ///
+    /// Empty means the tool takes no model flag, which is a different fact
+    /// from "no models" -- the picker shows no model control at all rather
+    /// than an empty menu implying a choice that does not exist.
+    pub models: Vec<AgentModelChoice>,
+    /// Thinking-effort levels this tool accepts, lowest first, spelled the way
+    /// the tool spells them. Empty when it cannot be asked.
+    pub effort_levels: Vec<String>,
+}
+
+/// One model a tool offers.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentModelChoice {
+    /// Passed to the tool verbatim. Never shown as-is.
+    pub id: String,
+    /// What the user sees.
+    pub display_name: String,
 }
 
 /// What the picker needs to render itself for one chat.
@@ -184,6 +203,22 @@ fn row(spec: &'static registry::AgentSpec) -> AgentProvider {
             .copied()
             .unwrap_or(spec.id)
             .to_string(),
+        models: match spec.model {
+            crate::ai::agent::registry::ModelSupport::Flag { choices, .. } => choices
+                .iter()
+                .map(|c| AgentModelChoice {
+                    id: c.id.to_string(),
+                    display_name: c.display_name.to_string(),
+                })
+                .collect(),
+            crate::ai::agent::registry::ModelSupport::None => Vec::new(),
+        },
+        effort_levels: match spec.effort {
+            crate::ai::agent::registry::EffortSupport::Flag { levels, .. } => {
+                levels.iter().map(|l| (*l).to_string()).collect()
+            }
+            crate::ai::agent::registry::EffortSupport::None => Vec::new(),
+        },
     }
 }
 
@@ -258,6 +293,8 @@ mod tests {
             preferred_provider: None,
             preferred_mode: None,
             preferred_team: None,
+            preferred_model: None,
+            preferred_effort: None,
         };
         write_session(&root, &AgentSession::new(header)).expect("write");
         (dir, root, "s-1".to_string())

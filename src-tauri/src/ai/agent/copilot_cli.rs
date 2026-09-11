@@ -412,6 +412,8 @@ mod tests {
                 network: &[],
                 write: &[],
             },
+            model: registry::ModelSupport::None,
+            effort: registry::EffortSupport::None,
             homepage_url: "https://example.invalid",
             install_hint: "",
 

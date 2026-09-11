@@ -3264,10 +3264,16 @@ async agentSessionRename(sessionId: string, title: string) : Promise<Result<Upda
  * Save the controls that belong to one chat. Keeping them beside the
  * session, rather than in pane-local React state, prevents Split View from
  * carrying one chat's authority or provider into another chat.
+ * 
+ * `model` and `effort` are `None` when the chat has expressed no preference,
+ * and are written through as-is rather than defaulted here: absent means
+ * "follow whatever the tool is set up for", which keeps following it when the
+ * tool's own default changes. Naming the current default instead would pin
+ * it silently.
  */
-async agentSessionSetPreferences(sessionId: string, mode: string, team: string, provider: string | null) : Promise<Result<UpdateSessionOutcome, string>> {
+async agentSessionSetPreferences(sessionId: string, mode: string, team: string, provider: string | null, model: string | null, effort: string | null) : Promise<Result<UpdateSessionOutcome, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("agent_session_set_preferences", { sessionId, mode, team, provider }) };
+    return { status: "ok", data: await TAURI_INVOKE("agent_session_set_preferences", { sessionId, mode, team, provider, model, effort }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -4016,6 +4022,18 @@ sizeBytes: number | null;
  */
 state: ResultState | null }
 /**
+ * One model a tool offers.
+ */
+export type AgentModelChoice = { 
+/**
+ * Passed to the tool verbatim. Never shown as-is.
+ */
+id: string; 
+/**
+ * What the user sees.
+ */
+displayName: string }
+/**
  * One row in the provider picker.
  */
 export type AgentProvider = { 
@@ -4079,7 +4097,20 @@ installHint: string;
  * binary name and a product name are routinely three different strings.
  * When detection is wrong this is the line that explains why.
  */
-binaryName: string }
+binaryName: string; 
+/**
+ * Models this tool can be asked for, best-known first.
+ * 
+ * Empty means the tool takes no model flag, which is a different fact
+ * from "no models" -- the picker shows no model control at all rather
+ * than an empty menu implying a choice that does not exist.
+ */
+models: AgentModelChoice[]; 
+/**
+ * Thinking-effort levels this tool accepts, lowest first, spelled the way
+ * the tool spells them. Empty when it cannot be asked.
+ */
+effortLevels: string[] }
 /**
  * What the picker needs to render itself for one chat.
  */
@@ -4224,7 +4255,23 @@ preferredMode?: string | null;
 /**
  * The last team shape chosen for this chat (`solo` or `helpers`).
  */
-preferredTeam?: string | null }
+preferredTeam?: string | null; 
+/**
+ * The model this chat asks its tool for, as the tool spells it.
+ * 
+ * `None` means "whatever the tool is set up to use" and is NOT the same
+ * as naming the tool's current default: a default can change under the
+ * user, and a chat that never expressed a preference should follow it
+ * rather than pin the value it happened to have on the day it started.
+ * A string rather than an enum for the same reason the two above are:
+ * the list lives in the agent registry and grows without a schema bump.
+ */
+preferredModel?: string | null; 
+/**
+ * How hard this chat asks its tool to think, as the tool spells it.
+ * `None` means the tool decides, exactly as with `preferred_model`.
+ */
+preferredEffort?: string | null }
 /**
  * What one execution (the lead, or a single helper) reported. Every figure
  * is optional for the same reason as on [`SessionUsage`]: absent means the

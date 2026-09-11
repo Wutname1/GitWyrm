@@ -20,6 +20,7 @@ import { OperatingModeControl } from './OperatingModeControl'
 import { cn } from '@/lib/utils'
 import { NewChatLanding } from './NewChatLanding'
 import { ProviderControl } from './ProviderControl'
+import { ModelControl } from './ModelControl'
 import { useStatus } from '@/hooks/useGitQueries'
 import { buildStarters } from '@/lib/agentDeskStarters'
 import { TeamShapeControl } from './TeamShapeControl'
@@ -115,6 +116,10 @@ export function SessionComposer({
   // default tool's id, so a chat nobody gave a preference keeps following the
   // default if it ever changes.
   const [provider, setProvider] = useState<string | null>(header?.preferredProvider ?? null)
+  // `null` is "whatever the tool is set up for", never resolved to the tool's
+  // current default -- see `agent_session_set_preferences`.
+  const [model, setModel] = useState<string | null>(header?.preferredModel ?? null)
+  const [effort, setEffort] = useState<string | null>(header?.preferredEffort ?? null)
   const [providerOpen, setProviderOpen] = useState(false)
   // Its own flag. While a chat is empty BOTH the new-chat screen and the
   // compact pill below it are mounted, each with a `ProviderControl`; one
@@ -206,7 +211,13 @@ export function SessionComposer({
     setChangingProject(false)
   }, [sessionId])
 
-  const savePreferences = (nextMode: ComposerMode, nextTeam: ComposerTeam, nextProvider: string | null) => {
+  const savePreferences = (
+    nextMode: ComposerMode,
+    nextTeam: ComposerTeam,
+    nextProvider: string | null,
+    nextModel: string | null = model,
+    nextEffort: string | null = effort
+  ) => {
     if (!sessionId) return
     const targetSessionId = sessionId
     // Keep rapid clicks in click order. Otherwise a slow first disk write can
@@ -214,7 +225,14 @@ export function SessionComposer({
     preferenceWrite.current = preferenceWrite.current
       .then(async () => {
         const outcome = unwrap(
-          await commands.agentSessionSetPreferences(targetSessionId, nextMode, nextTeam, nextProvider)
+          await commands.agentSessionSetPreferences(
+            targetSessionId,
+            nextMode,
+            nextTeam,
+            nextProvider,
+            nextModel,
+            nextEffort
+          )
         )
         if (outcome.kind === 'updated') {
           void qc.invalidateQueries({ queryKey: keys.agentSession(targetSessionId) })
@@ -267,7 +285,22 @@ export function SessionComposer({
   }
   const changeProvider = (next: string | null) => {
     setProvider(next)
-    savePreferences(mode, team, next)
+    // The model belongs to the tool that offers it, so switching tools drops a
+    // model the new one has never heard of rather than carrying a name it
+    // would refuse at launch.
+    setModel(null)
+    setEffort(null)
+    savePreferences(mode, team, next, null, null)
+    notePendingIfRunning()
+  }
+  const changeModel = (next: string | null) => {
+    setModel(next)
+    savePreferences(mode, team, provider, next, effort)
+    notePendingIfRunning()
+  }
+  const changeEffort = (next: string | null) => {
+    setEffort(next)
+    savePreferences(mode, team, provider, model, next)
     notePendingIfRunning()
   }
 
@@ -588,6 +621,16 @@ export function SessionComposer({
             onChange={changeProvider}
             open={providerOpen}
             onOpenChange={setProviderOpen}
+          />
+
+          {/* Each renders only when the chosen tool can actually be told. */}
+          <ModelControl
+            sessionId={sessionId}
+            provider={provider}
+            model={model}
+            onModelChange={changeModel}
+            effort={effort}
+            onEffortChange={changeEffort}
           />
 
           <span className="flex-1" />

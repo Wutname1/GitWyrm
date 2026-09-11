@@ -743,6 +743,8 @@ mod tests {
             preferred_provider: None,
             preferred_mode: None,
             preferred_team: None,
+        preferred_model: None,
+        preferred_effort: None,
         }
     }
 

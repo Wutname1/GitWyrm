@@ -95,6 +95,27 @@ pub struct CliAgent {
     /// Which tool this is. Carried so [`Self::connect`] starts it the way that
     /// tool expects and words a failure with that tool's name.
     spec: &'static AgentSpec,
+    /// The model this chat asked for, as the tool spells it, or `None` to let
+    /// the tool use whatever it is set up for.
+    model: Option<String>,
+    /// How hard this chat asked the tool to think, or `None` to let it decide.
+    effort: Option<String>,
+}
+
+impl CliAgent {
+    /// The same agent, asked for a particular model and thinking effort.
+    ///
+    /// Separate from [`Self::discover_for`] so discovery keeps answering one
+    /// question -- which tool can do this job -- and tuning stays a property
+    /// of the chat rather than of the policy. Either value being unknown to
+    /// this tool is dropped at the launch line rather than forwarded, because
+    /// these tools exit on an argument they do not recognise and a chat would
+    /// simply appear to go nowhere.
+    pub fn tuned(mut self, model: Option<String>, effort: Option<String>) -> Self {
+        self.model = model;
+        self.effort = effort;
+        self
+    }
 }
 
 impl CliAgent {
@@ -135,6 +156,10 @@ impl CliAgent {
                     program: PathBuf::from(path),
                     cwd,
                     spec,
+                    // Discovery answers which tool; tuning arrives after, via
+                    // `tuned`, from the chat that is about to run.
+                    model: None,
+                    effort: None,
                 })
             }
             CliState::TooOld { version, minimum } => Err(AgentError::TransportUnavailable {
@@ -199,14 +224,24 @@ impl CliAgent {
         match self.spec.protocol {
             super::registry::Protocol::Acp => {
                 let mut conn =
-                    AcpConnection::spawn_agent(self.spec, &self.program, &self.cwd, &denied)
-                        .await?;
+                    AcpConnection::spawn_agent(
+                        self.spec,
+                        &self.program,
+                        &self.cwd,
+                        &denied,
+                        self.model.as_deref(),
+                        self.effort.as_deref(),
+                    )
+                    .await?;
                 conn.start_session(&self.cwd).await?;
                 Ok(super::wire::Connection::Acp(conn))
             }
             super::registry::Protocol::CodexAppServer => {
-                let args: Vec<String> =
-                    self.spec.launch_args(&denied).into_iter().collect();
+                let args: Vec<String> = self
+                    .spec
+                    .launch_args_tuned(&denied, self.model.as_deref(), self.effort.as_deref())
+                    .into_iter()
+                    .collect();
                 let mut conn =
                     super::codex::CodexConnection::spawn(&self.program, &self.cwd, &args).await?;
                 // Codex bounds the whole session rather than naming tools, so
@@ -217,8 +252,11 @@ impl CliAgent {
                 Ok(super::wire::Connection::Codex(conn))
             }
             super::registry::Protocol::ClaudeStreamJson => {
-                let args: Vec<String> =
-                    self.spec.launch_args(&denied).into_iter().collect();
+                let args: Vec<String> = self
+                    .spec
+                    .launch_args_tuned(&denied, self.model.as_deref(), self.effort.as_deref())
+                    .into_iter()
+                    .collect();
                 let read_only = denied.contains(&"write");
                 let conn = super::claude::ClaudeConnection::spawn(
                     &self.program,

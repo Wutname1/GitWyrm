@@ -15,6 +15,8 @@ const READY: AgentProvider = {
   homepageUrl: 'https://example.invalid/install',
   installHint: 'npm install -g example',
   binaryName: 'copilot',
+  models: [],
+  effortLevels: [],
 }
 
 describe('blockedReason', () => {
