@@ -79,8 +79,22 @@ export function NewChatLanding({
   const startedFrom = describeSource(source)
   const teamBlocked = isTeamBlocked(mode)
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-6 px-6 py-8">
-      <div className="flex flex-col items-center gap-1.5 text-center">
+    // `min-h-0` and its own scrollbar, both load-bearing. A flex child
+    // defaults to `min-height: auto`, which refuses to shrink below its
+    // content -- so on a short window this panel grew the pane instead of
+    // fitting inside it, and the overflow pushed the pane header, the
+    // toolbar and the top of the sidebar off screen.
+    //
+    // Centred by `auto` margins on the children rather than
+    // `justify-center`, because centring content taller than its box
+    // overflows BOTH edges and the top edge is the one a scrollbar cannot
+    // reach. Auto margins collapse to zero once space runs out, so the
+    // panel centres while it fits and scrolls from the top once it does
+    // not. (`justify-content: safe center` says this directly but is not
+    // dependable in the shipped webview, and a dropped declaration would
+    // leave no centring at all.)
+    <div className="flex min-h-0 flex-1 flex-col items-center gap-6 overflow-y-auto px-6 py-8">
+      <div className="mt-auto flex flex-col items-center gap-1.5 text-center">
         <span className="flex size-9 items-center justify-center rounded-full bg-soft">
           <FolderGit2 size={17} className="text-accent-text" aria-hidden />
         </span>
@@ -88,7 +102,7 @@ export function NewChatLanding({
         <p className="max-w-sm text-xs leading-relaxed text-muted-foreground">Describe the goal below.</p>
       </div>
 
-      <div className="flex w-full max-w-lg flex-col gap-4">
+      <div className="mb-auto flex w-full max-w-lg flex-col gap-4">
         <Section label="Which project?">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
