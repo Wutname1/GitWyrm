@@ -143,6 +143,16 @@ const EXPECTED: &[&str] = &[
     // indistinguishable from each other because the host deliberately answers
     // 404 rather than admitting the thing exists.
     "could not find that. it may be private",
+    // The SAME 404 in the fetch path's wording, which is built separately in
+    // commands/remote.rs and never matched the needle above. It has been filing
+    // as an error since the phrasing landed on 2026-08-28 - caught when a fetch
+    // 404 and an unrelated file lock arrived three minutes apart on the same repo
+    // (GITWYRM-BACKEND-2) and only the lock had been accounted for.
+    //
+    // Matched on the distinctive half. "could not find" alone is far too broad -
+    // it would swallow "could not find commit <sha>" and the object-not-found
+    // faults that real_failures_are_still_reported pins as must-report.
+    "with your sign-in. it may have been moved or renamed",
     // The same condition in git's own words rather than the API's. A push or
     // fetch to a repo the host will not admit exists prints
     // `fatal: repository '<url>' not found`, and the host answers 404 whether it
@@ -320,6 +330,22 @@ mod tests {
     /// Verbatim from GITWYRM-BACKEND-2, and reproduced locally to confirm the
     /// shape: git prints `remote: Repository not found.` followed by
     /// `fatal: repository '<url>' not found`.
+    /// The fetch path phrases the same 404 differently, and built its own
+    /// wording in commands/remote.rs without ever reaching the needle the API
+    /// path uses. Both must classify as refusals.
+    #[test]
+    fn a_fetch_404_is_expected_in_its_own_wording() {
+        assert!(is_expected(
+            "Command failed: git fetch failed: Could not find https://github.com/acme/thing.git with your sign-in. It may have been moved or renamed, or your account may not have access to it."
+        ));
+        assert!(is_expected(
+            "Could not find this repository with your sign-in. It may have been moved or renamed, or your account may not have access to it."
+        ));
+        // The needle must not reach a real lookup failure that merely says
+        // "could not find".
+        assert!(!is_expected("could not find commit 0123456789abcdef"));
+    }
+
     #[test]
     fn a_missing_remote_repository_is_expected() {
         assert!(is_expected(
