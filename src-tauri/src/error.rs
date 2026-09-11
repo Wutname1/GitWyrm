@@ -191,6 +191,12 @@ const EXPECTED: &[&str] = &[
     // it would swallow "could not find commit <sha>" and the object-not-found
     // faults that real_failures_are_still_reported pins as must-report.
     "with your sign-in. it may have been moved or renamed",
+    // Staging or discarding individual lines when the file's diff is already
+    // empty - it was staged from elsewhere, or changed underneath the view
+    // between render and click. The selection simply no longer applies; the user
+    // re-reads the file and tries again. Nothing here is ours to fix, and the
+    // sentence already says what happened.
+    "no changes found for this file",
     // The same condition in git's own words rather than the API's. A push or
     // fetch to a repo the host will not admit exists prints
     // `fatal: repository '<url>' not found`, and the host answers 404 whether it
@@ -397,6 +403,16 @@ mod tests {
     /// The fetch path phrases the same 404 differently, and built its own
     /// wording in commands/remote.rs without ever reaching the needle the API
     /// path uses. Both must classify as refusals.
+    /// A line-level stage/discard against a file whose diff has gone empty. The
+    /// view raced the working tree; the user retries.
+    #[test]
+    fn a_stale_line_selection_is_expected() {
+        assert!(is_expected("Command failed: no changes found for this file"));
+        assert!(is_expected("mutation failed [error]: no changes found for this file"));
+        // Must not reach a real diff failure that merely mentions changes.
+        assert!(!is_expected("git error: could not read changes from the index"));
+    }
+
     #[test]
     fn a_fetch_404_is_expected_in_its_own_wording() {
         assert!(is_expected(
