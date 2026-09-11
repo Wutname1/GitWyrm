@@ -679,8 +679,18 @@ export function ConversationPane({
 
       {/* tasks.md 8.2: hiding the source bars hides only this banner. The
           pane's own Source button (in `headerSlot`) is untouched, so the
-          same information is always one click away. */}
-      {showSourceBanner && (
+          same information is always one click away.
+
+          A `manual` chat is skipped. Every other kind names the thing the
+          work came from -- an issue, a PR, a spec task -- which is the whole
+          point of the row. `manual` has no such thing, so the banner read
+          "Started without a specific issue, PR, or task" above every chat
+          anyone had ever typed into: a permanent row stating an absence,
+          taking height from the transcript on the chats that need it most.
+          The new-chat screen still offers to link a source, which is where
+          that sentence belongs -- there it is an invitation, here it was
+          only a label. */}
+      {showSourceBanner && session.header.source.kind !== 'manual' && (
         <SessionSourceBanner
           sessionId={sessionId}
           source={session.header.source}
@@ -689,8 +699,14 @@ export function ConversationPane({
         />
       )}
 
-      <div className="relative flex min-h-0 flex-1">
-        <div ref={transcriptRef} className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-3 py-3">
+      {/* `flex-none` while the chat is empty, and only then. The composer
+          takes `flex-1` in that state so the new-chat choices get the room
+          (see `SessionComposer`), but this wrapper was claiming `flex-1`
+          too -- so the two split the pane and the empty transcript held a
+          tall blank band above the very form it was making space for. One
+          of them has to yield, and it is the one with nothing in it. */}
+      <div className={cn('relative flex min-h-0', messages.length === 0 ? 'flex-none' : 'flex-1')}>
+        <div ref={transcriptRef} className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-3 py-3 empty:p-0">
           {messages.length === 0 ? (
             /* Nothing here on purpose: `SessionComposer` grows into this space
                with the mode, team and AI choices while a chat is empty. Two
