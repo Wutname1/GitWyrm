@@ -1272,7 +1272,17 @@ fn launch_helper(
 
         crate::airun::cli_run::run_task(
             &agent,
-            &format!("{}\n\nThe task:\n{}", crate::ai::agent::run::SYSTEM_PROMPT, prompt),
+            &format!(
+                "{}\n\nThe task:\n{}",
+                // A helper has a bounded job from its lead, never a spec task
+                // of its own -- the checkbox, where there is one, belongs to
+                // the lead's session and is ticked once for the whole graph.
+                crate::ai::agent::run::system_prompt(
+                    crate::ai::agent::run::TaskShape::JustAsked,
+                    can_write,
+                ),
+                prompt
+            ),
             sink,
             answer_rx,
             policy,
@@ -2773,7 +2783,12 @@ fn launch_lead_review(
             })
         };
 
-        crate::airun::cli_run::run_task(&agent, &format!("{}\n\nThe task:\n{}", crate::ai::agent::run::SYSTEM_PROMPT, prompt), sink, answer_rx, policy, true, cancel_handle, None, Some(integration_worktree.clone()), String::new()).await;
+        // The lead's own review turn over the combined work. It reads and
+        // judges rather than implementing a task, so there is no checkbox for
+        // it either.
+        let review_system_prompt =
+            crate::ai::agent::run::system_prompt(crate::ai::agent::run::TaskShape::JustAsked, true);
+        crate::airun::cli_run::run_task(&agent, &format!("{review_system_prompt}\n\nThe task:\n{prompt}"), sink, answer_rx, policy, true, cancel_handle, None, Some(integration_worktree.clone()), String::new()).await;
 
         crate::commands::airun::gate_answers()
             .lock()

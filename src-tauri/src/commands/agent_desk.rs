@@ -1716,7 +1716,21 @@ pub(crate) fn start_execution_at(
             &agent,
             &format!(
                 "{}\n\nThe task:\n{}",
-                crate::ai::agent::run::SYSTEM_PROMPT,
+                // Built from what this run actually is. Telling a blank chat
+                // it was "on one task from a spec", and that it finishes by
+                // ticking a checkbox in the change's tasks.md, described a
+                // file that does not exist -- and an agent asked "who are
+                // you?" spent its whole reply saying so instead of working.
+                crate::ai::agent::run::system_prompt(
+                    match session.header.source {
+                        crate::agentdesk::model::SessionSource::OpenSpecChange { .. }
+                        | crate::agentdesk::model::SessionSource::OpenSpecTask { .. } => {
+                            crate::ai::agent::run::TaskShape::SpecTask
+                        }
+                        _ => crate::ai::agent::run::TaskShape::JustAsked,
+                    },
+                    intent_policy.can_write,
+                ),
                 prompt
             ),
             sink,
