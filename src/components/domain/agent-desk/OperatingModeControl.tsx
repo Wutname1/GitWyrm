@@ -1,14 +1,25 @@
+import { Check, ChevronUp, ShieldCheck } from 'lucide-react'
 import { MODE_NOTES, READ_ONLY_REASON, isModeBlocked, type ComposerMode } from '@/lib/agentDeskComposer'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 
 /**
- * Ask / Plan / Auto operating-mode pills, plus a live plain-language note for
- * whichever mode is selected (tasks.md 6.1).
+ * How much the agent may do, as one chip beside the other composer controls.
  *
- * Structure mirrors the real mockup's `.ag-mode-row` (`role="group"`, a
- * `.ag-mode-label`, three `.ag-mode` buttons, a trailing `.ag-mode-note`) --
- * see `docs/agent-desk/agent-desk-mockup.html`. Colors come from the app's
- * own tokens rather than the mockup's `--ag-*` palette.
+ * Was a row: the label "Mode", three always-visible pills, and a note off to
+ * the right explaining whichever was selected. That put the three modes and a
+ * sentence about them on screen at all times, above a message box, and the
+ * first screen showed the same three choices AGAIN as large described cards.
+ *
+ * A chip instead, for the reason most people do not use this: the default is
+ * Auto and stays Auto. Making the exception cost one click, and the rule cost
+ * nothing, is the right trade -- and it matches every other control down here
+ * (team, AI), so the composer reads as one row of chips rather than a row plus
+ * a settings strip.
+ *
+ * The explanation did not disappear; it moved to where a choice is being made.
+ * Each mode carries its own note inside the menu, which is also the only place
+ * the notes can be read side by side.
  */
 export function OperatingModeControl({
   mode,
@@ -30,42 +41,49 @@ export function OperatingModeControl({
   canWrite?: boolean
 }) {
   return (
-    <div className="mb-1.5 flex flex-wrap items-center gap-1 px-0.5" role="group" aria-label="Agent operating mode">
-      <span className="mr-0.5 text-2xs text-muted-foreground">Mode</span>
-      {(['Ask', 'Plan', 'Auto'] as const).map((m) => {
-        const blocked = isModeBlocked(m, canWrite)
-        return (
-          <button
-            key={m}
-            type="button"
-            // `aria-disabled`, not `disabled`, for the same reason
-            // `ProviderControl` does it: a truly disabled button leaves the tab
-            // order, so the people who most need the reason read aloud are the
-            // ones who never reach it.
-            aria-disabled={blocked}
-            title={blocked ? READ_ONLY_REASON : undefined}
-            onClick={() => {
-              if (!blocked) onChange(m)
-            }}
-            aria-pressed={mode === m && !blocked}
-            className={cn(
-              // A tint alone is not a selected state (DESIGN.md), and this is
-              // the control that decides whether an agent may change files.
-              'rounded border px-1.5 py-0.5 text-2xs font-semibold',
-              blocked && 'cursor-not-allowed text-muted-foreground/60',
-              !blocked && mode === m
-                ? 'border-primary/60 bg-soft text-accent-text'
-                : 'border-transparent text-sub',
-              !blocked && mode !== m && 'hover:bg-panel3 hover:text-foreground'
-            )}
-          >
-            {m}
-          </button>
-        )
-      })}
-      <span className="ml-auto min-w-0 truncate text-2xs text-muted-foreground">
-        {canWrite ? MODE_NOTES[mode] : READ_ONLY_REASON}
-      </span>
-    </div>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          title={canWrite ? MODE_NOTES[mode] : READ_ONLY_REASON}
+          className="flex flex-none items-center gap-1 rounded px-1.5 py-0.5 text-2xs font-semibold text-sub hover:bg-panel3 hover:text-foreground"
+        >
+          <ShieldCheck size={12} aria-hidden />
+          {mode}
+          <ChevronUp size={11} aria-hidden />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side="top" align="start" className="w-[min(22rem,calc(100vw-3rem))]">
+        {(['Ask', 'Plan', 'Auto'] as const).map((m) => {
+          const blocked = isModeBlocked(m, canWrite)
+          return (
+            <DropdownMenuItem
+              key={m}
+              // `aria-disabled`, not `disabled`, for the same reason
+              // `ProviderControl` does it: a truly disabled item leaves the tab
+              // order, so the people who most need the reason read aloud are
+              // the ones who never reach it.
+              aria-disabled={blocked}
+              onSelect={(event) => {
+                if (blocked) {
+                  event.preventDefault()
+                  return
+                }
+                onChange(m)
+              }}
+              className={cn('items-start gap-2', blocked && 'cursor-not-allowed opacity-70')}
+            >
+              <span className="min-w-0 flex-1">
+                <span className="block text-2xs font-semibold text-foreground">{m}</span>
+                <span className="block text-2xs leading-snug text-muted-foreground">
+                  {blocked ? READ_ONLY_REASON : MODE_NOTES[m]}
+                </span>
+              </span>
+              {mode === m && !blocked && <Check size={12} className="mt-0.5 flex-none text-accent-text" aria-hidden />}
+            </DropdownMenuItem>
+          )
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

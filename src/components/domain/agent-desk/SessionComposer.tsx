@@ -20,6 +20,8 @@ import { OperatingModeControl } from './OperatingModeControl'
 import { cn } from '@/lib/utils'
 import { NewChatLanding } from './NewChatLanding'
 import { ProviderControl } from './ProviderControl'
+import { useStatus } from '@/hooks/useGitQueries'
+import { buildStarters } from '@/lib/agentDeskStarters'
 import { TeamShapeControl } from './TeamShapeControl'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useOpenRepo } from '@/hooks/useRepoActions'
@@ -68,6 +70,17 @@ import type { ChatProjectChoice } from './NewChatLanding'
  * fully independent drafts for free -- there is nothing pane-local to keep
  * in sync.
  */
+/**
+ * The last segment of a path, for naming a folder somebody picked from disk.
+ *
+ * Handles both separators and a trailing one, because a Windows folder picker
+ * can return either shape and `C:/code/` must not read as an empty name.
+ */
+function folderName(path: string): string {
+  const parts = path.split(/[\/]+/).filter(Boolean)
+  return parts[parts.length - 1] ?? path
+}
+
 export function SessionComposer({
   sessionId,
   header,
@@ -108,6 +121,27 @@ export function SessionComposer({
   // shared flag would have opened two copies of the list at once, in two
   // different places.
   const [landingProviderOpen, setLandingProviderOpen] = useState(false)
+
+  /**
+   * Somewhere to start, from what is really in this repository.
+   *
+   * Only asked for while the chat is empty -- this is the one screen it feeds,
+   * and a status walk on every open chat would be a cost for nothing.
+   */
+  const repoStatus = useStatus(isEmpty ? (header?.repoId ?? null) : null)
+  const starters = useMemo(() => {
+    if (!repoStatus.data) return []
+    return buildStarters({
+      uncommittedFileCount: repoStatus.data.staged.length + repoStatus.data.unstaged.length,
+      // `WorkingStatus` carries the changed files and nothing else. The branch
+      // and its unpushed count would each need their own query, which is not
+      // worth a round trip for one more suggestion -- and absent is passed as
+      // absent here rather than as zero, so `buildStarters` stays silent about
+      // commits nobody counted.
+      branchName: null,
+      aheadCount: null,
+    })
+  }, [repoStatus.data])
   // Source-kickoffs 2.4/5.3: the last failed start stays on screen as a card
   // until the person acts on it or closes it. A toast alone was gone before
   // anyone who stepped away could read it, leaving a saved message and no
@@ -444,22 +478,23 @@ export function SessionComposer({
           gives way to the transcript. */}
       {isEmpty && (
         <NewChatLanding
-          mode={mode}
-          onModeChange={changeMode}
-          team={team}
-          onTeamChange={changeTeam}
-          providerLabel={providerLabel}
-          sessionId={sessionId}
-          provider={provider}
-          onProviderChange={changeProvider}
-          providerOpen={landingProviderOpen}
-          onProviderOpenChange={setLandingProviderOpen}
           projectPath={header?.repoPath ?? ''}
           projectName={header?.repoName ?? 'Current project'}
           projects={projects}
           onProjectChange={(project) => void changeProject(project)}
+          onProjectPathChosen={(path) => void changeProject({ path, name: folderName(path) })}
           projectChanging={changingProject}
-          canWrite={canWrite}
+          starters={starters}
+          onStarterPick={(starter) => {
+            setDraft(starter.prompt)
+            // Straight into the box with the caret at the end: a starter is a
+            // first draft to edit, not a command that fires on its own.
+            const box = document.getElementById(`agent-desk-composer-${sessionId ?? 'none'}`)
+            if (box instanceof HTMLTextAreaElement) {
+              box.focus()
+              box.setSelectionRange(starter.prompt.length, starter.prompt.length)
+            }
+          }}
           source={header?.source ?? null}
         />
       )}
@@ -474,8 +509,6 @@ export function SessionComposer({
         </div>
       )}
       <div className="rounded-lg border border-border bg-panel2 p-1.5">
-        <OperatingModeControl mode={mode} onChange={changeMode} canWrite={canWrite} />
-
         <Textarea
           // Stable id so "New chat" can put the caret straight in here.
           // Focusing the surrounding wrapper only moved focus near the box,
@@ -538,10 +571,10 @@ export function SessionComposer({
             would have neither -- and the team defaults to a team, so that was
             the ordinary case on every read-only chat rather than a rare one.
           */}
-          <span className="flex flex-none items-center gap-1 text-2xs text-muted-foreground">
-            <Sparkles size={12} className="text-accent-text" />
-            {team === 'solo' || isTeamBlocked(mode) ? 'One agent' : 'A lead agent, up to 3 helpers'}
-          </span>
+          {/* The mode chip sits first: it is the one control here that decides
+              whether the agent may touch files, and it reads left-to-right as
+              "how much / how many / which tool". */}
+          <OperatingModeControl mode={mode} onChange={changeMode} canWrite={canWrite} />
 
           <TeamShapeControl team={team} mode={mode} onChange={changeTeam} open={teamOpen} onOpenChange={setTeamOpen} />
 

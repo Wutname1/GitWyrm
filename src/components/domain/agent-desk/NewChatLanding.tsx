@@ -1,14 +1,6 @@
-import { Bot, Check, ChevronDown, FolderGit2, GitFork, Link2, User } from 'lucide-react'
+import { useState } from 'react'
+import { ChevronDown, FolderGit2, FolderOpen, Link2 } from 'lucide-react'
 import type { SessionSource } from '@/lib/bindings'
-import type { ComposerMode, ComposerTeam } from '@/lib/agentDeskComposer'
-import {
-  MODE_NOTES,
-  READ_ONLY_REASON,
-  TEAM_NEEDS_MODE_REASON,
-  isModeBlocked,
-  isTeamBlocked,
-} from '@/lib/agentDeskComposer'
-import { ProviderControl } from './ProviderControl'
 import { sourceKindLabel } from '@/lib/agentSessionGrouping'
 import { adapterDisplayName } from '@/lib/agentImportDisplay'
 import { cn } from '@/lib/utils'
@@ -19,256 +11,36 @@ export interface ChatProjectChoice {
   name: string
 }
 
-/**
- * What a chat with nothing in it yet shows.
- *
- * The order is the argument. Any agent client can offer a mode, a team size
- * and a model picker, and leading with those made a new chat look like every
- * other one. What only this app knows is which repository the chat belongs
- * to and what started it (an issue, a pull request, a spec task, a failed
- * check), so those come first and largest. Then the goal, which is the
- * textarea directly below this landing. The AI tool comes after that, and
- * how much authority the agent has is last and quietest: it is a dial on the
- * run, not the point of it.
- *
- * Not a wizard. Every control here is the same state the composer edits, so
- * choosing nothing and simply typing is a complete path -- the defaults are
- * the ones the session was created with.
- */
-export function NewChatLanding({
-  mode,
-  onModeChange,
-  team,
-  onTeamChange,
-  providerLabel,
-  sessionId,
-  provider,
-  onProviderChange,
-  providerOpen,
-  onProviderOpenChange,
-  projectPath,
-  projectName,
-  projects,
-  onProjectChange,
-  projectChanging = false,
-  canWrite = true,
-  source,
-}: {
-  mode: ComposerMode
-  onModeChange: (mode: ComposerMode) => void
-  team: ComposerTeam
-  onTeamChange: (team: ComposerTeam) => void
-  /** The chosen tool's name, or the default's, already resolved. */
-  providerLabel: string
-  sessionId: string | null
-  provider: string | null
-  onProviderChange: (provider: string | null) => void
-  providerOpen: boolean
-  onProviderOpenChange: (open: boolean) => void
-  projectPath: string
-  projectName: string
-  projects: ChatProjectChoice[]
-  onProjectChange: (project: ChatProjectChoice) => void
-  /** True while a project change is still opening, so the control can say so. */
-  projectChanging?: boolean
-  /**
-   * Whether this chat's purpose allows changing files at all.
-   *
-   * The composer's own mode pills already refuse Plan and Auto for a chat
-   * that only reads -- a Review or Explain chat is read-only in the engine,
-   * and mode can never widen what the intent allows. These cards took no
-   * such prop, so they sat an inch above those pills offering the same two
-   * modes as freely selectable: clicking one lit it up while the engine
-   * would refuse it, and the two controls disagreed on screen at once.
-   */
-  canWrite?: boolean
-  /** What started this chat. `null` while the session is still loading. */
-  source: SessionSource | null
-}) {
-  const startedFrom = describeSource(source)
-  const teamBlocked = isTeamBlocked(mode)
-  return (
-    // `min-h-0` and its own scrollbar, both load-bearing. A flex child
-    // defaults to `min-height: auto`, which refuses to shrink below its
-    // content -- so on a short window this panel grew the pane instead of
-    // fitting inside it, and the overflow pushed the pane header, the
-    // toolbar and the top of the sidebar off screen.
-    //
-    // Centred by `auto` margins on the children rather than
-    // `justify-center`, because centring content taller than its box
-    // overflows BOTH edges and the top edge is the one a scrollbar cannot
-    // reach. Auto margins collapse to zero once space runs out, so the
-    // panel centres while it fits and scrolls from the top once it does
-    // not. (`justify-content: safe center` says this directly but is not
-    // dependable in the shipped webview, and a dropped declaration would
-    // leave no centring at all.)
-    <div className="flex min-h-0 flex-1 flex-col items-center gap-6 overflow-y-auto px-6 py-8">
-      <div className="mt-auto flex flex-col items-center gap-1.5 text-center">
-        <span className="flex size-9 items-center justify-center rounded-full bg-soft">
-          <FolderGit2 size={17} className="text-accent-text" aria-hidden />
-        </span>
-        <h2 className="text-base font-semibold text-foreground">New chat in {projectName}</h2>
-        <p className="max-w-sm text-xs leading-relaxed text-muted-foreground">Describe the goal below.</p>
-      </div>
-
-      <div className="mb-auto flex w-full max-w-lg flex-col gap-4">
-        <Section label="Which project?">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                // Opening a project arms a watcher over the whole tree, which
-                // can take seconds. Without this the click did nothing
-                // visible until it finished.
-                disabled={projectChanging}
-                className="flex w-full items-center gap-2.5 rounded-md border border-border bg-panel2 px-3 py-2.5 text-left hover:bg-panel3 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <FolderGit2 size={17} className="flex-none text-accent-text" aria-hidden />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-semibold text-foreground">{projectName}</span>
-                  <span className="block truncate text-2xs text-muted-foreground">{projectPath}</span>
-                </span>
-                <span className="text-2xs text-muted-foreground">{projectChanging ? 'Opening…' : 'Change'}</span>
-                <ChevronDown size={12} className="text-muted-foreground" aria-hidden />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-[min(30rem,calc(100vw-3rem))]">
-              {projects.map((project) => (
-                <DropdownMenuItem key={project.path} onSelect={() => onProjectChange(project)}>
-                  <FolderGit2 />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate">{project.name}</span>
-                    <span className="block truncate text-2xs text-muted-foreground">{project.path}</span>
-                  </span>
-                  {project.path.toLowerCase() === projectPath.toLowerCase() && <Check size={13} />}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </Section>
-
-        {/* Only shown when something concrete started the chat. A plain
-            manual chat has nothing to say here, and an empty "Started from:
-            Chat" row would be noise on the most common path. */}
-        {startedFrom && (
-          <Section label="What started this?">
-            <div className="flex items-center gap-2 rounded-md border border-border px-3 py-2">
-              <Link2 size={15} className="flex-none text-muted-foreground" aria-hidden />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-xs font-medium text-foreground">{startedFrom.title}</span>
-                {startedFrom.detail && (
-                  <span className="block truncate text-2xs text-muted-foreground">{startedFrom.detail}</span>
-                )}
-              </span>
-            </div>
-          </Section>
-        )}
-
-        <Section label="Which AI?">
-          {/* The list hangs off THIS button. It used to reach over and open
-              the composer's copy of the same control, so it appeared at the
-              bottom of the window, over the message box, nowhere near the
-              row that had just been pressed. */}
-          <ProviderControl
-            sessionId={sessionId}
-            provider={provider}
-            onChange={onProviderChange}
-            open={providerOpen}
-            onOpenChange={onProviderOpenChange}
-            side="bottom"
-            trigger={
-              <button
-                type="button"
-                className="flex w-full items-center gap-2 rounded-md border border-border px-3 py-2 text-left hover:bg-panel3"
-              >
-                <Bot size={15} className="flex-none text-muted-foreground" aria-hidden />
-                <span className="flex-1 text-xs font-medium text-foreground">{providerLabel}</span>
-                <span className="text-2xs text-muted-foreground">Change</span>
-              </button>
-            }
-          />
-        </Section>
-
-        <Section label="How much can it do?">
-          <div className="grid grid-cols-3 gap-1.5">
-            {(['Ask', 'Plan', 'Auto'] as ComposerMode[]).map((m) => {
-              // A chat that only reads cannot be given more authority by
-              // picking a mode -- the engine refuses the write tools whatever
-              // is selected here. Offering these as freely selectable put
-              // this screen in disagreement with the pills directly beneath
-              // it, and lit up a choice that would never take effect.
-              const blocked = isModeBlocked(m, canWrite)
-              return (
-                <Choice
-                  key={m}
-                  selected={mode === m && !blocked}
-                  blocked={blocked}
-                  onClick={() => {
-                    if (!blocked) onModeChange(m)
-                  }}
-                  title={m}
-                  detail={blocked ? READ_ONLY_REASON : MODE_NOTES[m]}
-                />
-              )
-            })}
-          </div>
-        </Section>
-
-        <Section label="How many agents?">
-          <div className="grid grid-cols-2 gap-1.5">
-            <Choice
-              selected={team === 'solo'}
-              onClick={() => onTeamChange('solo')}
-              title="One agent"
-              detail="One agent does the whole job."
-              icon={<User size={14} aria-hidden />}
-            />
-            {/*
-              The same defect the mode cards above were fixed for, eight lines
-              down and left alone. In Ask mode the backend adds no instruction
-              for handing work to helpers, so a team is a solo run whatever is
-              picked here -- and the card above already says "no helpers" in
-              its own note. This lit up on click and changed nothing.
-
-              Worse than a choice nobody makes: the team defaults to a team, so
-              every read-only chat opened with this selected and the composer
-              below reading "A lead agent, up to 3 helpers".
-            */}
-            <Choice
-              selected={team === 'helpers' && !teamBlocked}
-              blocked={teamBlocked}
-              onClick={() => {
-                if (!teamBlocked) onTeamChange('helpers')
-              }}
-              title="A team"
-              detail={teamBlocked ? TEAM_NEEDS_MODE_REASON : 'A lead splits safe work between helpers.'}
-              icon={<GitFork size={14} aria-hidden />}
-            />
-          </div>
-        </Section>
-      </div>
-    </div>
-  )
+/** One thing worth starting from, drawn from the repository's real state. */
+export interface ChatStarter {
+  /** Stable key. */
+  id: string
+  /** The button's words. Plain, and about the user's files. */
+  label: string
+  /** What lands in the message box when pressed. */
+  prompt: string
 }
 
 /**
- * The source in the words a person would use, with the one detail that
- * identifies it (the issue number, the change id, the commit). Snapshot
- * titles come from the backend at capture time, so they are safe to show as
- * they are; a source with no snapshot title falls back to its kind.
- */
-/**
- * "1 file" / "3 files".
+ * "1 file", never "1 file(s)".
  *
- * The two lines below used to read "1 file(s) changed". Every other place
- * that counts files -- `SessionContextPanel` describes these same two
- * sources -- writes it properly, so this was the odd one out, and "(s)" is
- * developer shorthand on the first screen a new person meets.
+ * Every other place that counts files -- `SessionContextPanel` included, which
+ * describes these same two sources -- writes it properly, so this was the odd
+ * one out, and the shorthand sat on the first screen a new person meets.
  */
 function fileCount(n: number): string {
   return `${n} file${n === 1 ? '' : 's'}`
 }
 
+/**
+ * What started this chat, in one line, or `null` when nothing did.
+ *
+ * Deliberately not `SessionSourceBanner`'s function of the same name: that one
+ * returns a three-part kicker/title/meta for a full-width banner row and has no
+ * answer for a manual chat, because the banner is never drawn for one. This
+ * returns a title and a detail, and answers `null` for manual -- which is what
+ * a chip needs, and what this file's own tests check.
+ */
 export function describeSource(source: SessionSource | null): { title: string; detail: string | null } | null {
   if (!source || source.kind === 'manual') return null
   const kind = sourceKindLabel(source.kind)
@@ -299,63 +71,159 @@ export function describeSource(source: SessionSource | null): { title: string; d
   }
 }
 
-function Section({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <section className="flex flex-col gap-1.5">
-      <h3 className="text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
-        {label}
-      </h3>
-      {children}
-    </section>
-  )
-}
-
-function Choice({
-  selected,
-  onClick,
-  title,
-  detail,
-  icon,
-  blocked = false,
+/**
+ * What a chat with nothing in it yet shows.
+ *
+ * Three things: which project, what you want, and -- only when the repository
+ * actually offers one -- somewhere to start. Nothing else.
+ *
+ * This used to be a five-section form. Project, AI, "how much can it do?" and
+ * "how many agents?" each got a labelled heading and a row of described cards,
+ * and then the composer twelve inches below offered the same four decisions
+ * again as chips. Measured: 34 controls and ~79 words of instructions before
+ * anyone could type a character, with three decisions rendered twice in one
+ * viewport.
+ *
+ * The composer won, for a reason worth keeping written down: this panel
+ * disappears the moment the first message lands, so every control taught here
+ * is a control the user then loses. The chips persist. Teaching the permanent
+ * UI is the only version that pays back.
+ *
+ * What remains is the part no other agent client can show -- the repository
+ * this chat is bound to, and work that is really sitting in it.
+ */
+export function NewChatLanding({
+  projectName,
+  projectPath,
+  projects,
+  onProjectChange,
+  onProjectPathChosen,
+  projectChanging = false,
+  starters,
+  onStarterPick,
+  source,
 }: {
-  selected: boolean
-  onClick: () => void
-  title: string
-  detail: string
-  icon?: React.ReactNode
+  projectName: string
+  projectPath: string
+  projects: ChatProjectChoice[]
+  onProjectChange: (project: ChatProjectChoice) => void
+  /** A folder picked from disk rather than from the list. */
+  onProjectPathChosen: (path: string) => void
+  projectChanging?: boolean
   /**
-   * Offered but refused. `aria-disabled` rather than `disabled`, the same
-   * choice the composer's pills make: a truly disabled control leaves the
-   * tab order, so the reason never reaches the people most relying on it.
+   * Starting points built from what is actually in the repository.
+   *
+   * Empty is a perfectly good answer and renders nothing. A row of invented
+   * suggestions would be the generic version of this idea; the whole value is
+   * that each one names real work.
    */
-  blocked?: boolean
+  starters: ChatStarter[]
+  onStarterPick: (starter: ChatStarter) => void
+  /** What started this chat. `null` while the session is still loading. */
+  source: SessionSource | null
 }) {
+  const [browsing, setBrowsing] = useState(false)
+  const startedFrom = describeSource(source)
+
+  const browseForFolder = async () => {
+    if (browsing) return
+    setBrowsing(true)
+    try {
+      // Lazily imported, as every other folder picker in the app does it, so
+      // the dialog plugin stays out of the initial bundle.
+      const { open } = await import('@tauri-apps/plugin-dialog')
+      const picked = await open({ directory: true, multiple: false, title: 'Open a folder' })
+      if (typeof picked === 'string') onProjectPathChosen(picked)
+    } finally {
+      setBrowsing(false)
+    }
+  }
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-disabled={blocked}
-      aria-pressed={selected}
-      className={cn(
-        'flex flex-col gap-0.5 rounded-md border px-2.5 py-2 text-left transition-colors',
-        // A tint and a faint border were the whole selected state, with the
-        // same text colour either way -- which DESIGN.md's Selected Must Read
-        // rule forbids, and this is the first screen a new person meets. The
-        // composer's equivalent control already colours its label; this adds
-        // that plus a tick, so the choice reads at a glance.
-        blocked
-          ? 'cursor-not-allowed border-border opacity-55'
-          : selected
-            ? 'border-primary bg-soft'
-            : 'border-border hover:bg-panel3'
+    // `min-h-0` and its own scrollbar: a flex child defaults to
+    // `min-height: auto` and refuses to shrink below its content, which used
+    // to push the pane header and the top of the sidebar off screen. Centred
+    // by auto margins rather than `justify-center`, because centring content
+    // taller than its box overflows the top edge too, and a scrollbar cannot
+    // reach it.
+    <div className="flex min-h-0 flex-1 flex-col items-center gap-5 overflow-y-auto px-6 py-8">
+      <div className="mt-auto flex w-full max-w-lg flex-col items-center gap-3">
+        <h2 className="text-center text-xl font-semibold tracking-tight text-foreground">
+          What are we working on in <span className="text-accent-text">{projectName}</span>?
+        </h2>
+
+        {/* The project, as one chip. It was a full-width card with the whole
+            Windows path underneath -- the machine detail this product exists
+            to spare people. The path is the tooltip, for the moment somebody
+            genuinely needs it. */}
+        <div className="flex items-center gap-1.5">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                // Opening a project arms a watcher over the whole tree, which
+                // can take seconds. Without this the click did nothing
+                // visible until it finished.
+                disabled={projectChanging}
+                title={projectPath}
+                className="flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-2xs font-semibold text-sub hover:bg-panel3 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <FolderGit2 size={12} className="flex-none text-accent-text" aria-hidden />
+                <span className="max-w-[16rem] truncate">{projectChanging ? 'Opening…' : projectName}</span>
+                <ChevronDown size={11} className="flex-none" aria-hidden />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="center" className="w-[min(26rem,calc(100vw-3rem))]">
+              {projects.map((project) => (
+                <DropdownMenuItem key={project.path} onSelect={() => onProjectChange(project)}>
+                  <FolderGit2 />
+                  <span className="min-w-0 flex-1 truncate">{project.name}</span>
+                </DropdownMenuItem>
+              ))}
+              {/* Any folder on disk, not only the ones already open. A chat
+                  about a parent directory of several repositories is a real
+                  thing to want, and a list of known projects cannot say it. */}
+              <DropdownMenuItem onSelect={() => void browseForFolder()}>
+                <FolderOpen />
+                <span className="min-w-0 flex-1 truncate">{browsing ? 'Choosing…' : 'Open another folder…'}</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {startedFrom && (
+            <span
+              className="flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-2xs font-semibold text-sub"
+              title={startedFrom.detail ?? startedFrom.title}
+            >
+              <Link2 size={12} className="flex-none text-accent-text" aria-hidden />
+              <span className="max-w-[18rem] truncate">{startedFrom.title}</span>
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Only ever what the repository really offers. No starters is the
+          ordinary case for a clean tree and renders nothing at all, rather
+          than a row of prompts anyone could have written. */}
+      {starters.length > 0 ? (
+        <div className="mb-auto flex w-full max-w-lg flex-wrap justify-center gap-1.5">
+          {starters.map((starter) => (
+            <button
+              key={starter.id}
+              type="button"
+              onClick={() => onStarterPick(starter)}
+              className={cn(
+                'rounded-full border border-border px-3 py-1 text-2xs font-medium text-sub',
+                'hover:border-primary/50 hover:bg-soft hover:text-foreground'
+              )}
+            >
+              {starter.label}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="mb-auto" />
       )}
-    >
-      <span className="flex items-center gap-1.5">
-        {icon && <span className={selected ? 'text-accent-text' : 'text-muted-foreground'}>{icon}</span>}
-        <span className={cn('text-xs font-semibold', selected ? 'text-accent-text' : 'text-foreground')}>{title}</span>
-        {selected && <Check size={12} className="ml-auto flex-none text-accent-text" aria-hidden />}
-      </span>
-      <span className="text-2xs leading-snug text-muted-foreground">{detail}</span>
-    </button>
+    </div>
   )
 }
