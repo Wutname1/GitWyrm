@@ -280,7 +280,25 @@ mod tests {
             repo_path: "C:/code/p".into(),
             repo_name: "p".into(),
             title: "t".into(),
-            source: SessionSource::Manual { repo_id: "r".into() },
+            // NOT `Manual`. A manual chat carrying `Ask` is how every chat
+            // made before the New-chat button switched to `Fix` looks on
+            // disk, and `migrate_session` widens exactly that pair on load --
+            // so a manual fixture here would have its intent changed out from
+            // under the assertion. These intents arrive with a real source in
+            // production anyway; this names one.
+            source: SessionSource::Issue {
+                host_id: "github".into(),
+                owner: "o".into(),
+                repo: "r".into(),
+                number: 1,
+                url: "https://example.invalid/1".into(),
+                snapshot: crate::agentdesk::model::SourceSnapshot {
+                    title: "t".into(),
+                    summary: String::new(),
+                    captured_at: "2026-01-01T00:00:00Z".into(),
+                    live_unavailable: false,
+                },
+            },
             intent,
             state: SessionState::Ready,
             created_at: "2026-01-01T00:00:00Z".into(),

@@ -849,9 +849,14 @@ pub fn migrate_session(raw: serde_json::Value) -> Result<AgentSession, SessionLo
             found: v,
             max_supported: CURRENT_SCHEMA_VERSION,
         }),
-        Some(1) => serde_json::from_value(raw).map_err(|e| SessionLoadError::Malformed {
-            detail: e.to_string(),
-        }),
+        Some(1) => {
+            let mut session: AgentSession =
+                serde_json::from_value(raw).map_err(|e| SessionLoadError::Malformed {
+                    detail: e.to_string(),
+                })?;
+            widen_manual_chat_intent(&mut session.header);
+            Ok(session)
+        }
         // No known migration path from an older version yet; v1 is the floor.
         Some(v) => Err(SessionLoadError::UnsupportedSchemaVersion {
             found: v,
@@ -860,6 +865,30 @@ pub fn migrate_session(raw: serde_json::Value) -> Result<AgentSession, SessionLo
         None => Err(SessionLoadError::Malformed {
             detail: "missing header.schemaVersion".into(),
         }),
+    }
+}
+
+/// Frees a chat somebody simply started from a read-only ceiling it never
+/// asked for.
+///
+/// Every chat carries an intent, and the intent is the most the chat may ever
+/// do -- `policy.rs` gives `Ask` `can_write: false`, permanently. New manual
+/// chats were created as `Ask`, so a chat started by pressing New chat could
+/// never change a file: Plan and Auto were greyed out for the life of the
+/// chat, each saying it "only reads and explains".
+///
+/// New chats are created as `Fix` now, but every chat made before that is
+/// still on disk with the old ceiling, and nothing else would ever lift it.
+///
+/// Deliberately narrow. Only a `manual` chat is widened, because only a
+/// manual chat has no stated purpose -- somebody opened a blank chat and had
+/// the answer chosen for them. A chat started from "Explain this issue" or
+/// "Review this pull request" means its read-only ceiling and keeps it; the
+/// same is true of anything imported. Widening those would hand write
+/// authority to chats whose whole point is that they do not have it.
+fn widen_manual_chat_intent(header: &mut AgentSessionHeader) {
+    if matches!(header.source, SessionSource::Manual { .. }) && header.intent == SessionIntent::Ask {
+        header.intent = SessionIntent::Fix;
     }
 }
 
@@ -876,9 +905,18 @@ pub fn migrate_header(raw: serde_json::Value) -> Result<AgentSessionHeader, Sess
             found: v,
             max_supported: CURRENT_SCHEMA_VERSION,
         }),
-        Some(1) => serde_json::from_value(raw).map_err(|e| SessionLoadError::Malformed {
-            detail: e.to_string(),
-        }),
+        Some(1) => {
+            // The same widening as `migrate_session`, applied here too: the
+            // sidebar and the index are rebuilt from the header alone, so a
+            // chat read through this path would otherwise disagree with the
+            // same chat read through the other one.
+            let mut header: AgentSessionHeader =
+                serde_json::from_value(raw).map_err(|e| SessionLoadError::Malformed {
+                    detail: e.to_string(),
+                })?;
+            widen_manual_chat_intent(&mut header);
+            Ok(header)
+        }
         Some(v) => Err(SessionLoadError::UnsupportedSchemaVersion {
             found: v,
             max_supported: CURRENT_SCHEMA_VERSION,
@@ -1294,6 +1332,90 @@ mod tests {
         let raw = serde_json::to_value(&session).unwrap();
         let migrated = migrate_session(raw).expect("current version must migrate cleanly");
         assert_eq!(migrated, session);
+    }
+
+    /// A chat somebody simply started is freed from a ceiling it never asked
+    /// for.
+    ///
+    /// New chats used to be created read-only, which meant Plan and Auto were
+    /// greyed out for the life of the chat. New ones are created writable now;
+    /// every chat made before that is still on disk with the old ceiling, and
+    /// nothing else would ever lift it.
+    #[test]
+    fn an_old_manual_chat_is_no_longer_stuck_read_only() {
+        let mut session = AgentSession::new(header(SessionSource::Manual {
+            repo_id: "repo-1".into(),
+        }));
+        session.header.intent = SessionIntent::Ask;
+        let raw = serde_json::to_value(&session).unwrap();
+
+        let migrated = migrate_session(raw).expect("migrates");
+        assert_eq!(migrated.header.intent, SessionIntent::Fix);
+    }
+
+    /// ...and only that chat.
+    ///
+    /// A chat started from "Explain this issue" or "Review this pull request"
+    /// means its read-only ceiling. Widening those would hand write authority
+    /// to the chats whose entire purpose is not having it -- the single most
+    /// damaging thing this function could get wrong.
+    #[test]
+    fn a_chat_with_a_real_source_keeps_the_ceiling_it_was_given() {
+        let sourced = SessionSource::Issue {
+            host_id: "github".into(),
+            owner: "o".into(),
+            repo: "r".into(),
+            number: 318,
+            url: "https://example.invalid/318".into(),
+            snapshot: SourceSnapshot {
+                title: "t".into(),
+                summary: String::new(),
+                captured_at: "2026-01-01T00:00:00Z".into(),
+                live_unavailable: false,
+            },
+        };
+        for intent in [
+            SessionIntent::Ask,
+            SessionIntent::Explain,
+            SessionIntent::Review,
+            SessionIntent::Summarize,
+        ] {
+            let mut session = AgentSession::new(header(sourced.clone()));
+            session.header.intent = intent;
+            let raw = serde_json::to_value(&session).unwrap();
+            let migrated = migrate_session(raw).expect("migrates");
+            assert_eq!(
+                migrated.header.intent, intent,
+                "{intent:?} came from a real source and must keep its ceiling"
+            );
+        }
+    }
+
+    /// A chat that already had write authority is untouched, so the widening
+    /// cannot be mistaken for "everything becomes Fix".
+    #[test]
+    fn a_chat_that_could_already_write_is_left_alone() {
+        let mut session = AgentSession::new(header(SessionSource::Manual {
+            repo_id: "repo-1".into(),
+        }));
+        session.header.intent = SessionIntent::Plan;
+        let raw = serde_json::to_value(&session).unwrap();
+        assert_eq!(
+            migrate_session(raw).expect("migrates").header.intent,
+            SessionIntent::Plan
+        );
+    }
+
+    /// The header-only path is rebuilt for the sidebar and the index, so it
+    /// has to reach the same answer as the full read.
+    #[test]
+    fn the_header_only_path_widens_the_same_chat() {
+        let mut h = header(SessionSource::Manual {
+            repo_id: "repo-1".into(),
+        });
+        h.intent = SessionIntent::Ask;
+        let raw = serde_json::to_value(&h).unwrap();
+        assert_eq!(migrate_header(raw).expect("migrates").intent, SessionIntent::Fix);
     }
 
     #[test]

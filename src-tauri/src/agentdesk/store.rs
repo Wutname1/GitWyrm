@@ -731,7 +731,11 @@ mod tests {
             source: SessionSource::Manual {
                 repo_id: "repo-1".into(),
             },
-            intent: SessionIntent::Ask,
+            // `Fix`, not `Ask`: these are round-trip tests, and a manual chat
+            // carrying `Ask` is the one pair `migrate_session` rewrites on
+            // load (see `widen_manual_chat_intent`), so an `Ask` fixture would
+            // fail identity for the right reason and hide the wrong one.
+            intent: SessionIntent::Fix,
             state: SessionState::Ready,
             created_at: "2026-01-01T00:00:00Z".into(),
             updated_at: updated_at.into(),

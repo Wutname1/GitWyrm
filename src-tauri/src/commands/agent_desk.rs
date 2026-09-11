@@ -3746,7 +3746,16 @@ mod tests {
         let GetSessionOutcome::Found { session: found } = outcome else {
             panic!("expected Found, got {outcome:?}");
         };
-        assert_eq!(found, session);
+        // Everything survives the round trip except the one field load-time
+        // migration exists to change: `create_request` still asks for `Ask`,
+        // and a manual chat carrying `Ask` is widened to `Fix` on read (see
+        // `widen_manual_chat_intent`). Compared field-wise rather than by
+        // loosening the fixture, so this test keeps proving the round trip
+        // AND names the single deliberate difference.
+        assert_eq!(found.header.intent, SessionIntent::Fix);
+        let mut expected = session.clone();
+        expected.header.intent = SessionIntent::Fix;
+        assert_eq!(found, expected);
     }
 
     // -- Startup reconciliation: a session persisted mid-run reconciles to
