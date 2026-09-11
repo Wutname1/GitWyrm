@@ -581,7 +581,24 @@ export function AgentDeskView() {
         repoName: repo.name,
         title: '',
         source: { kind: 'manual', repoId: repo.id },
-        intent: 'ask',
+        // `fix`, not `ask`. The intent is the ceiling on what a chat may ever
+        // do -- `policy.rs` gives `ask` `canWrite: false` -- and a blank chat
+        // has no purpose yet, so capping it at read-only decided for the
+        // person before they had typed anything.
+        //
+        // What that looked like: Plan and Auto were both disabled on the new
+        // chat screen, each showing Ask's own description ("This chat only
+        // reads and explains, so it cannot change files") as the reason.
+        // Meanwhile the composer defaulted its mode pill to Auto, so the
+        // screen offered Auto and refused it at the same time.
+        //
+        // `fix` is the only intent that permits writes; Ask and Plan remain
+        // one click away as MODES, which is the distinction the product
+        // draws -- the intent says what the chat is for, the mode says how
+        // much authority this turn gets. A chat started from an issue or a
+        // review still gets its own narrower intent from the kickoff path,
+        // which is untouched.
+        intent: 'fix',
       }
       const outcome = unwrap(await commands.agentSessionCreate(request))
       if (outcome.kind === 'created') {
