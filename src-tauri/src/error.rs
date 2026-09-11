@@ -10,6 +10,44 @@ pub enum AppError {
     Other(String),
 }
 
+/// Say what to do about a corrupt git index.
+///
+/// `.git/index` is a cache, not history: every byte in it is re-derivable from
+/// HEAD and the working tree. So corruption is annoying but fully recoverable -
+/// delete the file and let git rebuild it. libgit2 says only
+/// `invalid data in index - incorrect header signature` (class=Index), and git's
+/// own transport says `fatal: index file corrupt`; neither hints that the repo is
+/// fine or that the fix is one command.
+///
+/// Seen as a burst of six in one second on a single machine (GITWYRM-BACKEND-2,
+/// 0.12.0) - every operation that touched the index failing in turn, each showing
+/// the same opaque line. Nothing in the app caused it (an interrupted write, a
+/// crash mid-stage, or antivirus are the usual causes) but the user was left with
+/// no idea it was fixable.
+///
+/// Deliberately still REPORTED, unlike the file lock. This must not go on the
+/// EXPECTED list: index_refusals_are_expected_but_corruption_is_not pins that,
+/// and the reason holds - corruption is a real fault worth seeing, even when the
+/// remedy is the user's. This only improves the wording.
+///
+/// Keyed off the formatted message rather than a `git2::Error` because the
+/// Serialize boundary below has already lost the typed error, and that boundary
+/// is the ONE place every AppError from every command passes through.
+/// Translating there covers the whole app without each call site having to
+/// remember - which is exactly the coverage gap the file-lock hint hit (one call
+/// site, then four more found later). Matching on the wording also catches git's
+/// own porcelain phrasing, which carries no Index class at all.
+fn corrupt_index_hint_for(message: &str) -> Option<String> {
+    let lowered = message.to_lowercase();
+    if !lowered.contains("invalid data in index") && !lowered.contains("index file corrupt") {
+        return None;
+    }
+    Some(
+        "this repository's git index file is damaged. Nothing in your history is lost - the index is a cache git rebuilds. Close other git tools, delete the `.git/index` file in this repository, then run `git reset` to rebuild it."
+            .to_string(),
+    )
+}
+
 /// Turn a Windows file-lock refusal into something the user can act on.
 ///
 /// A checkout that has to remove a directory fails when anything else holds a
@@ -198,7 +236,10 @@ pub fn is_expected_for_tests(message: &str) -> bool {
 
 impl Serialize for AppError {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let message = self.to_string();
+        // A corrupt index is recoverable and the raw wording does not say so, but
+        // it still REPORTS - unlike the file lock, this is a real fault. Only the
+        // sentence the user reads changes.
+        let message = corrupt_index_hint_for(&self.to_string()).unwrap_or_else(|| self.to_string());
         // Tauri serializes command errors before returning them to the UI. Logging
         // at this boundary guarantees that an error shown to the user also has a
         // durable entry in the app log.
@@ -281,6 +322,29 @@ mod tests {
     }
 
     /// The index conditions, which split three ways and must not be conflated.
+    #[test]
+    /// The hint must explain the fix without making corruption look routine:
+    /// it stays reportable, only its wording improves.
+    #[test]
+    fn a_corrupt_index_gets_recovery_advice() {
+        let hint = super::corrupt_index_hint_for(
+            "git error: invalid data in index - incorrect header signature; class=Index (10)",
+        )
+        .expect("should be translated");
+        assert!(hint.contains(".git/index"), "names the file to delete: {hint}");
+        assert!(hint.contains("Nothing in your history is lost"), "reassures: {hint}");
+        // git's own porcelain wording, which carries no Index class at all.
+        assert!(super::corrupt_index_hint_for("git fetch failed: fatal: index file corrupt").is_some());
+        // A half-resolved merge is a REFUSAL, not corruption - it must not be
+        // dressed up as a damaged file.
+        assert!(super::corrupt_index_hint_for(
+            "git error: cannot create a tree from a not fully merged index.; class=Index (10)"
+        )
+        .is_none());
+        // And the translated wording must STILL report - never silenced.
+        assert!(!is_expected(&hint));
+    }
+
     #[test]
     fn index_refusals_are_expected_but_corruption_is_not() {
         // Refusal: a merge that is still half-resolved. Nothing to fix here.
