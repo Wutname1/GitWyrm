@@ -105,6 +105,24 @@ The Claude bridge is the newest and least proven row. Two ignored real-binary te
 (`claude_answers_a_real_turn`, `claude_routes_a_command_through_the_gate`) exist for the
 first signed-in machine; until one has passed, treat "Claude runs commands" as a claim.
 
+**Evidence gained 2026-10-10.** The ignored tests were run for the first time on a
+machine with `copilot` 1.0.82, `claude` 2.1.260, `codex` 0.151.0 and `opencode` 1.18.10
+installed. Five now pass and are recorded rather than claimed: the shell probe, skills
+discovery, the provider picker rows, submodule detection, and the auditor prompt.
+
+`lists_models_and_answers_a_prompt` failed on first run, and the failure was informative
+in a way its assertion was not. It demanded `models.len() > 1` -- a claim about the
+runner's GitHub plan rather than about GitWyrm -- and aborted before the half that
+exercises our own code. Reshaped to assert that a list came back and to complete with
+the account's own first model, it passes: a real turn reached a live provider and
+answered correctly. That is the whole `complete_streaming` body, session creation, the
+deny-all handler and the event pump, proved for the first time.
+
+The thin model list it exposed is the allowlisting described under Usage and quota
+below, confirmed directly: the stored token authenticates (`/user` returns 200) while
+`copilot_internal/v2/token` returns 403. It also turned out to be a real product fault,
+fixed separately -- see the model-list change and Q&A 469-479.
+
 ### Usage and quota
 
 Only what a provider reports is recorded. `plan_limit` and `plan_reset_at` still have no
