@@ -140,3 +140,13 @@ A: The tally as the headline and the first reason as the detail, since a bare "3
 | 580 | 2026-09-12 | Does it flag comments too? | No -- the rule covers them, but a comment is read by somebody already in the file, while this text reaches people who cannot see it coming. |
 | 581 | 2026-09-12 | Could the check pass by finding nothing anywhere? | No -- a second test plants one and requires it to be found, and requires a commented one to be ignored. |
 | 582 | 2026-09-12 | Was it proved on a real regression? | Yes -- putting one sentence back made it fail, printing the file, the line and the sentence. |
+| 583 | 2026-09-12 | Was the check added last pass actually protecting much? | No -- it named four files by hand out of twenty-six, so anything added later fell outside it silently. |
+| 584 | 2026-09-12 | Did the unwatched files hide anything? | No, they were clean, but the check now finds its own files instead of trusting a list somebody has to remember. |
+| 585 | 2026-09-12 | Was the wider reach proved? | Yes -- a fault planted in a file the old list never touched now fails the check by name. |
+| 586 | 2026-09-12 | What did reading the approval card turn up? | That it offers six kinds of approval and a real run can only ever produce two of them. |
+| 587 | 2026-09-12 | Which two? | Sending work off the machine, and everything else, which arrives unnamed but still stops and still shows what was asked. |
+| 588 | 2026-09-12 | So the other four never happen? | Not today -- they are written, worded and tested, and nothing in a live run creates them. |
+| 589 | 2026-09-12 | Is that a fault to fix? | Not by inventing recognisers on a guess; the honest failure is a vaguer card, never a silent action. |
+| 590 | 2026-09-12 | Then what changed? | It is written down where somebody counting six kinds of approval would otherwise assume six kinds happen. |
+| 591 | 2026-09-12 | What stops that note going stale? | A test that fails the moment a fifth kind becomes reachable, telling whoever did it to update the note. |
+| 592 | 2026-09-12 | Was a second test written and then removed? | Yes -- it repeated one that already existed, and a check that catches nothing new reads like a guard without being one. |

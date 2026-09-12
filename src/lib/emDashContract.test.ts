@@ -22,7 +22,17 @@ import { fileURLToPath } from 'node:url'
  * file, while this text is read by somebody who cannot see it coming.
  */
 const DIRS = ['../components/domain/agent-desk', '../components/domain/agent-setup']
-const LIB_FILES = ['agentDeskResult.ts', 'agentDeskComposer.ts', 'agentDeskGate.ts', 'aiModelList.ts']
+
+/**
+ * The pure-logic modules behind those screens, found rather than listed.
+ *
+ * The first version of this named four files by hand, which covered four of
+ * the twenty-six that exist -- an allowlist that protects whatever somebody
+ * remembered on the day and silently stops covering anything added later. The
+ * files that hold this text all start with the same few prefixes, so matching
+ * the prefix keeps a new one in scope on the day it is created.
+ */
+const LIB_PREFIXES = ['agentDesk', 'agentImport', 'agentSession', 'agentWorkspace', 'aiModel', 'specSync']
 
 function sourcesInScope(): { name: string; source: string }[] {
   const out: { name: string; source: string }[] = []
@@ -34,12 +44,10 @@ function sourcesInScope(): { name: string; source: string }[] {
     }
   }
   const libPath = fileURLToPath(new URL('.', import.meta.url))
-  for (const name of LIB_FILES) {
-    try {
-      out.push({ name, source: readFileSync(`${libPath}/${name}`, 'utf8') })
-    } catch {
-      // A file that has been renamed is not a failure of this rule.
-    }
+  for (const name of readdirSync(libPath) as string[]) {
+    if (!name.endsWith('.ts') || name.endsWith('.test.ts')) continue
+    if (!LIB_PREFIXES.some((prefix) => name.startsWith(prefix))) continue
+    out.push({ name, source: readFileSync(`${libPath}/${name}`, 'utf8') })
   }
   return out
 }

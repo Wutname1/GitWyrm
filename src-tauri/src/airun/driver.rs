@@ -56,6 +56,21 @@ pub struct PreflightItem {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum GateRequest {
+    /// **Not produced by a real run today.** `classify` below is the only
+    /// production path from a provider's summary to a gate, and it answers
+    /// `Publish` or `Unclassified` and nothing else -- so this and the three
+    /// variants under it are reachable from tests and the scripted fixture
+    /// only.
+    ///
+    /// Kept rather than deleted, because each names a consequence worth its
+    /// own card the day a classifier can recognise it, and the card's wording
+    /// is already written and tested. But nothing should read this list as a
+    /// description of what a person will actually be asked: an unrecognised
+    /// command reaches them as `Unclassified`, which still gates the run and
+    /// still shows the raw summary.
+    ///
+    /// Recorded here rather than left to be rediscovered: a reader counting
+    /// six kinds of approval would reasonably assume six kinds happen.
     AddDependency {
         name: String,
     },
@@ -348,6 +363,40 @@ mod tests {
             paths: vec!["a".into(), "b".into(), "c".into()],
         };
         assert!(many.title().contains('3'));
+    }
+
+    /// What a real run can actually ask a person to approve.
+    ///
+    /// `classify` is the only production path from a provider's summary to a
+    /// gate, and it answers two of the six kinds. The other four are written,
+    /// worded and tested, and no live run produces them -- which is worth
+    /// pinning, because the honest reading of the enum is otherwise "six
+    /// kinds of approval happen" and only two do.
+    ///
+    /// This fails the day somebody teaches `classify` a third answer. That is
+    /// the point: the comment on the enum says four variants are unreachable,
+    /// and a comment saying so has to stop being true loudly.
+    #[test]
+    fn only_two_kinds_of_gate_can_reach_a_person_today() {
+        let summaries = [
+            "git push origin main",
+            "gh pr merge 42",
+            "rm -rf build",
+            "npm install left-pad",
+            "curl https://example.invalid",
+            "write ../../outside.txt",
+            "anything at all",
+        ];
+        for summary in summaries {
+            let request = GateRequest::classify(summary);
+            assert!(
+                matches!(
+                    request,
+                    GateRequest::Publish { .. } | GateRequest::Unclassified { .. }
+                ),
+                "classify learnt a new answer for {summary:?}: {request:?}. That is good, but the note on `GateRequest` still says four variants are unreachable -- update it."
+            );
+        }
     }
 
     #[test]
