@@ -160,3 +160,13 @@ A: The tally as the headline and the first reason as the detail, since a bare "3
 | 600 | 2026-09-12 | What keeps the list honest? | A test that fails when a builder gains a caller and when one loses it, telling whoever did it which list to move it to. |
 | 601 | 2026-09-12 | Did that test earn its place immediately? | Yes -- it failed on its first run and corrected two mistakes in the note being written alongside it. |
 | 602 | 2026-09-12 | Which mistakes? | A builder nobody had counted, and one named in the note that does not exist at all. |
+| 603 | 2026-09-12 | What was built this pass? | The missing way to start a chat from the work you have not committed yet. |
+| 604 | 2026-09-12 | Why that one first? | Because everything behind it already existed and only the menu item was absent, so it is the smallest of the three gaps. |
+| 605 | 2026-09-12 | Where does it live? | On the right-click menu over the uncommitted changes, next to staging and stashing, which is where somebody is already looking at that work. |
+| 606 | 2026-09-12 | Does it ask the agent to change anything? | No -- it explains, because an agent that started editing work in progress unasked would be the worst possible surprise. |
+| 607 | 2026-09-12 | What happens to a file that is both staged and edited again? | It is counted once, since asking about the same file twice reads as two different files. |
+| 608 | 2026-09-12 | Does the item appear when there is nothing to talk about? | No, and that also keeps the builder's empty wording out of reach entirely. |
+| 609 | 2026-09-12 | Did the check written last pass do its job? | Yes -- it failed the moment the wiring landed and said which list to move it to. |
+| 610 | 2026-09-12 | Was that followed rather than silenced? | Yes, the list and both notes were moved together, so the record still matches what a person can actually reach. |
+| 611 | 2026-09-12 | What is left of the three? | Starting from one commit's diff, which needs a menu item, and starting from a failed check, which has no way to build one yet. |
+| 612 | 2026-09-12 | Was the menu seen in the running app? | No -- it needs the desktop shell to start, so the wording and the states are proved and the drawn menu is not. |

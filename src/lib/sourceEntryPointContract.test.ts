@@ -8,11 +8,15 @@ import { fileURLToPath } from 'node:url'
  * Which ways of starting a chat a person can actually reach.
  *
  * The product describes the entry points as "an issue, a pull request, a
- * diff, a failed check, or an OpenSpec task". Two of those -- a diff and the
- * uncommitted working changes -- have a builder here, a shape the backend
- * stores with durable identity, and tests, and no menu item anywhere. A
- * failed check has the backend shape and no builder at all, so it is not in
- * either list below; this test would have to grow one when it gains one.
+ * diff, a failed check, or an OpenSpec task". A diff still has a builder
+ * here, a shape the backend stores with durable identity, and tests, and no
+ * menu item anywhere. A failed check has the backend shape and no builder at
+ * all, so it is in neither list below; this test would have to grow one when
+ * it gains one.
+ *
+ * The uncommitted changes moved from the second list to the first when the
+ * changes menu grew an "Explain with AI" item -- which this test caught,
+ * naming what to do about it.
  *
  * That is the wiring-gap class this project has hit before -- a command that
  * existed, was registered, was tested, and was never called. It is recorded
@@ -29,10 +33,11 @@ const WIRED = [
   'commitSourceInput',
   'openSpecTaskSourceInput',
   'openSpecChangeSourceInput',
+  'workingChangesSourceInput',
 ]
 
 /** Built and stored, with nothing in the app that calls them. */
-const NOT_WIRED = ['diffSourceInput', 'workingChangesSourceInput']
+const NOT_WIRED = ['diffSourceInput']
 
 function componentSources(): string {
   const parts: string[] = []
