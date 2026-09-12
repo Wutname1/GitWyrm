@@ -264,7 +264,10 @@ export function hasVerifiedCheck(checks: ResultCheckOutcome[]): boolean {
 export function checksAttribution(checks: ResultCheckOutcome[]): string | null {
   if (checks.length === 0) return null
   if (hasVerifiedCheck(checks)) return null
-  return 'as reported by the agent -- GitWyrm did not run these'
+  // Short enough to sit inline at `text-2xs` in a narrow panel, and it says
+  // the only thing that matters: the agent is the sole witness. "Reported"
+  // alone would leave the person to work out by whom.
+  return 'the agent says so; GitWyrm did not run these'
 }
 
 /**
