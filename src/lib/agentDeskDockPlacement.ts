@@ -85,3 +85,58 @@ export function resolveDockVisibility(
   if (dock.edge === 'right' && !isRightDockSafeAtWidth(windowWidthPx)) return 'popover-fallback'
   return 'pinned'
 }
+
+/**
+ * The mockup's own three breakpoints, which have always been real media
+ * queries in `docs/agent-desk/agent-desk-mockup.html` (900 / 760 / 620).
+ *
+ * Only the 900 one was ever built, as `RIGHT_DOCK_UNSAFE_WIDTH_PX` above. The
+ * other two were designed and never implemented, so the window's own minimum
+ * -- 720x560, set in `spec_desk.rs` where the Agent Desk window is built --
+ * sat inside a band nothing handled. At that size the section tabs collided
+ * with the New chat button, the workspace note truncated mid-sentence, and
+ * the composer's control row pushed Send off its own edge.
+ *
+ * Named for what they change rather than for their pixel value, so a caller
+ * reads as a decision instead of a number comparison.
+ */
+export const COMPACT_WIDTH_PX = 760
+export const NARROW_WIDTH_PX = 620
+
+/**
+ * Whether chrome should shed its labels and optional text.
+ *
+ * The mockup's 760 rule: the workspace note goes, and the layout buttons keep
+ * their icons but drop their words. Nothing is removed that cannot be reached
+ * another way -- every control keeps its `aria-label` and its tooltip, so the
+ * affordance survives even where the word does not.
+ */
+export function isCompactWidth(windowWidthPx: number): boolean {
+  return windowWidthPx < COMPACT_WIDTH_PX
+}
+
+/**
+ * Whether the window is too narrow to carry the chat list beside the
+ * conversation.
+ *
+ * The mockup's 620 rule hides the sidebar outright. Hiding it is only
+ * honest if the chats stay reachable, so callers must pair this with a way
+ * to open the list -- never use it to simply drop the navigation.
+ */
+export function isNarrowWidth(windowWidthPx: number): boolean {
+  return windowWidthPx < NARROW_WIDTH_PX
+}
+
+/**
+ * How wide the chat sidebar should be at a given window width.
+ *
+ * 240 is the built default and 176 is the mockup's 900 rule. Returns `null`
+ * when the sidebar should not be laid out beside the conversation at all, so
+ * the caller has to decide what replaces it rather than rendering a zero-width
+ * column.
+ */
+export function sidebarWidthAtWidth(windowWidthPx: number): number | null {
+  if (isNarrowWidth(windowWidthPx)) return null
+  if (windowWidthPx < RIGHT_DOCK_UNSAFE_WIDTH_PX) return 176
+  return 240
+}

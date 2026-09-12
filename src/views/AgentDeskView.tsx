@@ -31,7 +31,7 @@ import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
 import { cn } from '@/lib/utils'
 import { resolveAgentDeskShellState } from '@/views/agentDeskViewState'
 import { otherPane, resolvePaneTarget, type PaneId } from '@/lib/agentDeskPaneTargeting'
-import { isRightDockSafeAtWidth, resolveDockVisibility, zoneToPlacement, placementToZone, type DockZone } from '@/lib/agentDeskDockPlacement'
+import { sidebarWidthAtWidth, isRightDockSafeAtWidth, resolveDockVisibility, zoneToPlacement, placementToZone, type DockZone } from '@/lib/agentDeskDockPlacement'
 import type { DockKind } from '@/lib/agentWorkspaceLayout'
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 
@@ -337,7 +337,7 @@ export function AgentDeskView() {
    */
   const paneAreaRef = useRef<HTMLDivElement | null>(null)
   const paneAreaWidth = useContainerWidth(paneAreaRef)
-  const responsiveMode = resolveResponsiveMode(paneAreaWidth)
+  const responsiveMode = resolveResponsiveMode(paneAreaWidth, windowWidth)
   const splitPresentation = resolveSplitPresentation(layout.split, responsiveMode)
 
   const primarySessionId = layout.primarySessionId
@@ -810,7 +810,9 @@ export function AgentDeskView() {
             /* Explicit load-failed state for the session list itself. */
             <div
               className="flex min-h-0 flex-none flex-col items-center justify-center gap-1 border-r border-border bg-panel p-4 text-center"
-              style={{ width: 240 }}
+              // Matches whatever the real sidebar would be at this width, so
+              // the failure state does not sit wider than the list it replaces.
+              style={{ width: sidebarWidthAtWidth(windowWidth) ?? 240 }}
             >
               <p className="text-xs font-semibold text-foreground">Chats could not load</p>
               <p className="max-w-[14rem] text-2xs leading-relaxed text-muted-foreground">

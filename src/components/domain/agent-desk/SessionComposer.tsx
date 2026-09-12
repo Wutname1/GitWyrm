@@ -574,7 +574,13 @@ export function SessionComposer({
           }}
         />
 
-        <div className="flex items-center gap-1.5 px-0.5 pt-1">
+        {/* Wraps rather than overflows. At the window's 720px minimum these
+            five controls plus Send are wider than the composer, and the row
+            did not wrap -- so Send was pushed off its own edge and rendered
+            clipped to "Se", with no way to reach it but widening the window.
+            Send keeps `ml-auto` so it stays on the trailing edge whether the
+            row is one line or two. */}
+        <div className="flex flex-wrap items-center gap-1.5 px-0.5 pt-1">
           {/* Disabled rather than toast-on-click: a button that looks live and
               only apologises teaches the user that controls here are decorative.
               There is no attachment picker behind this yet, so it says so. */}
@@ -633,14 +639,12 @@ export function SessionComposer({
             onEffortChange={changeEffort}
           />
 
-          <span className="flex-1" />
-
           {running ? (
             <button
               type="button"
               disabled={stopping}
               onClick={() => void stopRun()}
-              className="flex flex-none items-center gap-1 rounded-md border border-destructive/50 px-2.5 py-1 text-2xs font-semibold text-destructive hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
+              className="ml-auto flex flex-none items-center gap-1 rounded-md border border-destructive/50 px-2.5 py-1 text-2xs font-semibold text-destructive hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {stopping ? 'Stopping…' : 'Stop'}
               <Square size={11} aria-hidden />
@@ -650,7 +654,7 @@ export function SessionComposer({
               type="button"
               disabled={!canSend}
               onClick={() => void send()}
-              className="flex flex-none items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-2xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              className="ml-auto flex flex-none items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-2xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
             >
               {sending ? 'Sending…' : 'Send'}
               <ArrowUp size={12} />

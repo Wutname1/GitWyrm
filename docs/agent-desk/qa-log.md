@@ -486,3 +486,14 @@ competing sub-agents, the answer names the losing option too.
 | 477 | 2026-10-10 | And the check itself? | It now asserts a list came back, and asks the account's own first model rather than one hardcoded that a small account cannot use. |
 | 478 | 2026-10-10 | Did that prove anything new? | Yes -- the half that talks to a real provider had never once run, and it now answers correctly end to end. |
 | 479 | 2026-10-10 | Was the settings screen seen with these changes on it? | No -- the app needs its desktop shell to start, so the wording and the logic are proved but the live screen is not. |
+| 480 | 2026-10-10 | What did the screenshot of a shrunk window show? | Section tabs running into the New chat button, a sentence cut off mid-word, and the Send button clipped to two letters. |
+| 481 | 2026-10-10 | How small can that window actually get? | 720 by 560, set where the window is built, which is far below anything the layout had been arranged for. |
+| 482 | 2026-10-10 | Was the layout missing rules for that size? | The rules were written years-deep in the mockup as three real width rules, and only the widest of the three was ever built. |
+| 483 | 2026-10-10 | Why did the toolbar keep its labels even though a rule existed for them? | It measures the conversation column, which does not exist yet while the repository is still opening, and an unmeasured column was guessed to be wide. |
+| 484 | 2026-10-10 | Why is guessing wide wrong? | Because the guess is made in exactly the situation where it cannot be checked, and the window's own width was known the whole time. |
+| 485 | 2026-10-10 | What happens to the chat list at that size now? | It narrows to the width the mockup already specified rather than holding a comfortable width that left the conversation with under half the window. |
+| 486 | 2026-10-10 | Why not just hide the list instead? | Because the rule that hides it sits below the smallest window allowed, so it could never have run, and hiding navigation with nothing to replace it is worse anyway. |
+| 487 | 2026-10-10 | Was anything removed that cannot be reached another way? | No -- every shortened label keeps its full wording as its name and its tooltip, and the one chip that disappears is also shown beside the message box. |
+| 488 | 2026-10-10 | How was the Send button fixed? | The row of controls now wraps onto a second line instead of pushing the button past the edge with no way to reach it. |
+| 489 | 2026-10-10 | Was the result measured rather than assumed? | Yes -- the title bar wanted 968 pixels in a 720 pixel window before, and 510 after, measured in the app's own font. |
+| 490 | 2026-10-10 | Was the running app itself checked? | No -- it needs its desktop shell to start, so the widths are measured and the rules are tested, but the assembled screen is not seen. |

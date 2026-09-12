@@ -18,6 +18,19 @@ const DRAWER_BREAKPOINT_PX = 620
 const SIDEBAR_MIN_PX = 218
 const SIDEBAR_MAX_PX = 282
 
+/**
+ * The mockup's 900px rule, which narrows the chat list to 176px rather than
+ * dropping it (`.ag-shell { grid-template-columns: 176px ... }`).
+ *
+ * design.md's "218-282 px" describes the column at a comfortable width. It
+ * was being applied at every width above the drawer breakpoint, including the
+ * band between 620 and 900 -- so at the window's own 720px minimum a 218px
+ * list sat beside a conversation with barely 440px left. The drawer could
+ * never rescue it, because 620 is below the smallest size the window allows.
+ */
+const SIDEBAR_COMPACT_PX = 176
+const SIDEBAR_COMPACT_BELOW_PX = 900
+
 interface SessionSidebarProps {
   /**
    * The main window's current repo, i.e. what "this project" means for the
@@ -181,6 +194,8 @@ export function SessionSidebar({
   }, [])
 
   const isDrawerMode = viewportWidth < DRAWER_BREAKPOINT_PX
+  // Between the drawer breakpoint and 900 the list stays, narrower.
+  const isCompactColumn = !isDrawerMode && viewportWidth < SIDEBAR_COMPACT_BELOW_PX
 
   // Selecting a session while the sidebar is a drawer implies the user is
   // done with it -- closing automatically keeps the drawer from covering the
@@ -201,7 +216,13 @@ export function SessionSidebar({
   const body = (
     <div
       className="flex h-full flex-col bg-panel"
-      style={!isDrawerMode ? { minWidth: SIDEBAR_MIN_PX, maxWidth: SIDEBAR_MAX_PX } : undefined}
+      style={
+        isDrawerMode
+          ? undefined
+          : isCompactColumn
+            ? { width: SIDEBAR_COMPACT_PX, minWidth: SIDEBAR_COMPACT_PX, maxWidth: SIDEBAR_COMPACT_PX }
+            : { minWidth: SIDEBAR_MIN_PX, maxWidth: SIDEBAR_MAX_PX }
+      }
     >
       <div className="flex-none p-1.5 pb-1">
         <NewSessionButton onNewSession={handleNewSession} />

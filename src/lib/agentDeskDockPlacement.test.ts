@@ -4,6 +4,9 @@ import {
   isRightDockSafeAtWidth,
   placementToZone,
   resolveDockVisibility,
+  isCompactWidth,
+  isNarrowWidth,
+  sidebarWidthAtWidth,
   zoneToPlacement,
 } from './agentDeskDockPlacement'
 
@@ -56,5 +59,51 @@ describe('isRightDockSafeAtWidth / resolveDockVisibility', () => {
   it('never falls back for bottom or left docks regardless of width', () => {
     expect(resolveDockVisibility({ edge: 'bottom' }, 300)).toBe('pinned')
     expect(resolveDockVisibility({ edge: 'left' }, 300)).toBe('pinned')
+  })
+})
+
+/**
+ * The window's own minimum is 720x560 (`spec_desk.rs`), and nothing in the
+ * layout respected it: at that size the section tabs collided with New chat,
+ * the workspace note truncated mid-sentence, and the composer pushed Send off
+ * its edge. These pin the mockup's own breakpoints -- 900/760/620, real media
+ * queries in `agent-desk-mockup.html` -- of which only 900 had been built.
+ */
+describe('small-window breakpoints', () => {
+  const MIN_WINDOW_WIDTH = 720
+
+  it('treats the window minimum as compact, which is what went unhandled', () => {
+    expect(isCompactWidth(MIN_WINDOW_WIDTH)).toBe(true)
+    // Not narrow: the chat list still fits beside the conversation at 720,
+    // and the drawer breakpoint sits below the smallest allowed window.
+    expect(isNarrowWidth(MIN_WINDOW_WIDTH)).toBe(false)
+  })
+
+  it('leaves a comfortable window alone', () => {
+    expect(isCompactWidth(1200)).toBe(false)
+    expect(isNarrowWidth(1200)).toBe(false)
+  })
+
+  it('is exclusive at the boundary, so 760 is not yet compact', () => {
+    expect(isCompactWidth(760)).toBe(false)
+    expect(isCompactWidth(759)).toBe(true)
+    expect(isNarrowWidth(620)).toBe(false)
+    expect(isNarrowWidth(619)).toBe(true)
+  })
+
+  it('narrows the chat list at the window minimum rather than dropping it', () => {
+    // 176 is the mockup's 900 rule. The list stays reachable; it is only the
+    // 218-282 comfortable width that does not apply here.
+    expect(sidebarWidthAtWidth(MIN_WINDOW_WIDTH)).toBe(176)
+  })
+
+  it('keeps the full width once there is room', () => {
+    expect(sidebarWidthAtWidth(1200)).toBe(240)
+  })
+
+  it('answers null below the drawer breakpoint, so the caller must replace it', () => {
+    // Never zero: a zero-width column would render as a hairline rather than
+    // telling the caller to show the drawer instead.
+    expect(sidebarWidthAtWidth(600)).toBeNull()
   })
 })

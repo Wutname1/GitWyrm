@@ -186,10 +186,26 @@ export type ResponsiveMode = 'wide' | 'compact' | 'narrow'
 export const COMPACT_BREAKPOINT_PX = 760
 export const NARROW_BREAKPOINT_PX = 620
 
-export function resolveResponsiveMode(containerWidthPx: number | null): ResponsiveMode {
-  if (containerWidthPx == null) return 'wide'
-  if (containerWidthPx < NARROW_BREAKPOINT_PX) return 'narrow'
-  if (containerWidthPx < COMPACT_BREAKPOINT_PX) return 'compact'
+/**
+ * `fallbackWidthPx` is the window's own width, used only until the container
+ * has been measured.
+ *
+ * Without it, "not measured yet" resolved to `wide` -- the right guess for a
+ * maximised window and the wrong one for a small one. The pane area only
+ * mounts after the repository finishes opening, while the workspace toolbar
+ * above it renders immediately, so during `Opening...` in a 720px window the
+ * toolbar drew full-width labels and a sentence that ran off its own edge.
+ * The window width is always known and is never wider than the container, so
+ * it cannot produce a narrower answer than the truth.
+ */
+export function resolveResponsiveMode(
+  containerWidthPx: number | null,
+  fallbackWidthPx?: number
+): ResponsiveMode {
+  const width = containerWidthPx ?? fallbackWidthPx
+  if (width == null) return 'wide'
+  if (width < NARROW_BREAKPOINT_PX) return 'narrow'
+  if (width < COMPACT_BREAKPOINT_PX) return 'compact'
   return 'wide'
 }
 

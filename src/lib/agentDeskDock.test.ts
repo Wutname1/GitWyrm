@@ -323,3 +323,27 @@ describe('resolvePin', () => {
     expect(resolveDrop({ targetZone: 'right', dock: null, rightZoneUnavailable: false }).status).toBe('reject')
   })
 })
+
+describe('resolveResponsiveMode before the container is measured', () => {
+  it('used to guess wide, which is wrong in a small window', () => {
+    // The pane area only mounts once the repository has opened, while the
+    // workspace toolbar above it renders immediately. During "Opening..." in a
+    // 720px window the container is unmeasured, and guessing `wide` drew
+    // full-width button labels and a sentence that ran off its own edge.
+    expect(resolveResponsiveMode(null, 720)).toBe('compact')
+  })
+
+  it('still says wide when the window really is wide', () => {
+    expect(resolveResponsiveMode(null, 1400)).toBe('wide')
+  })
+
+  it('prefers the measured container over the window once it exists', () => {
+    // A wide window can still hold a cramped pane area -- a sidebar and a
+    // pinned dock both take from it -- so the measurement always wins.
+    expect(resolveResponsiveMode(500, 1400)).toBe('narrow')
+  })
+
+  it('keeps answering wide when neither is known', () => {
+    expect(resolveResponsiveMode(null)).toBe('wide')
+  })
+})
