@@ -231,6 +231,26 @@ function AgentRow({ row }: { row: AgentProvider }) {
           </span>
         )}
 
+        {/* What this tool cannot do, said where it is chosen.
+            
+            Not on each result: this is true of every writing run on the tool,
+            so a per-result banner would be a permanent label wearing warning
+            paint, arriving after the choice it should have informed. Here it
+            is read once, before.
+
+            Muted rather than amber for the same reason the note below is: this
+            describes a tool that works, not a refusal. It leads with what the
+            person loses and closes with what still holds, so it informs
+            without implying something escaped.
+
+            Driven by the data, never by a provider name -- the day the tool
+            starts asking again, the row goes quiet on its own. */}
+        {row.installed && row.approvalGateGap && (
+          <span className="mt-0.5 text-2xs leading-snug text-muted-foreground">
+            {row.approvalGateGap}
+          </span>
+        )}
+
         {/* A working tool that could be newer. Deliberately quiet and
             deliberately NOT the amber "too old" treatment: that one is a
             refusal, this is a note about something that works fine. Shown

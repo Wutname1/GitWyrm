@@ -19,6 +19,7 @@ const READY: AgentProvider = {
   effortLevels: [],
   modelSource: 'fallback',
   update: { kind: 'notChecked' },
+  approvalGateGap: null,
 }
 
 describe('blockedReason', () => {

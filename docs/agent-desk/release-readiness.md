@@ -149,6 +149,25 @@ gate. What is missing is that `RunStep::Gate` never reaches the approval card
 for this provider, so Auto on Claude asks before nothing. The comments that
 stated the gate as fact now state it as an intent with the evidence beside it.
 
+**Evidence gained 2026-09-12, second pass.** Two more never-run tests were run
+and both pass: `codex_answers_a_real_turn` (a real turn against a live Codex)
+and `auditor_catches_a_hollow_codex_run`. The auditor one is the significant
+one -- it is the acceptance test the plan called for, it had never been
+executed, and it worked: told to cut a corner against a spec that asked for
+more, the run was caught and sent back naming both shortfalls (a function that
+always returned true, and a test that only checked one value). Item 5 of the
+list below moves from claim to evidence.
+
+With `claude_answers_a_real_turn` from the previous pass, all three providers
+have now completed a real turn end to end.
+
+The Claude consent gap is now also stated where a person can act on it. It is a
+property of the tool rather than of any one run -- on 2.1.260 it is true of
+every writing run -- so it is shown on the tool's own row in Agent setup, read
+once before the tool is chosen, rather than as a banner on each result arriving
+after the choice was made. Driven by a field on the registry row, so the note
+goes quiet on its own when upstream restores the frame.
+
 **Evidence gained 2026-10-10.** The ignored tests were run for the first time on a
 machine with `copilot` 1.0.82, `claude` 2.1.260, `codex` 0.151.0 and `opencode` 1.18.10
 installed. Five now pass and are recorded rather than claimed: the shell probe, skills

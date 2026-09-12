@@ -4166,6 +4166,15 @@ models: AgentModelChoice[];
  */
 effortLevels: string[]; 
 /**
+ * Why this tool cannot ask before it acts, when it cannot.
+ * 
+ * `null` is the ordinary case and shows nothing. A sentence means this
+ * tool runs commands without stopping to ask, which the person choosing
+ * it should know before they choose -- rather than after each run, when
+ * the choice is already made.
+ */
+approvalGateGap: string | null; 
+/**
  * Where `models` came from.
  * 
  * `fallback` means GitWyrm could not ask the tool and is showing the list
@@ -6220,7 +6229,20 @@ live: boolean }
  */
 export type ModelSource = 
 /**
- * The tool was asked and answered.
+ * The tool's own answer, rather than a list GitWyrm made up.
+ * 
+ * This axis is WHO AUTHORED the list, not how recently it arrived. An
+ * answer restored from disk is still the tool's own answer -- it was
+ * asked, and the reply was written down verbatim -- and it is only
+ * restored while the executable path and version match the install in
+ * front of us. How fresh an answer is has its own mechanism in `TTL`,
+ * and how old a remembered one is has its own field in `written_at`;
+ * neither belongs here.
+ * 
+ * Recorded rather than left implicit because it was argued twice: the
+ * alternative was a third variant for remembered answers, which would
+ * hedge a value that does not warrant hedging and put a word on screen
+ * nobody can act on.
  */
 "live" | 
 /**

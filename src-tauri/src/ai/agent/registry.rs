@@ -205,6 +205,18 @@ pub struct AgentSpec {
     /// has no way to learn what the newest release is, which reads as "not
     /// checked" rather than as "up to date".
     pub release_package: Option<&'static str>,
+    /// Why this tool cannot ask the person before it acts, when it cannot.
+    ///
+    /// `None` is the ordinary case: the tool routes each command and edit to
+    /// GitWyrm's approval gate. `Some(reason)` is shown beside the tool where
+    /// it is chosen, in the tool's own row, because this is a property of the
+    /// TOOL rather than of any one run -- stating it once where the choice is
+    /// made beats repeating it on every result afterwards, where nobody can
+    /// act on it any more.
+    ///
+    /// A sentence rather than a flag, so the row can say what is actually
+    /// wrong instead of rendering the same warning for unrelated causes.
+    pub approval_gate_gap: Option<&'static str>,
     /// How this tool is told which model to use, if it can be.
     pub model: ModelSupport,
     /// How this tool is told how hard to think, if it can be.
@@ -451,6 +463,7 @@ pub const AGENTS: &[AgentSpec] = &[
         homepage_url: "https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli",
         install_hint: "npm install -g @github/copilot",
         release_package: Some("@github/copilot"),
+        approval_gate_gap: None,
         // `copilot --help` on 1.0.76: `--model <model> (use 'auto' to let
         // Copilot pick automatically)`, with `--model gpt-5.4` as its own
         // example. "Auto" is offered first because it is the tool's own
@@ -492,6 +505,7 @@ pub const AGENTS: &[AgentSpec] = &[
         homepage_url: "https://github.com/google-gemini/gemini-cli#quickstart",
         install_hint: "npm install -g @google/gemini-cli",
         release_package: Some("@google/gemini-cli"),
+        approval_gate_gap: None,
         // Gemini CLI takes `--model`/`-m`. Not installed on the machine this
         // row was written on, so the flag is from the tool's published usage
         // rather than from its own `--help` -- weaker evidence than every
@@ -564,6 +578,14 @@ pub const AGENTS: &[AgentSpec] = &[
         // The binary `version_args` asks is `claude`, which ships in Claude
         // Code itself -- not in the adapter the install hint names.
         release_package: Some("@anthropic-ai/claude-code"),
+        // Measured against 2.1.260, not assumed: the tool answers GitWyrm's
+        // opening message and then never asks before running a command. Five
+        // settings were tried; see `claude.rs`'s module doc and upstream
+        // claude-code#34046. Written for the person choosing a tool, so it
+        // says what it costs them and what still holds.
+        approval_gate_gap: Some(
+            "This tool does not ask before it runs a command. Work still stays in a separate copy of your project.",
+        ),
         // `claude --help` on 2.1.260: "Provide an alias for the latest model
         // (e.g. 'fable', 'opus', or 'sonnet') or a model's full name (e.g.
         // 'claude-fable-5')". Aliases rather than full names, so the choice
@@ -617,6 +639,7 @@ pub const AGENTS: &[AgentSpec] = &[
         homepage_url: "https://opencode.ai/docs/",
         install_hint: "npm install -g opencode-ai",
         release_package: Some("opencode-ai"),
+        approval_gate_gap: None,
         // `opencode --help`: `-m, --model  model to use in the format of
         // provider/model`. The pair is the whole identifier, so the ids below
         // carry it verbatim.
@@ -655,6 +678,7 @@ pub const AGENTS: &[AgentSpec] = &[
         homepage_url: "https://developers.openai.com/codex/cli/",
         install_hint: "npm install -g @openai/codex",
         release_package: Some("@openai/codex"),
+        approval_gate_gap: None,
         // `codex --help` on 0.151.0: `-m, --model <MODEL>  Model the agent
         // should use`. The long form is used here so the launch line reads the
         // same shape as every other row.
@@ -1128,6 +1152,41 @@ mod tests {
     /// following the latest release of each family instead of pinning to a
     /// version that ages out. So this checks the two halves separately -- the
     /// label is versioned, the alias is not.
+    /// A tool that cannot ask before it acts says so, in a sentence, and only
+    /// where it is chosen.
+    ///
+    /// Pinned as DATA rather than as a provider name so the note disappears on
+    /// its own the day the tool starts asking again -- the same discipline the
+    /// model list follows. A test naming Claude would have to be remembered
+    /// and deleted by hand, and would not be.
+    #[test]
+    fn a_tool_that_cannot_ask_before_acting_says_so_in_its_own_words() {
+        let gaps: Vec<&str> = AGENTS.iter().filter_map(|a| a.approval_gate_gap).collect();
+        for gap in &gaps {
+            // A sentence, not a token: the row shows this text directly.
+            assert!(
+                gap.ends_with('.') && gap.split_whitespace().count() >= 6,
+                "the gap note is shown to a person and must read as a sentence: {gap}"
+            );
+            // Names the loss and what still holds, so it informs rather than
+            // implying something escaped the run's own copy of the project.
+            assert!(
+                gap.contains("does not ask"),
+                "the note must say what the tool will not do: {gap}"
+            );
+            // No jargon: this is read by someone choosing a tool.
+            for word in ["gate", "control_request", "can_use_tool", "stdio", "permission-mode"] {
+                assert!(!gap.contains(word), "{word} is plumbing, not user copy: {gap}");
+            }
+        }
+        // Every other tool stays silent rather than reassuring: a row that
+        // claimed "this one does ask" would be a promise nothing here checks.
+        assert!(
+            gaps.len() < AGENTS.len(),
+            "if every tool has a gap the note has stopped distinguishing anything"
+        );
+    }
+
     #[test]
     fn claude_model_names_say_which_generation_they_are() {
         let spec = find("claude").expect("claude row");

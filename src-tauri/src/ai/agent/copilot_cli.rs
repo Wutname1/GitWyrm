@@ -419,6 +419,7 @@ mod tests {
             effort: registry::EffortSupport::None,
             // Nowhere to ask about releases, which is its own true answer.
             release_package: None,
+            approval_gate_gap: None,
             homepage_url: "https://example.invalid",
             install_hint: "",
 

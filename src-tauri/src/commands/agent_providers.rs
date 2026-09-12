@@ -79,6 +79,13 @@ pub struct AgentProvider {
     /// Thinking-effort levels this tool accepts, lowest first, spelled the way
     /// the tool spells them. Empty when it cannot be asked.
     pub effort_levels: Vec<String>,
+    /// Why this tool cannot ask before it acts, when it cannot.
+    ///
+    /// `null` is the ordinary case and shows nothing. A sentence means this
+    /// tool runs commands without stopping to ask, which the person choosing
+    /// it should know before they choose -- rather than after each run, when
+    /// the choice is already made.
+    pub approval_gate_gap: Option<String>,
     /// Where `models` came from.
     ///
     /// `fallback` means GitWyrm could not ask the tool and is showing the list
@@ -566,6 +573,7 @@ fn row(
             }
             crate::ai::agent::registry::EffortSupport::None => Vec::new(),
         },
+        approval_gate_gap: spec.approval_gate_gap.map(str::to_string),
         model_source: catalog.source,
     }
 }

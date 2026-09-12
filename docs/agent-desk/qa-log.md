@@ -110,3 +110,13 @@ A: The tally as the headline and the first reason as the detail, since a bare "3
 | 550 | 2026-09-12 | So what changed here instead? | GitWyrm now counts how many times it was asked, and says so in the log when a run that could change files was asked nothing. |
 | 551 | 2026-09-12 | Why is being asked nothing worth saying out loud? | Because it looks exactly like a run somebody approved, and that is the only state where silence is dangerous. |
 | 552 | 2026-09-12 | Does a read-only chat trip that warning? | No -- it is asked nothing by design, and the warning checks both facts before it fires. |
+| 553 | 2026-09-12 | What did the last two never-run checks show? | Both passed -- a real turn against one tool, and the review step that is meant to catch work that only looks finished. |
+| 554 | 2026-09-12 | Did the review step really catch anything? | Yes -- told to cut a corner, it was sent back naming both shortfalls, which is the acceptance the plan asked for and had never been run. |
+| 555 | 2026-09-12 | Where should the missing-approval fact be told? | On the tool's own row where it is chosen, not on every result afterwards. |
+| 556 | 2026-09-12 | Why not on each result, where the person decides to keep the work? | Because it is true of every run on that tool, so it would be a permanent label wearing warning paint, arriving after the choice it should have informed. |
+| 557 | 2026-09-12 | Was that argued rather than assumed? | Yes, by two sub-agents, and the one arguing for the result panel conceded that a warning which can never be false becomes wallpaper. |
+| 558 | 2026-09-12 | What did the losing side get right? | That the fact has to reach a person at all, because a line in a log is read by nobody who is choosing a tool. |
+| 559 | 2026-09-12 | How is it worded? | It says the tool does not ask before running a command, and that the work still stays in a separate copy of the project. |
+| 560 | 2026-09-12 | Why mention the separate copy? | Because leaving it out would imply something escaped, when what was actually lost is being asked first. |
+| 561 | 2026-09-12 | Will somebody have to remember to remove it? | No -- it comes from a field on the tool's record, so it goes quiet by itself when the tool starts asking again. |
+| 562 | 2026-09-12 | Is that protected? | Yes -- a test requires the note to read as a sentence, to say what the tool will not do, and to contain none of the words from the plumbing. |
