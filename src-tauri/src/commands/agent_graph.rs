@@ -30,6 +30,26 @@ use crate::error::AppError;
 use crate::git::worktree;
 use crate::state::RepoManager;
 
+/// Names in a sentence, the way a person writes them.
+///
+/// `join(" and ")` reads correctly for one or two and breaks at three: "the
+/// backend job and the test job and the docs job". A lead may create up to
+/// three helpers, and a helper can wait on more than one of them, so the
+/// broken form is reachable rather than theoretical -- it is what somebody
+/// reads when their run stalls, which is the worst moment for the sentence to
+/// sound machine-made.
+///
+/// No trailing comma before "and": the house voice writes the way a person
+/// speaks, and this text sits in a chat rather than in a specification.
+fn names_in_a_sentence(names: &[String]) -> String {
+    match names {
+        [] => String::new(),
+        [only] => only.clone(),
+        [a, b] => format!("{a} and {b}"),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
 fn now_rfc3339() -> String {
     time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
@@ -2448,11 +2468,11 @@ fn mark_abandoned_helpers(
             helper.ended_at = Some(now_rfc3339());
             helper.output_summary = Some(format!(
                 "Never started: it needed {} to finish first.",
-                blockers.join(" and ")
+                names_in_a_sentence(&blockers)
             ));
             notes.push(format!(
                 "\"{title}\" never started because {} did not finish.",
-                blockers.join(" and ")
+                names_in_a_sentence(&blockers)
             ));
         }
     });
@@ -3583,6 +3603,38 @@ mod tests {
         assert_eq!(graph.helpers.len(), 1);
     }
     use super::*;
+
+    /// The sentence a person reads when their run stalls.
+    ///
+    /// `join(" and ")` was correct for one and two blockers and broke at
+    /// three, which a lead with three helpers can reach: "the backend job and
+    /// the test job and the docs job".
+    #[test]
+    fn blocker_names_read_as_a_sentence_at_every_count() {
+        let name = |s: &str| s.to_string();
+        assert_eq!(names_in_a_sentence(&[]), "");
+        assert_eq!(names_in_a_sentence(&[name("the backend job")]), "the backend job");
+        assert_eq!(
+            names_in_a_sentence(&[name("the backend job"), name("the test job")]),
+            "the backend job and the test job"
+        );
+        // The case that was wrong. One "and", commas before it.
+        assert_eq!(
+            names_in_a_sentence(&[name("the backend job"), name("the test job"), name("the docs job")]),
+            "the backend job, the test job and the docs job"
+        );
+    }
+
+    #[test]
+    fn a_blocker_sentence_never_repeats_and() {
+        let names: Vec<String> = (1..=3).map(|i| format!("job {i}")).collect();
+        let sentence = names_in_a_sentence(&names);
+        assert_eq!(
+            sentence.matches(" and ").count(),
+            1,
+            "more than one \"and\" is how the machine-made version reads: {sentence}"
+        );
+    }
     use crate::agentdesk::graph::{CompletionCondition, JobBudget};
     use crate::agentdesk::model::{
         AgentSessionHeader, SessionIntent, SessionSource, CURRENT_SCHEMA_VERSION,

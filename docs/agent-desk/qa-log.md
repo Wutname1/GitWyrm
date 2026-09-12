@@ -120,3 +120,13 @@ A: The tally as the headline and the first reason as the detail, since a bare "3
 | 560 | 2026-09-12 | Why mention the separate copy? | Because leaving it out would imply something escaped, when what was actually lost is being asked first. |
 | 561 | 2026-09-12 | Will somebody have to remember to remove it? | No -- it comes from a field on the tool's record, so it goes quiet by itself when the tool starts asking again. |
 | 562 | 2026-09-12 | Is that protected? | Yes -- a test requires the note to read as a sentence, to say what the tool will not do, and to contain none of the words from the plumbing. |
+| 563 | 2026-09-12 | What did re-checking the acceptance list find? | Two entries describing a state that has moved on, and one real fault they were hiding. |
+| 564 | 2026-09-12 | Which entries were stale? | The one saying a sign-in blocked a whole provider, and the one saying four paths could only be reached by unit tests. |
+| 565 | 2026-09-12 | Were those four paths really uncovered? | No -- all four have passing tests, so the wording read as "nobody checked" when the truth is narrower. |
+| 566 | 2026-09-12 | What is the narrower truth? | The logic is tested but the wiring is not: nobody has watched a lead start a helper in the built app. |
+| 567 | 2026-09-12 | Was the wiring at least confirmed to exist? | Yes -- the scheduler is called on the helper path, under a lock, re-reading after each change, which is worth checking rather than assuming. |
+| 568 | 2026-09-12 | Why check that at all? | Because this project has found commands before that existed, were registered, were tested, and were never called by anything. |
+| 569 | 2026-09-12 | What was the real fault? | The sentence telling somebody why a helper never started reads "a and b and c" once three things are named. |
+| 570 | 2026-09-12 | Is three actually reachable? | Yes -- a lead may create three helpers and one can wait on all of them, so it is what somebody reads when their run stalls. |
+| 571 | 2026-09-12 | Why does the wording matter there? | Because it is the worst possible moment for the explanation to sound machine-made. |
+| 572 | 2026-09-12 | Did the tests hold up? | Yes -- put the old version back and both fail, printing the broken sentence word for word. |

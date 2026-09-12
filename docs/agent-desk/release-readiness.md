@@ -60,9 +60,12 @@ tests until native acceptance covers a real Auto graph.
 No unit fixture substitutes for these. Each is a path a person walks in the built app.
 
 1. Open a chat on each of Copilot, Claude Code and Codex with nothing extra installed and
-   get a reply. Codex and Copilot are verified by real-binary tests (`codex_answers_a_real_turn`,
-   `tests/copilot_acp.rs`, both re-run 2026-09-02); Claude is blocked on the development
-   machine by an expired login.
+   get a reply. **Done 2026-09-12**: all three answer a real turn.
+   `codex_answers_a_real_turn` and `claude_answers_a_real_turn` were both run against live
+   binaries (the Claude login that blocked this is no longer expired), and Copilot's
+   `lists_models_and_answers_a_prompt` completes a turn once its assertion stopped gating
+   on the runner's GitHub plan. Still a harness rather than the app, so the chat surface
+   itself is unproven -- but "the provider answers" no longer is.
 2. Send a second message while a turn is running and watch the follow-up turn start on
    its own when the first finishes, and NOT start after pressing Stop.
 3. An Auto chat whose lead proposes helpers: the helpers appear and run without a Start
@@ -77,6 +80,27 @@ No unit fixture substitutes for these. Each is a path a person walks in the buil
 6. The four paths the second audit could only reach in unit tests: a real Auto graph
    that spawns helpers, Stop pressed during the after-run check, a helper whose
    dependency fails, and deleting an imported chat.
+
+   **Re-checked 2026-09-12: all four ARE covered, and the wording above misreads as
+   "uncovered" when the gap is narrower than that.** `schedule_starts_independent_ready_helpers_up_to_the_cap`
+   and `a_helper_waiting_on_a_dead_dependency_is_abandoned_not_blocked` (`agentdesk/graph.rs`),
+   `cancel_wakes_a_waiter` (`airun/cli_run.rs`, alongside a comment recording that a
+   previous review argued from prose that Stop could not reach the audit phase and the
+   tests showed otherwise), and three unlink tests including idempotency
+   (`commands/agent_import.rs`) all pass.
+
+   What is genuinely unproven is the WIRING, not the logic: these are pure-function tests
+   over the scheduler, the cancel primitive and the store. Nobody has watched a real lead
+   spawn a helper in the built app, or pressed Stop while an audit was running. That is a
+   smaller and more honest claim than "only reachable in unit tests", and it is the one
+   an acceptance run has to close.
+
+   The scheduler is genuinely connected, which was worth checking rather than assuming:
+   `graph::schedule` is called twice in `commands/agent_graph.rs` (around the helper
+   integration path), under an integration lock, re-reading the session after any
+   mutation and re-scheduling once abandoned helpers are marked. This is not another of
+   the wiring gaps this project has found before, where a command existed, was
+   registered, was tested and was never called.
 7. The original list: dirty checkouts, two simultaneous same-repo sessions, two real
    uncommitted helpers, delete/rename/binary changes, conflict and restart, child-process
    cleanup, window focus, Split View cross-repo behaviour, scaling, keyboard and
