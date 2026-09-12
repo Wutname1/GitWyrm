@@ -89,9 +89,22 @@ const RULES: Rule[] = [
     // The host will not admit the repository exists. It answers 404 whether the
     // repo is private, renamed, deleted, or merely outside the token's scope, so
     // the app genuinely cannot tell the user which -- say all four rather than
-    // guess. Covers both wordings: git's own `fatal: repository '<url>' not
-    // found` and the API's "could not find that".
-    match: (r) => r.includes("fatal: repository '") || r.includes('could not find that'),
+    // guess. Covers all three wordings: git's own `fatal: repository '<url>' not
+    // found`, the API's "could not find that", and the fetch path's sentence
+    // built separately in commands/remote.rs.
+    //
+    // That third needle is why this rule had to grow. The backend has listed it
+    // as expected since 2026-08-28, but nothing here matched it, so every fetch
+    // 404 fell through to the unclassified branch and filed a crash report in
+    // git's own wording -- 114 of them (GITWYRM-BACKEND-2).
+    //
+    // Matched on the distinctive half, exactly as the backend does. "could not
+    // find" alone is far too broad: it would swallow "could not find commit
+    // <sha>" and the object-not-found faults that must keep reporting.
+    match: (r) =>
+      r.includes("fatal: repository '") ||
+      r.includes('could not find that') ||
+      r.includes('with your sign-in. it may have been moved or renamed'),
     severity: 'warning',
     message:
       "The cloud copy couldn't be found. It may have been renamed or deleted, or your account may not have access to it.",
@@ -169,6 +182,16 @@ const RULES: Rule[] = [
     match: (r) => r.includes('submodule'),
     severity: 'error',
     message: "Couldn't update the submodule. Check that it's set up and try again.",
+  },
+  {
+    // Staging or discarding individual lines when the file's diff is already
+    // empty -- it was staged from elsewhere, or changed underneath the view
+    // between render and click. The selection simply no longer applies. The
+    // backend has treated this as expected since the phrasing landed, but with
+    // no rule here the frontend still filed it as a crash (GITWYRM-BACKEND-6).
+    match: (r) => r.includes('no changes found for this file'),
+    severity: 'info',
+    message: 'Those lines have already moved on. Re-open the file and try again.',
   },
   {
     // Committing with a merge still half-resolved. git will not build a tree

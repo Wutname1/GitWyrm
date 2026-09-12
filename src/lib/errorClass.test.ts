@@ -214,6 +214,49 @@ describe('a cloud copy the host will not admit exists', () => {
     const raw = 'GitHub could not find that. It may be private, renamed, or your token may not cover it.'
     expect(classifyError(new Error(raw)).severity).toBe('warning')
   })
+
+  it('covers the fetch path wording, which the backend classified but this did not', () => {
+    // Verbatim from GITWYRM-BACKEND-2, which filed 114 crash reports because
+    // this sentence is built separately in commands/remote.rs and matched none
+    // of the needles above.
+    const raw =
+      'Command failed: git clone failed: Could not find https://github.com/owner/repo with your sign-in. It may have been moved or renamed, or your account may not have access to it.'
+    const { severity, message } = classifyError(new Error(raw))
+    expect(severity).toBe('warning')
+    expect(message).toMatch(/renamed or deleted/i)
+  })
+
+  it('does not reach a genuine object lookup failure', () => {
+    // "could not find" alone would swallow these, which are real faults that
+    // must keep reporting.
+    for (const raw of [
+      'git error: could not find commit 4f2b1a9; class=Odb (9); code=NotFound (-3)',
+      'could not find object in database',
+    ]) {
+      expect(classifyError(new Error(raw)).severity).toBe('error')
+    }
+  })
+})
+
+describe('picking lines whose diff has already moved on', () => {
+  // Verbatim from GITWYRM-BACKEND-6. The backend classified this as expected in
+  // 1a3cac4, but no rule here matched it, so the frontend kept filing crashes.
+  const RAW = 'mutation failed [error]: no changes found for this file'
+
+  it('is a refusal, not a fault', () => {
+    expect(classifyError(new Error(RAW)).severity).toBe('info')
+  })
+
+  it('tells the user what to do instead of repeating the backend wording', () => {
+    const { message } = classifyError(new Error(RAW))
+    expect(message).toMatch(/already moved on/i)
+    expect(message).not.toMatch(/mutation failed/i)
+  })
+
+  it('does not reach a genuine diff failure that merely mentions changes', () => {
+    const raw = 'git error: failed to load changes for this file; class=Diff (20)'
+    expect(classifyError(new Error(raw)).severity).toBe('error')
+  })
 })
 
 describe('an index that is mid-conflict or damaged', () => {
