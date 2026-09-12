@@ -551,13 +551,24 @@ pub const AGENTS: &[AgentSpec] = &[
         // 'claude-fable-5')". Aliases rather than full names, so the choice
         // keeps following the latest of each family instead of pinning to a
         // version that ages out.
+        //
+        // The names carry the version even though the `id` deliberately does
+        // not. Claude Code's own picker writes them this way -- "Opus 5",
+        // "Fable 5.1", "Sonnet 5", "Haiku 4.5" -- and a bare family name left
+        // people unable to tell which generation they were choosing, or to
+        // match this list against the picker in the tool itself. The version
+        // belongs to the label, which is display, and not to the alias, which
+        // is what keeps following the latest release.
+        //
+        // Ordered most capable first, as Claude Code orders them, rather than
+        // alphabetically.
         model: ModelSupport::Flag {
             flag: "--model",
             choices: &[
-                ModelChoice { id: "sonnet", display_name: "Sonnet" },
-                ModelChoice { id: "opus", display_name: "Opus" },
-                ModelChoice { id: "fable", display_name: "Fable" },
-                ModelChoice { id: "haiku", display_name: "Haiku" },
+                ModelChoice { id: "opus", display_name: "Opus 5" },
+                ModelChoice { id: "fable", display_name: "Fable 5.1" },
+                ModelChoice { id: "sonnet", display_name: "Sonnet 5" },
+                ModelChoice { id: "haiku", display_name: "Haiku 4.5" },
             ],
         },
         // `claude --help` on 2.1.260: `--effort <level>` with
@@ -1086,6 +1097,36 @@ mod tests {
             !args.iter().any(|a| a.contains(',')),
             "a deny flag must name one tool, got {args:?}"
         );
+    }
+
+    #[test]
+    /// Claude's model names carry their generation, because Claude Code's own
+    /// picker does and a bare family name left people unable to tell which one
+    /// they were choosing or to match this list against the tool itself.
+    ///
+    /// The `id` deliberately stays a bare alias: that is what keeps the choice
+    /// following the latest release of each family instead of pinning to a
+    /// version that ages out. So this checks the two halves separately -- the
+    /// label is versioned, the alias is not.
+    #[test]
+    fn claude_model_names_say_which_generation_they_are() {
+        let spec = find("claude").expect("claude row");
+        let ModelSupport::Flag { choices, .. } = spec.model else {
+            panic!("claude offers models through a flag");
+        };
+        assert!(!choices.is_empty(), "claude must offer models");
+        for choice in choices {
+            assert!(
+                choice.display_name.chars().any(|c| c.is_ascii_digit()),
+                "{} is shown without a version, so nobody can tell which generation it is",
+                choice.display_name
+            );
+            assert!(
+                !choice.id.chars().any(|c| c.is_ascii_digit()),
+                "{} pins a version in the alias, which stops it following the latest release",
+                choice.id
+            );
+        }
     }
 
     #[test]

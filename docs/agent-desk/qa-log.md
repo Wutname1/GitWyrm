@@ -497,3 +497,13 @@ competing sub-agents, the answer names the losing option too.
 | 488 | 2026-10-10 | How was the Send button fixed? | The row of controls now wraps onto a second line instead of pushing the button past the edge with no way to reach it. |
 | 489 | 2026-10-10 | Was the result measured rather than assumed? | Yes -- the title bar wanted 968 pixels in a 720 pixel window before, and 510 after, measured in the app's own font. |
 | 490 | 2026-10-10 | Was the running app itself checked? | No -- it needs its desktop shell to start, so the widths are measured and the rules are tested, but the assembled screen is not seen. |
+| 491 | 2026-10-10 | What did the model pickers get wrong? | Codex was offering two versions of a model generation that has been superseded twice, and the Claude list did not say which generation any entry was. |
+| 492 | 2026-10-10 | Why was the Codex list wrong? | It is written into the program by hand, against a version of the tool from several releases ago, so it cannot notice when the tool moves on. |
+| 493 | 2026-10-10 | Can the tool be asked instead? | Yes -- it answers a request for its own model list over the same connection GitWyrm already uses to talk to it, and the answer matches its own picker exactly. |
+| 494 | 2026-10-10 | Was that verified or assumed? | Verified by asking a running copy, which returned every model in the screenshot along with which one is the default. |
+| 495 | 2026-10-10 | Does that fix anything else? | Yes -- the same answer carries how hard each model can be asked to think, which is recorded here as unavailable for that tool. |
+| 496 | 2026-10-10 | Why not just correct the hardcoded names now? | Because they would be wrong again by the next release, and the whole fault is a list that cannot tell when it has gone stale. |
+| 497 | 2026-10-10 | What changed for Claude? | The names now say which generation each is, written the way the tool's own picker writes them. |
+| 498 | 2026-10-10 | Why not put the version in what gets sent to the tool too? | Because the short name is what keeps following the newest release of each family, and pinning it would recreate the problem being fixed. |
+| 499 | 2026-10-10 | Is that split protected? | Yes -- a test now fails if a name loses its version, or if a version creeps into the part that is sent to the tool. |
+| 500 | 2026-10-10 | Why did nobody notice the tool was five releases behind? | Because the only version question asked is whether a tool is too old to work at all, and a merely outdated one answers no. |
