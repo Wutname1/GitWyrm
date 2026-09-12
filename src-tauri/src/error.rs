@@ -421,6 +421,12 @@ mod tests {
         assert!(is_expected(
             "Could not find this repository with your sign-in. It may have been moved or renamed, or your account may not have access to it."
         ));
+        // CLONE phrases it the same way and reached the same needle - confirmed
+        // rather than assumed after a clone 404 appeared the day after the fetch
+        // one (GITWYRM-BACKEND-2).
+        assert!(is_expected(
+            "Command failed: git clone failed: Could not find https://github.com/acme/thing with your sign-in. It may have been moved or renamed, or your account may not have access to it."
+        ));
         // The needle must not reach a real lookup failure that merely says
         // "could not find".
         assert!(!is_expected("could not find commit 0123456789abcdef"));
