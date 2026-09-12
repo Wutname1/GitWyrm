@@ -227,7 +227,7 @@ function AgentRow({ row }: { row: AgentProvider }) {
 
         {row.tooOld && (
           <span className="mt-0.5 text-2xs leading-snug text-muted-foreground">
-            Updating it is enough — GitWyrm found it, but this version is older than it can drive.
+            Updating it is enough. GitWyrm found it, but this version is older than it can drive.
           </span>
         )}
 

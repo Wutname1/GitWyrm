@@ -555,7 +555,10 @@ export function describeCommitDestination(
 export function failingCheckLines(checks: ResultCheckOutcome[]): string[] {
   return checks
     .filter((c) => c.outcome === 'failed')
-    .map((c) => (c.summary ? `${c.commandName} — ${c.summary}` : `${c.commandName} failed`))
+    // A colon, not an em dash. The house rule bans them from anything a
+    // person reads, and this line is read at the moment somebody decides
+    // whether to keep the work.
+    .map((c) => (c.summary ? `${c.commandName}: ${c.summary}` : `${c.commandName} failed`))
 }
 
 /**

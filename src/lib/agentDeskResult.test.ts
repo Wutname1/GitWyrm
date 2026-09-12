@@ -581,7 +581,7 @@ describe('failingCheckLines', () => {
       check('npm run typecheck', 'failed', '3 errors'),
       check('npm test', 'passed'),
     ])
-    expect(lines).toEqual(['npm run typecheck — 3 errors'])
+    expect(lines).toEqual(['npm run typecheck: 3 errors'])
   })
 
   it('still names a failure that reported no detail', () => {

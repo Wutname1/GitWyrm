@@ -130,3 +130,13 @@ A: The tally as the headline and the first reason as the detail, since a bare "3
 | 570 | 2026-09-12 | Is three actually reachable? | Yes -- a lead may create three helpers and one can wait on all of them, so it is what somebody reads when their run stalls. |
 | 571 | 2026-09-12 | Why does the wording matter there? | Because it is the worst possible moment for the explanation to sound machine-made. |
 | 572 | 2026-09-12 | Did the tests hold up? | Yes -- put the old version back and both fail, printing the broken sentence word for word. |
+| 573 | 2026-09-12 | What was checked this pass? | Whether the same kind of wording fault found last time had siblings elsewhere in what people read. |
+| 574 | 2026-09-12 | Did it? | Not that kind, but a different house rule was being broken quietly in two places on screen. |
+| 575 | 2026-09-12 | Which rule? | The one banning the long dash from anything a person reads, which this project writes down and had drifted from anyway. |
+| 576 | 2026-09-12 | Where were they? | On the line naming a failed check, read at the moment work is accepted, and on the row telling somebody their tool is too old. |
+| 577 | 2026-09-12 | Why does it keep coming back? | Because it is the punctuation a machine reaches for when joining two thoughts, so it arrives in new wording long after anyone last read the rule. |
+| 578 | 2026-09-12 | Was a guard already there? | Yes, on exactly one short list, checking one field -- so it protected almost nothing. |
+| 579 | 2026-09-12 | What replaced it? | A check that reads the screens themselves and fails naming the file, the line and the sentence. |
+| 580 | 2026-09-12 | Does it flag comments too? | No -- the rule covers them, but a comment is read by somebody already in the file, while this text reaches people who cannot see it coming. |
+| 581 | 2026-09-12 | Could the check pass by finding nothing anywhere? | No -- a second test plants one and requires it to be found, and requires a commented one to be ignored. |
+| 582 | 2026-09-12 | Was it proved on a real regression? | Yes -- putting one sentence back made it fail, printing the file, the line and the sentence. |
