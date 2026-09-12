@@ -28,7 +28,20 @@ use super::registry::{AgentSpec, ModelSupport};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum ModelSource {
-    /// The tool was asked and answered.
+    /// The tool's own answer, rather than a list GitWyrm made up.
+    ///
+    /// This axis is WHO AUTHORED the list, not how recently it arrived. An
+    /// answer restored from disk is still the tool's own answer -- it was
+    /// asked, and the reply was written down verbatim -- and it is only
+    /// restored while the executable path and version match the install in
+    /// front of us. How fresh an answer is has its own mechanism in `TTL`,
+    /// and how old a remembered one is has its own field in `written_at`;
+    /// neither belongs here.
+    ///
+    /// Recorded rather than left implicit because it was argued twice: the
+    /// alternative was a third variant for remembered answers, which would
+    /// hedge a value that does not warrant hedging and put a word on screen
+    /// nobody can act on.
     Live,
     /// The tool could not be asked, so this is the list built into GitWyrm.
     /// It may be out of date, and says so.
@@ -242,6 +255,22 @@ mod tests {
             catalog.source,
             ModelSource::Live,
             "Codex is installed but its model list could not be read"
+        );
+        // `Live` alone is not proof this ran: a remembered answer restored
+        // from disk carries the same label, correctly, because it is equally
+        // the tool's own answer. This test exists to catch `model/list`
+        // breaking, so it must prove the round trip happened rather than that
+        // a label says it did.
+        //
+        // `catalog` never reads the disk -- persistence lives one layer up, in
+        // `commands::agent_providers` -- and `forget_all_cached` above clears
+        // the in-process one, so reaching the tool is the only way to get here.
+        // Asserted rather than left to that layering, because a later build
+        // that teaches this module to restore would silently disarm the one
+        // check on the live protocol.
+        assert!(
+            catalog.models.iter().any(|m| !m.efforts.is_empty()),
+            "no model reported its reasoning efforts, which only the live protocol carries"
         );
         assert!(!catalog.models.is_empty());
         assert!(

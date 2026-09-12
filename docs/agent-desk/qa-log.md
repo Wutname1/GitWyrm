@@ -78,3 +78,15 @@ A: The tally as the headline and the first reason as the detail, since a bare "3
 | 518 | 2026-09-12 | Would a unit test have caught that? | No, and that is the point of keeping one check that really goes out and asks. |
 | 519 | 2026-09-12 | What happens when the check cannot run? | Nothing is said about that tool, because "we could not look" must never be shown as "you are up to date". |
 | 520 | 2026-09-12 | Does GitWyrm update anything itself? | No -- it shows the command to copy, for the same reason it has never run an install on anyone's behalf. |
+| 521 | 2026-09-12 | What did every relaunch cost? | About four seconds of asking five tools their versions, their models and whether newer ones exist, with nothing on screen until it finished. |
+| 522 | 2026-09-12 | And the next launch? | Did all of it again, having written nothing down. |
+| 523 | 2026-09-12 | What happens now? | The answer from last time is shown at once, then checked again quietly, and the screen updates only if the new answer differs. |
+| 524 | 2026-09-12 | What stops a remembered answer outliving the thing it describes? | It is kept only while the program is in the same place and still prints the same version, and thrown away otherwise. |
+| 525 | 2026-09-12 | Why both, rather than just the version? | Because a second copy taking over can print the same version while being a different install with different models. |
+| 526 | 2026-09-12 | Should a remembered list be labelled differently from one just asked for? | No, after two sub-agents argued it: the label says who wrote the list, and a remembered one is still the tool's own words, written down. |
+| 527 | 2026-09-12 | What did the losing side get right? | That the check proving the tool still answers could have quietly started passing from a file without ever reaching the tool. |
+| 528 | 2026-09-12 | Was that fixed? | Yes -- it now also requires something only the live conversation carries, so it cannot be satisfied by anything remembered. |
+| 529 | 2026-09-12 | Can the built-in list sneak in this way? | No -- only a real answer is ever written down, so the made-up list cannot come back looking like the tool said it. |
+| 530 | 2026-09-12 | What if the file is damaged or from a newer build? | It is treated as nothing remembered, which costs the time it was saving and nothing else. |
+| 531 | 2026-09-12 | Why is the quiet re-check silent when nothing changed? | Because redrawing a list that already matches would move things under the pointer for no reason. |
+| 532 | 2026-09-12 | How is the event name kept honest? | A test reads both sides and fails on a single wrong letter, which would otherwise look exactly like the feature working. |

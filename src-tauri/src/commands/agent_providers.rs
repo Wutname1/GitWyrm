@@ -12,6 +12,8 @@
 
 use std::collections::HashMap;
 
+use tauri::Emitter;
+
 use crate::ai::agent::codex_models::{ModelCatalog, ModelSource};
 use crate::ai::agent::tool_updates::UpdateCheck;
 use crate::ai::agent::copilot_cli::{detect_agent, CliState};
@@ -144,10 +146,51 @@ pub async fn agent_providers_list(
 ) -> Result<AgentProviderChoices, crate::error::AppError> {
     let root = crate::agentdesk::store::SessionStoreRoot::resolve(&app)
         .map_err(|e| crate::error::AppError::Other(e.to_string()))?;
-    // Asked before the blocking work: listing models talks to a child process
-    // over stdio, which is async, and the answer is cached so this is free on
-    // every render after the first.
-    let learned = resolve_learned().await;
+
+    // Answer from what was written down last run, which costs one small file
+    // read and the version probes that are already cached. Before this, the
+    // picker showed nothing for about four seconds on every launch while five
+    // subprocesses and five network calls ran -- and the next launch repeated
+    // all of it, having learnt nothing.
+    let restored = {
+        let app = app.clone();
+        tauri::async_runtime::spawn_blocking(move || restore_learned(&app))
+            .await
+            .map_err(|e| crate::error::AppError::Other(e.to_string()))?
+    };
+
+    let learned = if restored.is_empty() {
+        // Nothing remembered -- a first run, a cleared memory, or an install
+        // that has changed since. There is no faster honest answer than
+        // asking, so this one time the picker waits.
+        let fresh = resolve_learned().await;
+        let to_write = clone_learned(&fresh);
+        let app = app.clone();
+        let _ = tauri::async_runtime::spawn_blocking(move || remember_learned(&app, &to_write)).await;
+        fresh
+    } else {
+        // Check again quietly behind the answer already being returned.
+        // Deliberately not awaited: the whole point is that nobody waits for
+        // it. The event fires only when the fresh answer actually differs, so
+        // a check that confirms what is on screen never redraws it.
+        let shown = clone_learned(&restored);
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let fresh = resolve_learned().await;
+            let differs = differs_from(&shown, &fresh);
+            let to_write = clone_learned(&fresh);
+            let app_for_disk = app.clone();
+            let _ = tauri::async_runtime::spawn_blocking(move || {
+                remember_learned(&app_for_disk, &to_write)
+            })
+            .await;
+            if differs {
+                let _ = app.emit(TOOLS_CHANGED_EVENT, ());
+            }
+        });
+        restored
+    };
+
     tauri::async_runtime::spawn_blocking(move || AgentProviderChoices {
         providers: list(&learned),
         read_only: session_id
@@ -217,6 +260,13 @@ pub async fn agent_providers_refresh(
     .map_err(|e| crate::error::AppError::Other(e.to_string()))
 }
 
+/// Fired when a quiet re-check found something different from what the picker
+/// was already showing.
+///
+/// Carries no payload: the frontend refetches, which keeps one shape for the
+/// answer instead of a second one that could disagree with it.
+pub const TOOLS_CHANGED_EVENT: &str = "agent-tools-changed";
+
 /// Everything learnt about one tool before its row is built.
 ///
 /// One struct rather than a map per fact: `row` already takes a spec, and a
@@ -253,6 +303,172 @@ fn list(learned: &HashMap<&'static str, Learned>) -> Vec<AgentProvider> {
             )
         })
         .collect()
+}
+
+/// `Learned` holds a `ModelCatalog`, which is not `Clone`-derived, so this
+/// spells the copy out rather than making the whole type cloneable for one use.
+fn clone_learned(src: &HashMap<&'static str, Learned>) -> HashMap<&'static str, Learned> {
+    src.iter()
+        .map(|(k, v)| {
+            (
+                *k,
+                Learned { catalog: v.catalog.clone(), update: v.update.clone() },
+            )
+        })
+        .collect()
+}
+
+/// Whether a fresh answer says anything different from the one on screen.
+///
+/// Compares only what a reader would see -- which models are offered, in what
+/// order, and whether a newer release exists. A re-check that confirms the
+/// picker must not redraw it.
+fn differs_from(shown: &HashMap<&'static str, Learned>, fresh: &HashMap<&'static str, Learned>) -> bool {
+    if shown.len() != fresh.len() {
+        return true;
+    }
+    shown.iter().any(|(id, was)| match fresh.get(id) {
+        None => true,
+        Some(now) => {
+            let model_ids = |l: &Learned| {
+                l.catalog
+                    .as_ref()
+                    .map(|c| c.models.iter().map(|m| m.id.clone()).collect::<Vec<_>>())
+                    .unwrap_or_default()
+            };
+            was.update != now.update || model_ids(was) != model_ids(now)
+        }
+    })
+}
+
+/// What was remembered from a previous run, for the tools it is still about.
+///
+/// Reads one small file and asks each tool only for its version, which is the
+/// cached probe. Nothing here goes to the network and nothing spawns a model
+/// query, so the picker can paint from this immediately and check again
+/// afterwards.
+///
+/// An entry is used only when it is about the install in front of us now --
+/// same executable, same version string. Anything else is dropped, because the
+/// moment a tool is updated is exactly when its remembered answer is most
+/// wrong and would be most trusted.
+fn restore_learned(app: &tauri::AppHandle) -> HashMap<&'static str, Learned> {
+    let Ok(app_data) = crate::settings::app_data_dir(app) else {
+        return HashMap::new();
+    };
+    let memory = crate::ai::agent::tool_memory::load(&crate::ai::agent::tool_memory::memory_path(app_data));
+    let mut out: HashMap<&'static str, Learned> = HashMap::new();
+    for spec in registry::AGENTS.iter() {
+        let CliState::Ready { version, path } = detect_agent(spec).state else {
+            continue;
+        };
+        let Some(entry) = memory.tools.get(spec.id) else { continue };
+        if !crate::ai::agent::tool_memory::is_about(entry, &path, &version) {
+            continue;
+        }
+        log::info!(
+            "tool memory: reusing what {} said at {} (written {}s ago)",
+            spec.id,
+            entry.version,
+            crate::ai::agent::tool_memory::now_secs().saturating_sub(entry.written_at)
+        );
+        let learned = out.entry(spec.id).or_default();
+        if !entry.models.is_empty() {
+            learned.catalog = Some(ModelCatalog {
+                models: entry
+                    .models
+                    .iter()
+                    .map(|m| crate::ai::agent::codex::CodexModel {
+                        id: m.id.clone(),
+                        display_name: m.display_name.clone(),
+                        description: m.description.clone(),
+                        is_default: m.is_default,
+                        efforts: m.efforts.clone(),
+                        default_effort: m.default_effort.clone(),
+                    })
+                    .collect(),
+                // The tool's own answer, written down. The comparison against
+                // the newest release is redone below rather than remembered as
+                // a verdict, which would go stale the moment it is updated.
+                source: ModelSource::Live,
+            });
+        }
+        learned.update = entry
+            .latest_release
+            .as_deref()
+            .map(|latest| crate::ai::agent::tool_updates::compare(&version, Some(latest)));
+    }
+    out
+}
+
+/// Writes down what was learnt, so the next run can answer immediately.
+///
+/// Only positive answers are kept. A tool that could not be reached leaves
+/// whatever was remembered about it alone rather than recording the failure,
+/// for the reason detection never caches "not installed": somebody who fixes
+/// the thing that was broken must not keep reading the old answer.
+fn remember_learned(app: &tauri::AppHandle, learned: &HashMap<&'static str, Learned>) {
+    use crate::ai::agent::tool_memory as mem;
+    let Ok(app_data) = crate::settings::app_data_dir(app) else { return };
+    let path = mem::memory_path(app_data);
+    let mut memory = mem::load(&path);
+    let mut changed = false;
+
+    for spec in registry::AGENTS.iter() {
+        let Some(known) = learned.get(spec.id) else { continue };
+        let CliState::Ready { version, path: exe } = detect_agent(spec).state else {
+            continue;
+        };
+        let models: Vec<mem::RememberedModel> = known
+            .catalog
+            .as_ref()
+            .filter(|c| c.source == ModelSource::Live)
+            .map(|c| {
+                c.models
+                    .iter()
+                    .map(|m| mem::RememberedModel {
+                        id: m.id.clone(),
+                        display_name: m.display_name.clone(),
+                        description: m.description.clone(),
+                        is_default: m.is_default,
+                        efforts: m.efforts.clone(),
+                        default_effort: m.default_effort.clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        // Stored as what the source published, not as a verdict.
+        let latest = match &known.update {
+            Some(UpdateCheck::NewerAvailable { latest }) => Some(latest.clone()),
+            Some(UpdateCheck::UpToDate) => Some(version.clone()),
+            _ => None,
+        };
+        if models.is_empty() && latest.is_none() {
+            continue;
+        }
+        let existing = memory.tools.get(spec.id);
+        let entry = mem::Remembered {
+            path: exe,
+            version,
+            // Keep whatever was already known where this run learnt nothing
+            // new, so one unreachable half does not erase the other.
+            models: if models.is_empty() {
+                existing.map(|e| e.models.clone()).unwrap_or_default()
+            } else {
+                models
+            },
+            latest_release: latest.or_else(|| existing.and_then(|e| e.latest_release.clone())),
+            written_at: mem::now_secs(),
+        };
+        if existing != Some(&entry) {
+            memory.tools.insert(spec.id.to_string(), entry);
+            changed = true;
+        }
+    }
+
+    if changed {
+        mem::save(&path, &memory);
+    }
 }
 
 /// Asks each tool, and the place its releases are published, what they know.

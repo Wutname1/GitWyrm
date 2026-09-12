@@ -142,6 +142,13 @@ let unlistenFn: (() => void) | null = null
 let listenerStarting = false
 
 /**
+ * Fired when a quiet re-check of the installed AI tools found something
+ * different from what was already on screen. Matches
+ * `commands::agent_providers::TOOLS_CHANGED_EVENT`.
+ */
+const TOOLS_CHANGED_EVENT = 'agent-tools-changed'
+
+/**
  * Subscribes to `agent-session-event` exactly once for the whole window and
  * routes every event into the live-event store, invalidating the affected
  * session's (and its list's) queries so a background tab or a fresh mount
@@ -161,6 +168,21 @@ export function useAgentSessionListener() {
 
     if (!unlistenFn && !listenerStarting) {
       listenerStarting = true
+      // The tool list is checked again quietly after being answered from what
+      // GitWyrm wrote down last run, and this fires only when that check found
+      // something different -- a tool installed, updated, or offering
+      // different models. Every screen that lists tools shares the
+      // `agentProviders` key prefix, so one invalidation reaches all of them
+      // and each refetches only if it is actually mounted.
+      //
+      // Rides the same subscription rather than opening a second one: this
+      // listener already runs exactly once per window, with the refcount
+      // bookkeeping that makes that true under StrictMode, and a parallel
+      // singleton would be a second copy of that same delicate thing.
+      void listen(TOOLS_CHANGED_EVENT, () => {
+        void qc.invalidateQueries({ queryKey: ['agentProviders'] })
+      })
+
       void listen<AgentSessionEvent>(AGENT_SESSION_EVENT, (event) => {
         useAgentSessionStore.getState().applyEvent(event.payload)
         qc.invalidateQueries({ queryKey: keys.agentSession(event.payload.sessionId) })
