@@ -368,3 +368,54 @@ describe('the project filter list', () => {
     expect(choices[0]).toMatchObject({ name: 'No project recorded', count: 2 })
   })
 })
+
+/**
+ * Two things sync must not do, checked against the source because the wiring
+ * that decides them lives in a component and this project has no DOM test
+ * environment (`vitest.config.ts`).
+ *
+ * Both were real defects in this rebuild, caught on review rather than by a
+ * test, which is exactly why they are pinned now: neither produces an error,
+ * and both are invisible until someone is midway through picking chats.
+ */
+describe('keeping in sync stays out of the way', () => {
+  function importPickerSource(): string {
+    // @ts-expect-error -- no @types/node in this project; available at runtime
+    const { readFileSync } = require('node:fs')
+    // @ts-expect-error -- no @types/node in this project; available at runtime
+    const { fileURLToPath } = require('node:url')
+    const path = fileURLToPath(
+      new URL('../components/domain/agent-desk/ImportPicker.tsx', import.meta.url)
+    )
+    return readFileSync(path, 'utf8')
+  }
+
+  /**
+   * Sync runs on a timer. If it cleared the selection the way a pressed import
+   * does, it would reach in every few minutes and discard chats someone was
+   * halfway through picking, with no action of theirs to explain it.
+   */
+  it('a timed import never clears a selection the person is building', () => {
+    const source = importPickerSource()
+    // The clear inside the batch handler is guarded by "this batch was pressed
+    // for", rather than running at the end of every batch. The Clear button's
+    // own call is deliberately not covered here -- that one IS the person
+    // asking.
+    expect(source).toMatch(/if\s*\(!syncedFrom\)\s*\{[\s\S]{0,120}setSelectedIds\(\[\]\)/)
+    // And the guard is inside the batch result handler, not somewhere it
+    // could never run.
+    expect(source).toMatch(/summarizeBatchImport[\s\S]{0,1400}if\s*\(!syncedFrom\)/)
+  })
+
+  /**
+   * The poll and the import effect read `onImport`/`refetch` through refs. Both
+   * change identity on nearly every render, so listing them as dependencies
+   * rebuilds the interval before it can ever fire -- the toggle would look on
+   * and never actually check.
+   */
+  it('the timer is not rebuilt on every render', () => {
+    const source = importPickerSource()
+    expect(source).toContain('refetchRef.current()')
+    expect(source).toMatch(/SYNC_POLL_MS\)\s*\n\s*return \(\) => window\.clearInterval\(id\)\s*\n\s*\},\s*\[syncOn, enabled\]\)/)
+  })
+})

@@ -48,3 +48,13 @@ A: A batch holds the session lock and writes a session file per chat; over the l
 
 **Q: Was the existing `absenceClaimContract` test enough to cover the unreadable-folder rule here?**
 A: No - it matches only the `query.data ?? []` shape, and reverting this surface's failure branch to "No chats found for this AI tool." left every existing check green, so a second contract now covers `isError` branches that state an absence.
+
+**Q: Why do the sync effects read `onImport` and `refetch` through refs instead of listing them as dependencies?**
+A: Both change identity on nearly every render, so depending on them rebuilt the three-minute interval before it could ever fire - the toggle would have read as on and never actually checked.
+
+**Q: Does a sync-triggered batch clear the selection the way a pressed one does?**
+A: No - sync runs on a timer, and clearing would discard chats someone was midway through picking with no action of theirs to explain it.
+
+**Q: What does a person see when some chats in a batch refuse?**
+A: The tally as the headline and the first reason as the detail, since a bare "3 could not be brought in" says nothing about whether a file is damaged or the tool has gone.
+

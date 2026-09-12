@@ -258,19 +258,34 @@ function AdapterChats({
           }
           const summary = summarizeBatchImport(result.items, adapterId)
           const syncLine = syncedFrom ? explainSyncImport(summary, syncedFrom) : null
-          if (syncLine) toast.success(syncLine)
-          else if (summary.ok) toast.success(summary.message)
-          else toast.error(summary.message)
+          const headline = syncLine ?? summary.message
+          // A reason, not just a tally. "3 could not be brought in" with
+          // nothing else leaves the person no idea whether a file is damaged
+          // or the tool has gone -- and the reasons are usually all the same
+          // one, so the first names the problem for the group.
+          const detail =
+            summary.failed.length === 0
+              ? undefined
+              : summary.failed.length === 1
+                ? summary.failed[0]?.reason
+                : `${summary.failed[0]?.reason} (and ${summary.failed.length - 1} more)`
+
+          if (summary.ok) toast.success(headline)
+          else toast.error(headline, { description: detail })
+
           if (summary.failed.length > 0) {
-            // The first refusal by name, not just a count: "3 could not be
-            // brought in" with no reason leaves nothing to act on, and the
-            // reasons are usually all the same one.
             log.error(
               `batch import from ${adapterId}: ${summary.failed.map((f) => f.reason).join('; ')}`
             )
           }
-          setSelectedIds([])
-          setAnchor(null)
+
+          // Only a batch the person pressed for clears their selection. Sync
+          // runs on a timer and must never reach in and discard chats someone
+          // is in the middle of picking.
+          if (!syncedFrom) {
+            setSelectedIds([])
+            setAnchor(null)
+          }
         },
       }
     )
@@ -283,7 +298,6 @@ function AdapterChats({
 
   useImportSync({
     adapterId,
-    adapterName,
     enabled,
     sessions,
     scanning: scan.isFetching,
@@ -840,7 +854,6 @@ function ChatDetails({
  */
 function useImportSync({
   adapterId,
-  adapterName,
   enabled,
   sessions,
   scanning,
@@ -848,7 +861,6 @@ function useImportSync({
   onImport,
 }: {
   adapterId: string
-  adapterName: string
   enabled: boolean
   sessions: ScannedExternalSession[]
   scanning: boolean
@@ -858,6 +870,16 @@ function useImportSync({
   const prefs = useAgentImportSyncPreferences()
   const scan = useAgentImportScan(adapterId, enabled)
   const syncOn = prefs.data?.some((p) => p.adapterId === adapterId && p.enabled) ?? false
+
+  // `onImport` and `refetch` are read through refs rather than listed as
+  // dependencies. Both change identity on almost every render -- `onImport` is
+  // built inline by the caller, and the query object is replaced on each fetch
+  // -- so depending on them would tear down and rebuild the interval below
+  // before it could ever fire, and re-run the import effect continuously.
+  const onImportRef = useRef(onImport)
+  onImportRef.current = onImport
+  const refetchRef = useRef(scan.refetch)
+  refetchRef.current = scan.refetch
 
   // What sync has already acted on, so a chat it brought in is not offered
   // again on the next tick before the scan has refetched.
@@ -892,8 +914,8 @@ function useImportSync({
     if (fresh.length === 0) return
 
     for (const id of fresh) handled.current.add(id)
-    onImport(fresh)
-  }, [syncOn, enabled, sessions, scanning, importing, onImport])
+    onImportRef.current(fresh)
+  }, [syncOn, enabled, sessions, scanning, importing])
 
   // The timer only re-scans; the effect above decides what to do with what it
   // finds. Cleared whenever sync goes off or the view closes, so nothing keeps
@@ -901,8 +923,8 @@ function useImportSync({
   useEffect(() => {
     if (!syncOn || !enabled) return
     const id = window.setInterval(() => {
-      void scan.refetch()
+      void refetchRef.current()
     }, SYNC_POLL_MS)
     return () => window.clearInterval(id)
-  }, [syncOn, enabled, scan])
+  }, [syncOn, enabled])
 }
