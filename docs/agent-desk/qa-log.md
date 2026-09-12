@@ -443,3 +443,12 @@ competing sub-agents, the answer names the losing option too.
 | 434 | 2026-10-09 | Did the new tests hold up? | Not the first one -- it passed even with the fix removed, because the placeholder sorts last under the old rule anyway. |
 | 435 | 2026-10-09 | How was that fixed? | By testing a chat genuinely dated before 1970, which is the only case where the old and new rules disagree. |
 | 436 | 2026-10-09 | Anything still worth doing here? | Yes -- the list still never says a chat has no date, though the wording already exists one field over for a missing project. |
+| 437 | 2026-10-10 | What did this pass start from? | A fresh design critique of the first screen, scoring it 22 of 40, plus a four-item audit carried over from two days earlier. |
+| 438 | 2026-10-10 | Were the critique's five priority problems still real? | No -- all five had been fixed since it was captured, which its own recorded fingerprint of the file proves by no longer matching. |
+| 439 | 2026-10-10 | Why re-read the file rather than trust the critique? | Because a critique is a photograph, and four of the commits since it was taken were rewrites of the exact screen it photographed. |
+| 440 | 2026-10-10 | Had the direction the user chose actually been carried out? | Yes, every part -- the four sections deleted, starting points only when the project really offers them, any folder openable, and the mode control now a menu rather than a row. |
+| 441 | 2026-10-10 | Was anything from the critique genuinely still open? | Yes -- the parts about people who do not use a mouse, which the fixes to the visible layout never touched. |
+| 442 | 2026-10-10 | What was wrong for them? | The project chip read aloud as a bare word with no hint it opened anything, and the folder it names was hidden in a hover tooltip. |
+| 443 | 2026-10-10 | What about the line saying what started the chat? | It was cut short on screen at a fixed width, and the rest of the sentence was in a tooltip no screen reader ever reaches. |
+| 444 | 2026-10-10 | And the row of suggested starting points? | It was a loose run of buttons with nothing saying what they were or that ignoring them was fine, so each is now part of a named set. |
+| 445 | 2026-10-10 | Was the "still says Opening… over a live form" complaint fixed too? | It fixed itself -- with the four sections gone there is no live form behind it, so the greyed-out chip is now an accurate statement. |

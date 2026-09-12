@@ -166,6 +166,13 @@ export function NewChatLanding({
                 // visible until it finished.
                 disabled={projectChanging}
                 title={projectPath}
+                // The visible chip is the project name alone, which read as a
+                // bare word with no hint that it opens anything. The path
+                // lives in `title`, which a keyboard or screen-reader user
+                // never reaches, so it is named here too -- the one place the
+                // machine detail is genuinely wanted is when you are checking
+                // which of two similarly named folders this chat is bound to.
+                aria-label={`Project: ${projectName}${projectPath ? ` (${projectPath})` : ''}. Choose a different project`}
                 className="flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-2xs font-semibold text-sub hover:bg-panel3 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <FolderGit2 size={12} className="flex-none text-accent-text" aria-hidden />
@@ -194,9 +201,20 @@ export function NewChatLanding({
             <span
               className="flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-2xs font-semibold text-sub"
               title={startedFrom.detail ?? startedFrom.title}
+              // The visible text truncates at 18rem and the rest of the
+              // sentence is in `title`, which never reaches a screen reader.
+              // Read whole, it is the one thing on this screen no other agent
+              // client can say: what this chat was started from.
+              aria-label={
+                startedFrom.detail
+                  ? `Started from ${startedFrom.title} -- ${startedFrom.detail}`
+                  : `Started from ${startedFrom.title}`
+              }
             >
               <Link2 size={12} className="flex-none text-accent-text" aria-hidden />
-              <span className="max-w-[18rem] truncate">{startedFrom.title}</span>
+              <span className="max-w-[18rem] truncate" aria-hidden>
+                {startedFrom.title}
+              </span>
             </span>
           )}
         </div>
@@ -206,7 +224,15 @@ export function NewChatLanding({
           ordinary case for a clean tree and renders nothing at all, rather
           than a row of prompts anyone could have written. */}
       {starters.length > 0 ? (
-        <div className="mb-auto flex w-full max-w-lg flex-wrap justify-center gap-1.5">
+        // Named as a group, so a screen reader reaches a labelled set of
+        // optional starting points rather than a bare run of buttons with no
+        // hint of what they are or that skipping them is fine. The composer's
+        // own control rows are grouped the same way.
+        <div
+          role="group"
+          aria-label="Starting points from this project"
+          className="mb-auto flex w-full max-w-lg flex-wrap justify-center gap-1.5"
+        >
           {starters.map((starter) => (
             <button
               key={starter.id}
