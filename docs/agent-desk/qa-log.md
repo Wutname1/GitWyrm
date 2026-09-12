@@ -90,3 +90,15 @@ A: The tally as the headline and the first reason as the detail, since a bare "3
 | 530 | 2026-09-12 | What if the file is damaged or from a newer build? | It is treated as nothing remembered, which costs the time it was saving and nothing else. |
 | 531 | 2026-09-12 | Why is the quiet re-check silent when nothing changed? | Because redrawing a list that already matches would move things under the pointer for no reason. |
 | 532 | 2026-09-12 | How is the event name kept honest? | A test reads both sides and fails on a single wrong letter, which would otherwise look exactly like the feature working. |
+| 533 | 2026-09-12 | What did running the two never-run Claude checks show? | One passed on the first try, and the other found two real faults in how GitWyrm starts a writing run. |
+| 534 | 2026-09-12 | What was the first fault? | A writing run could not run a command at all, because the word GitWyrm used to ask for the tools back does not ask for them. |
+| 535 | 2026-09-12 | Was the word wrong or the documentation? | The documentation says it means "all tools", and asking the program directly shows it returns twelve tools and not the one that runs commands. |
+| 536 | 2026-09-12 | Why not simply name the command tool then? | Because naming any tool replaces the whole set, so naming only that one would have traded not running commands for not reading files. |
+| 537 | 2026-09-12 | Can asking tools back reach past a refusal? | No, and a test now proves it: anything the run was refused is left out of the list it asks for. |
+| 538 | 2026-09-12 | What was the second fault? | With commands working, one ran without anybody being asked to approve it. |
+| 539 | 2026-09-12 | Is that the same as the program refusing quietly? | No, and it is worse -- a run that silently allows looks exactly like a run somebody approved. |
+| 540 | 2026-09-12 | Was a fix found? | No -- three different settings were tried and none of them produced a request for approval. |
+| 541 | 2026-09-12 | Why stop rather than keep guessing? | Because the message shapes were read out of an older copy of the program and are written down nowhere, so a guess would ship a safety claim resting on an assumption. |
+| 542 | 2026-09-12 | What is actually at risk? | Consent, not containment -- the work still happens inside its own isolated folder, but nobody is asked first. |
+| 543 | 2026-09-12 | Are read-only chats affected? | No -- those are held by refusing the tools before the program starts, rather than by asking during it. |
+| 544 | 2026-09-12 | What changed in the meantime? | The comments that stated the approval step as a fact now state it as an intention, with the evidence beside them. |

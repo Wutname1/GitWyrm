@@ -26,6 +26,42 @@
 //! Every other `control_request` subtype (hooks, MCP relays, dialogs) is
 //! answered with an error frame so the CLI never waits on something GitWyrm
 //! will not provide.
+//!
+//! # The gate does not fire on 2.1.260 (found 2026-09-12, UNFIXED)
+//!
+//! The paragraph above describes 2.1.251. On 2.1.260 a writing run executes a
+//! Bash command and **no `control_request` arrives at all** -- verified by
+//! logging every frame the CLI sends during
+//! `claude_routes_a_command_through_the_gate`, which had never been run before
+//! today and fails on exactly this. The command runs; nobody is asked.
+//!
+//! Neither auto-deny nor prompt-and-wait: a third behaviour neither this
+//! module nor `registry.rs` anticipated, and the more dangerous one, because a
+//! run that silently allows is indistinguishable from a run that was approved.
+//!
+//! Ruled out by direct experiment, not inference:
+//!
+//! - `--permission-mode manual` (a documented value; `default` is not one,
+//!   though the CLI accepts it without complaint). No frame.
+//! - `--permission-prompts host`, stated explicitly rather than relied on as
+//!   the default. No frame.
+//! - Dropping `--restricted` from the writing run entirely. No frame.
+//!
+//! The shapes here were read out of the 2.1.251 binary and nothing about them
+//! is documented, so the protocol is free to move and appears to have. Guessing
+//! the new one would mean shipping a safety claim on an assumption, which is
+//! the position this comment exists to prevent someone taking.
+//!
+//! **What this costs today.** A writing run keeps `--restricted` and its
+//! isolated worktree, so file access stays inside the run's own directory and
+//! Claude Code still guards git and settings files. What is missing is the
+//! person's consent: `RunStep::Gate` never reaches the approval card, and
+//! `policy::check_tool_capability`'s runtime half never runs for this provider.
+//! Codex and the ACP tools are unaffected -- both still gate.
+//!
+//! Read-only runs are not affected either: they are held by
+//! `--permission-mode plan` plus launch-flag denial of shell and write, which
+//! is enforcement before the process starts rather than a prompt during it.
 
 use std::path::Path;
 use std::process::Stdio;
@@ -280,15 +316,62 @@ impl ClaudeConnection {
 ///
 /// Permissions are routed to GitWyrm (`--permission-prompt-tool stdio`, see
 /// the module notes) and the mode is left at `default` for a writing run, so
-/// both edits and commands come to the person's gate instead of being
-/// auto-accepted by `acceptEdits`. A read-only run stays in `plan`, where
-/// Claude Code refuses writes itself and the gate refuses anything that
-/// still gets through.
+/// both edits and commands are MEANT to come to the person's gate instead of
+/// being auto-accepted by `acceptEdits`.
 ///
-/// `--restricted` keeps file tools inside the run's working directory but
-/// also removes Bash "unless --tools names them", so a writing run adds
-/// `--tools default` to get commands back. Whether that spelling satisfies
-/// the exception is verified by the ignored real-binary test, not assumed.
+/// On 2.1.260 they do not: no `control_request` arrives and the command runs
+/// unasked. Stated here as an intent rather than a fact, because this comment
+/// asserting it as a fact is what a future reader would trust instead of
+/// re-testing. See the module doc for what was ruled out.
+///
+/// A read-only run stays in `plan`, where Claude Code refuses writes itself
+/// and launch-flag denial keeps shell and write tools out of the process
+/// altogether -- that half is enforcement before launch, and is unaffected.
+///
+/// The tools a writing run needs back after `--restricted` reshapes the set.
+///
+/// Named explicitly, and all of them, because naming ANY tool REPLACES the
+/// available set rather than adding to it. Asked directly: a restricted run
+/// with `--tools Bash` reports Bash and no `Read` or `Edit`, and so does
+/// `--tools default --tools Bash`. So a list that names only the shell tools
+/// would trade "cannot run a command" for "cannot read a file", which is
+/// worse for the runs this exists to fix.
+///
+/// Deliberately GitWyrm's own dependency list rather than whatever the CLI
+/// happens to expose: a restricted run with no `--tools` at all also offers
+/// tools that belong to the machine it is running on, and naming those would
+/// pin this build to one environment.
+///
+/// Not read from the registry's `tool_names`, which answers the opposite
+/// question -- what to DENY. A name added there to close a hole would
+/// silently start re-opening it here.
+const WRITING_RUN_TOOLS: &[&str] = &[
+    "Read", "Write", "Edit", "NotebookEdit", "Glob", "Grep", "Bash", "BashOutput", "KillShell",
+];
+
+/// `--restricted` keeps file tools inside the run's working directory but also
+/// removes the command-running tools "unless --tools names them".
+///
+/// It has to NAME them, and `default` is not a name. GitWyrm passed
+/// `--tools default`, which the CLI's own help documents as "use all tools"
+/// and which reads like the right answer -- and which does not restore Bash.
+/// Asked directly, a restricted run with `--tools default` reports twelve
+/// tools and no Bash. So every writing run has been launching unable to run a
+/// command: an agent asked to run the tests answered that the tool was not
+/// available to it.
+///
+/// The doc comment here used to say this spelling was "verified by the
+/// ignored real-binary test, not assumed" -- honest, and that test had never
+/// been run. Its first run failed on exactly this.
+///
+/// `--tools` is variadic: one flag, then the names. Repeating the flag is
+/// accepted but consumes the following words, which is how a probe of this
+/// ended up eating its own prompt.
+///
+/// Denied tools are never asked back for. A capability this run may not have
+/// arrives as a `--disallowedTools=Name` entry in `base`, and anything named
+/// there is left out -- so this can only widen a writing run toward what it
+/// was already allowed, never past a denial.
 fn launch_args(base: &[String], read_only: bool) -> Vec<String> {
     let mut args = base.to_vec();
     args.push("--permission-mode".into());
@@ -299,8 +382,21 @@ fn launch_args(base: &[String], read_only: bool) -> Vec<String> {
     // Claude Code itself to guard Git/settings/tool-configuration files.
     args.push("--restricted".into());
     if !read_only {
-        args.push("--tools".into());
-        args.push("default".into());
+        let denied: Vec<&str> = base
+            .iter()
+            .filter_map(|a| a.strip_prefix("--disallowedTools="))
+            .collect();
+        let wanted: Vec<&str> = WRITING_RUN_TOOLS
+            .iter()
+            .copied()
+            .filter(|t| !denied.contains(t))
+            .collect();
+        if !wanted.is_empty() {
+            args.push("--tools".into());
+            for tool in wanted {
+                args.push(tool.into());
+            }
+        }
     }
     args
 }
@@ -682,7 +778,14 @@ mod tests {
                     Incoming::PermissionRequest(req) => {
                         eprintln!("gate: {} ({:?}, {:?})", req.summary, req.capability, req.path);
                         assert_eq!(req.capability, ToolCapability::EditFile);
-                        gated += 1;
+                        // The Bash call specifically, not any prompt at all: a
+                        // bare count would pass if some other tool gated while
+                        // the command slipped through, which is the failure
+                        // this exists to catch. `permission_summary` writes a
+                        // command as "Run <command>".
+                        if req.summary.starts_with("Run ") {
+                            gated += 1;
+                        }
                         let _ = req.respond.send(PermissionDecision::AllowOnce);
                     }
                     Incoming::TextChunk(t) => said.push_str(&t),
@@ -697,7 +800,10 @@ mod tests {
         }
         conn.shutdown().await;
         eprintln!("claude said: {said:?}; gated {gated} time(s)");
-        assert!(gated >= 1, "the Bash call never reached GitWyrm's gate");
+        assert!(
+            gated >= 1,
+            "the Bash call never reached GitWyrm's gate -- see this module's doc              on 2.1.260, where no control_request arrives at all and the              command runs unasked"
+        );
         assert!(said.contains("GATE-PONG"), "got {said:?}");
     }
 
@@ -758,14 +864,49 @@ mod tests {
                 "without the stdio prompt route the CLI auto-denies every prompt: {args:?}"
             );
         }
+        // Named, not "default". Asked directly, a restricted run with
+        // `--tools default` reports twelve tools and no Bash -- so every
+        // writing run was launching unable to run a command, and an agent
+        // asked to run the tests said the tool was not available to it.
         assert!(
-            writing.windows(2).any(|pair| pair == ["--tools", "default"]),
-            "a writing run must name the tools back that --restricted removes"
+            writing.contains(&"Bash".to_string()),
+            "a writing run must name Bash back, which --restricted removes: {writing:?}"
         );
+        // And naming any tool replaces the set, so the file tools have to be
+        // named too or this trades "cannot run a command" for "cannot read a
+        // file".
+        for tool in ["Read", "Write", "Edit", "Glob", "Grep"] {
+            assert!(
+                writing.contains(&tool.to_string()),
+                "naming tools replaces the set, so {tool} must be named too: {writing:?}"
+            );
+        }
         assert!(
             !read_only.contains(&"--tools".to_string()),
             "a read-only run keeps Bash absent as a second line of defence"
         );
+    }
+
+    /// Asking tools back must never reach past a denial.
+    ///
+    /// The list of tools a writing run names is fixed, while what it is
+    /// allowed to touch is not -- so the two have to be intersected. Without
+    /// this, a Fix session that denied the shell would have had it handed
+    /// straight back by the same flag that restores file access.
+    #[test]
+    fn a_denied_tool_is_never_named_back() {
+        let spec = crate::ai::agent::registry::find("claude").expect("claude row");
+        let base = spec.launch_args(&["url", "shell"]);
+        let writing = launch_args(&base, false);
+        for denied in ["Bash", "BashOutput", "KillShell"] {
+            assert!(
+                !writing.contains(&denied.to_string()),
+                "{denied} was denied and must not be named back: {writing:?}"
+            );
+        }
+        // The rest still are, or the run cannot do its job.
+        assert!(writing.contains(&"Read".to_string()));
+        assert!(writing.contains(&"Edit".to_string()));
     }
 
     /// Shape taken from the CLI binary (2.1.251): a Bash prompt names the

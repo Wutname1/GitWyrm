@@ -105,6 +105,34 @@ The Claude bridge is the newest and least proven row. Two ignored real-binary te
 (`claude_answers_a_real_turn`, `claude_routes_a_command_through_the_gate`) exist for the
 first signed-in machine; until one has passed, treat "Claude runs commands" as a claim.
 
+**Release blocker found 2026-09-12: the Claude gate does not fire.**
+
+`claude_routes_a_command_through_the_gate` was run for the first time and
+failed. Two separate defects, one fixed and one open.
+
+Fixed: a writing run could not run a command at all. `--restricted` removes the
+command-running tools "unless --tools names them", and GitWyrm passed
+`--tools default` -- which the CLI's own help documents as "use all tools" and
+which does not restore Bash. Asked directly, a restricted run with
+`--tools default` reports twelve tools and no Bash. Naming any tool also
+REPLACES the set, so the file tools have to be named too or the fix trades
+"cannot run a command" for "cannot read a file". Both halves are now unit
+tested, including that a denied tool is never named back.
+
+Open, and a release blocker for Claude writing runs: with Bash restored, the
+command runs and **no `control_request` reaches GitWyrm**. Verified by logging
+every frame the CLI sends. Ruled out by experiment: `--permission-mode manual`
+(a documented value, unlike `default`), `--permission-prompts host` stated
+explicitly, and dropping `--restricted` entirely. The frame shapes were read
+out of the 2.1.251 binary and are undocumented; the installed CLI is 2.1.260.
+
+Blast radius is consent, not containment: `--restricted` and the isolated
+worktree still hold, and read-only runs are unaffected because they are held by
+launch-flag denial before the process starts. Codex and the ACP tools still
+gate. What is missing is that `RunStep::Gate` never reaches the approval card
+for this provider, so Auto on Claude asks before nothing. The comments that
+stated the gate as fact now state it as an intent with the evidence beside it.
+
 **Evidence gained 2026-10-10.** The ignored tests were run for the first time on a
 machine with `copilot` 1.0.82, `claude` 2.1.260, `codex` 0.151.0 and `opencode` 1.18.10
 installed. Five now pass and are recorded rather than claimed: the shell probe, skills
