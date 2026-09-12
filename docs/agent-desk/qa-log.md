@@ -170,3 +170,14 @@ A: The tally as the headline and the first reason as the detail, since a bare "3
 | 610 | 2026-09-12 | Was that followed rather than silenced? | Yes, the list and both notes were moved together, so the record still matches what a person can actually reach. |
 | 611 | 2026-09-12 | What is left of the three? | Starting from one commit's diff, which needs a menu item, and starting from a failed check, which has no way to build one yet. |
 | 612 | 2026-09-12 | Was the menu seen in the running app? | No -- it needs the desktop shell to start, so the wording and the states are proved and the drawn menu is not. |
+| 613 | 2026-09-12 | Should starting a chat from a commit's diff be built next? | No, decided by two sub-agents: a commit already has its own way in, and a chat about one runs against the real repository holding the real sha. |
+| 614 | 2026-09-12 | What would the extra entry have added? | A list of file names the agent can already get for itself, on the longest menu in the app, with no difference a person could perceive. |
+| 615 | 2026-09-12 | Would it have cost anything? | Yes -- two different stored identities for one real thing, and the weaker of the two carries no commit at all. |
+| 616 | 2026-09-12 | What was that builder actually for? | A selection: the staged files, the unstaged ones, a pattern, a range -- not an object that already has its own kind. |
+| 617 | 2026-09-12 | Had this been decided before? | Yes, twice in an earlier audit, which declined the same two entry points for want of a proper place to put them. |
+| 618 | 2026-09-12 | Does that mean last pass ignored the precedent? | No -- the reason given then was that those rows had no right-click menu, and one has since been added, so the place it was waiting for now exists. |
+| 619 | 2026-09-12 | Did the argument turn up a real fault? | Yes -- a chat about a set of files was telling the agent the first five and "and 7 more". |
+| 620 | 2026-09-12 | Why did that happen? | The wording was written for a small label in the sidebar and was being reused as the instruction handed to the agent. |
+| 621 | 2026-09-12 | Was the full list available? | Yes, stored in full the whole time and simply not passed on. |
+| 622 | 2026-09-12 | What about the other kinds? | They keep their short wording, because each points at something the agent can go and fetch, while these two are the list. |
+| 623 | 2026-09-12 | And starting from a failed check? | Further off than it looked -- nothing in the app fetches or shows whether a check passed, so it is a feature rather than a menu item. |

@@ -1940,13 +1940,31 @@ fn truncate_prompt_text(text: &str, max_chars: usize) -> (String, usize) {
 fn source_summary(source: &SessionSource) -> (String, String) {
     match source {
         SessionSource::Manual { .. } => (String::new(), String::new()),
+        // The two kinds that ARE a set of files name every one of them.
+        //
+        // The snapshot's summary is written for a chip in the sidebar, so it
+        // stops after five and says "and 7 more". That is right on screen and
+        // wrong in a prompt: the paths are stored in full, durably, and the
+        // agent was being told a file it must look at exists without being
+        // told which. Every other kind points at something the agent can go
+        // and read for itself -- a sha, an issue number -- and these two are
+        // the list.
+        SessionSource::Diff { snapshot, paths, .. }
+        | SessionSource::WorkingChanges { snapshot, paths, .. } => {
+            let summary = if paths.is_empty() {
+                snapshot.summary.clone()
+            } else {
+                format!("Changed files:
+{}", paths.join("
+"))
+            };
+            (snapshot.title.clone(), summary)
+        }
         SessionSource::Issue { snapshot, .. }
         | SessionSource::PullRequest { snapshot, .. }
         | SessionSource::OpenSpecChange { snapshot, .. }
         | SessionSource::OpenSpecTask { snapshot, .. }
         | SessionSource::Commit { snapshot, .. }
-        | SessionSource::Diff { snapshot, .. }
-        | SessionSource::WorkingChanges { snapshot, .. }
         | SessionSource::CheckFailure { snapshot, .. }
         | SessionSource::Imported { snapshot, .. } => {
             (snapshot.title.clone(), snapshot.summary.clone())
@@ -3490,6 +3508,61 @@ mod tests {
             },
             intent: SessionIntent::Ask,
         }
+    }
+
+    fn snap(title: &str, summary: &str) -> SourceSnapshot {
+        SourceSnapshot {
+            title: title.into(),
+            summary: summary.into(),
+            captured_at: "2026-01-01T00:00:00Z".into(),
+            live_unavailable: false,
+        }
+    }
+
+    /// A chat about a set of files tells the agent every one of them.
+    ///
+    /// The snapshot's summary is written for a chip in the sidebar, so it
+    /// stops after five and says "and 7 more". Sent to an agent that is meant
+    /// to go and read those files, that is a list with a hole in it -- and the
+    /// full list was stored the whole time.
+    #[test]
+    fn a_file_set_source_names_every_file_not_the_first_five() {
+        let paths: Vec<String> = (1..=12).map(|i| format!("src/file{i}.ts")).collect();
+        let source = SessionSource::WorkingChanges {
+            paths: paths.clone(),
+            snapshot: snap("Your 12 changed files", "src/file1.ts, src/file2.ts, and 10 more"),
+        };
+        let (title, summary) = source_summary(&source);
+        assert_eq!(title, "Your 12 changed files");
+        for path in &paths {
+            assert!(summary.contains(path.as_str()), "{path} is missing from {summary:?}");
+        }
+        assert!(
+            !summary.contains("more"),
+            "the agent must not be told a file exists without being told which: {summary:?}"
+        );
+    }
+
+    /// A kind that points at something the agent can fetch keeps its snapshot.
+    #[test]
+    fn a_source_that_names_an_object_still_uses_its_snapshot() {
+        let source = SessionSource::Commit {
+            oid: "abc123".into(),
+            snapshot: snap("Fix the thing", "Fix the thing - by Ada - today"),
+        };
+        let (title, summary) = source_summary(&source);
+        assert_eq!(title, "Fix the thing");
+        assert_eq!(summary, "Fix the thing - by Ada - today");
+    }
+
+    /// An empty list falls back rather than sending a bare heading.
+    #[test]
+    fn a_file_set_with_no_files_keeps_whatever_the_snapshot_said() {
+        let source = SessionSource::WorkingChanges {
+            paths: vec![],
+            snapshot: snap("Your changes", "Nothing is changed right now"),
+        };
+        assert_eq!(source_summary(&source).1, "Nothing is changed right now");
     }
 
     #[test]

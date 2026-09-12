@@ -242,6 +242,20 @@ export function commitSourceInput(
  * Kept because the plumbing is right and only the entry point is absent, so
  * the day a diff view grows a "Fix with AI" action this is what it calls.
  *
+ * **Deliberately not hung off the commit menu**, which was argued out on
+ * 2026-09-12. A commit already has its own source kind and its own entry
+ * point, and a chat started from one runs read-only against the real
+ * repository holding the real sha -- so `git show` yields every path and
+ * every hunk, which is strictly more than this builder's path list. Wiring it
+ * there would put a second AI verb on the app's longest context menu with no
+ * difference a person could perceive, and would store `diff:<sha>:<paths>`
+ * beside `commit:<sha>` as two identities for one real-world thing.
+ *
+ * `scope` is a SELECTOR -- "staged", "unstaged", a glob, a ref range -- which
+ * is what the tests use it for. A commit is an object, not a selector, and it
+ * already has a variant. The right home is a surface where a set of changed
+ * files is the unit and no commit owns it.
+ *
  * A chat started from a set of changed files -- a commit's diff, or the
  * staged/unstaged view.
  *

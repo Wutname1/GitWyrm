@@ -14,6 +14,12 @@ import { fileURLToPath } from 'node:url'
  * all, so it is in neither list below; this test would have to grow one when
  * it gains one.
  *
+ * The failed check is further from shipping than "no builder" suggests: the
+ * app holds no CI check data at all. Checked 2026-09-12 -- `commands/github.rs`
+ * exposes `github_auth_status` and `gh_cli_status`, both about whether signing
+ * in worked, and nothing anywhere fetches or shows whether a check passed. It
+ * is a feature to build, not a menu item to add.
+ *
  * The uncommitted changes moved from the second list to the first when the
  * changes menu grew an "Explain with AI" item -- which this test caught,
  * naming what to do about it.
