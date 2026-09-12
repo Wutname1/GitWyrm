@@ -467,3 +467,22 @@ competing sub-agents, the answer names the losing option too.
 | 458 | 2026-10-10 | Does a failing set still warn properly? | Yes -- it keeps its amber mark, because a reported failure is still worth heeding, and only gains a note about who reported it. |
 | 459 | 2026-10-10 | Was any of this seen running in the app? | No -- the panel needs a finished agent run to appear, so what is proved here is the logic and the wording, not the live screen. |
 | 460 | 2026-10-10 | Why rewrite the old audit rather than add a new one? | Because leaving four findings looking open is what caused two of them to be argued again after they had already been settled. |
+| 461 | 2026-10-10 | What were the two findings left standing at the end of the last pass? | Bringing chats over from OpenChamber, and the fact that no part of the full run has been walked through in the built app. |
+| 462 | 2026-10-10 | Why had the OpenChamber one sat unfinished for so long? | Because it was written down as waiting for a sample file to read, and nobody had the tool installed to take one from. |
+| 463 | 2026-10-10 | Was a sample file ever going to appear? | No -- reading the tool's own source shows it keeps no chats on disk, so there was never a file to take a sample of. |
+| 464 | 2026-10-10 | Where does it keep them instead? | Nowhere of its own: it asks a running server for them over a port, and the chats themselves belong to another tool GitWyrm already reads directly. |
+| 465 | 2026-10-10 | How certain is that? | Its own path file names every file it writes, and none of them are chats, while every chat command goes through the server. |
+| 466 | 2026-10-10 | Did the behaviour need changing? | No -- refusing to claim it can read them was already right, and refusing for a reason that cannot be resolved is still right. |
+| 467 | 2026-10-10 | Then what changed? | The explanation, in the module, the version line and two test names, so the next reader does not go looking for a file that will never exist. |
+| 468 | 2026-10-10 | What would bringing them over actually take? | Talking to a live server on a port, which is a different kind of connection from every file-reading one here and a different question about trust. |
+| 469 | 2026-10-10 | What happened when a never-run live check was finally run? | It failed, reporting that the signed-in account offers exactly one model where the check demanded more than one. |
+| 470 | 2026-10-10 | Was the account broken? | No -- the sign-in is valid, and the thin list is GitHub restricting what an unapproved app is allowed to see. |
+| 471 | 2026-10-10 | Two sub-agents argued the test versus the product; who won? | Both, on different questions: the check was asserting the wrong thing, and it was accidentally standing in for a real fault nobody had noticed. |
+| 472 | 2026-10-10 | What was the real fault? | A one-entry list was taken as a reading of the account's plan, and a model the person had deliberately chosen was quietly replaced with it. |
+| 473 | 2026-10-10 | Why did that stick? | Because the replacement was saved against the provider, and once saved it looked like a valid choice, so nothing ever reconsidered it. |
+| 474 | 2026-10-10 | Was there already a guard meant to catch this? | Yes, and it could never fire -- it watches for a list with nothing usable, while this path marks everything it returns usable. |
+| 475 | 2026-10-10 | Was the warning about a bad sign-in extended to cover it too? | In settings yes, but not in the spec editor, because that one switches the features off and the single option genuinely works. |
+| 476 | 2026-10-10 | Would reconnecting have fixed it before? | No -- the saved list was keyed on whether you are signed in, which does not change when you reconnect while already signed in. |
+| 477 | 2026-10-10 | And the check itself? | It now asserts a list came back, and asks the account's own first model rather than one hardcoded that a small account cannot use. |
+| 478 | 2026-10-10 | Did that prove anything new? | Yes -- the half that talks to a real provider had never once run, and it now answers correctly end to end. |
+| 479 | 2026-10-10 | Was the settings screen seen with these changes on it? | No -- the app needs its desktop shell to start, so the wording and the logic are proved but the live screen is not. |

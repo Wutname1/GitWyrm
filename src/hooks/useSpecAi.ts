@@ -91,6 +91,14 @@ export function useSpecAi(): SpecAi {
   // A live list with nothing enabled is the stale-token signature. A non-live
   // list is a static fallback and cannot prove anything either way, so trust the
   // credentials in that case rather than crying wolf.
+  //
+  // Deliberately NOT extended to the only-`auto` list, which is the other shape
+  // a degraded Copilot reply takes (see `aiModelList.ts`). `reconnect` reports
+  // `configured: false` and switches the AI features off, and `auto` is a
+  // genuinely working selection -- so treating that list as broken would
+  // disable a setup that writes perfectly good commit messages. It is called
+  // out where it is actionable (the model picker in settings) rather than
+  // where it would only take something away.
   if (models.data.live && usable.length === 0) {
     return { state: 'reconnect', configured: false, ...base }
   }

@@ -54,7 +54,16 @@ export function useAiModels(providerId: string | null, configured: boolean) {
 
 export function useAiMutations() {
   const qc = useQueryClient()
-  const invalidate = () => qc.invalidateQueries({ queryKey: configuredKey })
+  // The model list goes too, not just the configured set. `configured` is in
+  // the models key so that connecting busts it -- but it is a boolean, and the
+  // recoveries that matter most (a plan upgraded, an org granting models, a
+  // re-authorisation) all move it from `true` to `true`. The key never
+  // changed, so nothing refetched, and a thin list outlived the thing that
+  // fixed it for the whole five-minute stale window.
+  const invalidate = () => {
+    void qc.invalidateQueries({ queryKey: configuredKey })
+    void qc.invalidateQueries({ queryKey: ['ai-models'] })
+  }
 
   return {
     setApiKey: useMutation({

@@ -279,14 +279,27 @@ mod tests {
         for m in &models {
             println!("  {} | {}", m.id, m.name);
         }
-        assert!(
-            models.len() > 1,
-            "expected more than the `auto` pseudo-model"
-        );
+        // Deliberately not `models.len() > 1`, which is what this asserted and
+        // what made it fail on a perfectly valid account. That is a claim about
+        // somebody's GitHub plan, not about GitWyrm, and it aborted before the
+        // half of this test that exercises our own code ever ran.
+        //
+        // The count still matters, so it is printed above and warned about in
+        // `models::list` -- an environment fact belongs in the output, not in a
+        // pass/fail gate. What is asserted here is the thing the test is named
+        // for: a list came back.
+        assert!(!models.is_empty(), "expected at least one model");
 
+        // Driven by what the account actually has, rather than a hardcoded
+        // `claude-haiku-4.5` that a minimal seat cannot use -- which would have
+        // failed one line later for the same wrong reason. On a rich account
+        // this exercises the explicit-model branch; on a thin one, the `auto`
+        // branch. Both are real paths.
+        let model = models[0].id.clone();
+        println!("completing with {model:?}");
         let text = super::complete(
             token,
-            "claude-haiku-4.5",
+            &model,
             "Reply with exactly one word.",
             "Say PONG.",
         )

@@ -39,6 +39,20 @@ pub async fn list(app: &tauri::AppHandle, provider: &CatalogProvider) -> ModelLi
           "model detection live but no models are enabled: provider={}. For Copilot this means the signed-in account has no active subscription, or the token lacks Copilot access.",
           provider.id
         );
+            } else if models.iter().filter(|m| m.enabled).all(|m| m.id == "auto") {
+                // The sibling shape, and the one that went unremarked. The
+                // warning above was written for Copilot and can never fire for
+                // it: the SDK path stamps `enabled: true` on everything it
+                // returns, so `enabled == 0` is unreachable there.
+                //
+                // What Copilot degrades to instead is a list of exactly `auto`,
+                // which `copilot_sdk` documents as the reply to a call whose
+                // token was not honoured. It arrives well-formed and marked
+                // live, so nothing downstream questioned it.
+                log::warn!(
+          "model detection live but only the `auto` pseudo-model came back: provider={}. Usually the token was not honoured for model listing; `auto` still works but this is not a reading of the account's entitlements.",
+          provider.id
+        );
             }
             ModelList { models, live: true }
         }

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { modelListCaveat, onlyAutoOffered } from '@/lib/aiModelList'
 import { Check, RefreshCw, RotateCcw, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { DeviceCodePanel } from '@/components/domain/github/DeviceCodePanel'
@@ -105,6 +106,21 @@ export function AiSettings() {
     if (!provider || models.length === 0 || !entitlementsKnown) return
     const saved = models.find((mo) => mo.id === aiModel)
     if (saved?.enabled) return
+    // A list offering nothing but `auto` is not evidence about anybody's plan.
+    // It is the documented shape of a token the provider did not honour
+    // (`copilot_sdk.rs`: "list() without a token returns only the `auto`
+    // pseudo-model"), and it arrives marked live like any other.
+    //
+    // Overwriting a model the person deliberately picked, on that evidence,
+    // is the worst of both: silent, persisted against the provider so it
+    // outlives a switch away and back, and self-sealing -- once `auto` is
+    // saved it counts as enabled, so this effect never reconsiders it. A
+    // minute of a degraded response permanently downgraded the choice.
+    //
+    // Leaving it alone costs nothing: `auto` is still selectable by hand, and
+    // a saved model the account really cannot use fails at generate time with
+    // a message, which is recoverable in a way a silent swap is not.
+    if (aiModel && onlyAutoOffered(models)) return
     const firstEnabled = models.find((mo) => mo.enabled)
     if (firstEnabled && firstEnabled.id !== aiModel) {
       setAiSelection(provider.id, firstEnabled.id)
@@ -370,7 +386,11 @@ export function AiSettings() {
           <div className="w-52 flex-none">
             <div className="text-xs font-semibold text-foreground">Model</div>
             <div className="mt-0.5 text-2xs text-muted-foreground">
-              {isConfigured
+              {/* Only claims to be showing the account's entitlement when the
+                  list is one GitWyrm can stand behind. A reply of nothing but
+                  `auto` gets its own sentence below rather than being passed
+                  off here as "the models your account can use". */}
+              {isConfigured && !onlyAutoOffered(models)
                 ? 'Shows the models your account can use.'
                 : 'Used to generate commit messages from your staged changes.'}
             </div>
@@ -392,12 +412,30 @@ export function AiSettings() {
             </select>
             {modelsQuery.isFetching ? (
               <div className="mt-1 text-2xs text-muted-foreground">Loading your models…</div>
+            ) : isConfigured && !entitlementsKnown ? (
+              <div className="mt-1 text-2xs text-muted-foreground">
+                We could not check which models your account can use, so nothing is picked for
+                you. Choose one, or retry the connection.
+              </div>
             ) : (
+              // The sibling case, and the one that had nothing to say: a reply
+              // that arrived, counts as live, and offers only `auto`. Says what
+              // was seen and the usual reason without asserting which it is --
+              // a small plan and an unhonoured token look identical from here.
               isConfigured &&
-              !entitlementsKnown && (
-                <div className="mt-1 text-2xs text-muted-foreground">
-                  We could not check which models your account can use, so nothing is picked for
-                  you. Choose one, or retry the connection.
+              modelListCaveat(models) && (
+                <div className="mt-1 flex items-start gap-2 text-2xs text-muted-foreground">
+                  <span className="min-w-0 flex-1">{modelListCaveat(models)}</span>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="h-6 flex-none text-2xs"
+                    disabled={modelsQuery.isFetching}
+                    onClick={() => void modelsQuery.refetch()}
+                  >
+                    <RotateCcw size={11} />
+                    Check again
+                  </Button>
                 </div>
               )
             )}
