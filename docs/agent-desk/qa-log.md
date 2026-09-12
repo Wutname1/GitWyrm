@@ -462,3 +462,8 @@ competing sub-agents, the answer names the losing option too.
 | 453 | 2026-10-10 | Does anything actually run a check yet? | No, and the second option exists only so the hedge disappears by itself on the day something does. |
 | 454 | 2026-10-10 | Did the new tests hold up? | Yes -- with the change taken back out, two of them failed, naming the sentence that had gone missing. |
 | 455 | 2026-10-10 | Were the other two findings worth keeping open? | One is a decision already recorded twice as a decision, and the other waits on a real installation to read, not on code. |
+| 456 | 2026-10-10 | Was the new sentence checked at the size it actually renders? | Yes, and it was too long for a narrow panel, so it now says the agent says so rather than describing itself as a report. |
+| 457 | 2026-10-10 | Do the tests care about the exact wording? | No, deliberately -- they pin that the agent is named and that bare "reported" is not enough, so the sentence can be improved without rewriting them. |
+| 458 | 2026-10-10 | Does a failing set still warn properly? | Yes -- it keeps its amber mark, because a reported failure is still worth heeding, and only gains a note about who reported it. |
+| 459 | 2026-10-10 | Was any of this seen running in the app? | No -- the panel needs a finished agent run to appear, so what is proved here is the logic and the wording, not the live screen. |
+| 460 | 2026-10-10 | Why rewrite the old audit rather than add a new one? | Because leaving four findings looking open is what caused two of them to be argued again after they had already been settled. |
