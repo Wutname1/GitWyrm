@@ -102,3 +102,11 @@ A: The tally as the headline and the first reason as the detail, since a bare "3
 | 542 | 2026-09-12 | What is actually at risk? | Consent, not containment -- the work still happens inside its own isolated folder, but nobody is asked first. |
 | 543 | 2026-09-12 | Are read-only chats affected? | No -- those are held by refusing the tools before the program starts, rather than by asking during it. |
 | 544 | 2026-09-12 | What changed in the meantime? | The comments that stated the approval step as a fact now state it as an intention, with the evidence beside them. |
+| 545 | 2026-09-12 | Was the missing approval step chased further? | Yes -- the program was driven by hand outside GitWyrm to watch every message it sends during a command. |
+| 546 | 2026-09-12 | Is the channel itself dead? | No -- it answers GitWyrm's opening message with its full list of commands, helpers and models, so it is listening and simply never asks. |
+| 547 | 2026-09-12 | Did announcing that GitWyrm can answer approvals help? | No, in either of the two shapes tried, which brings the ruled-out list to five. |
+| 548 | 2026-09-12 | Whose fault is it? | The program's -- the missing message is already reported against it, and this way of driving it is documented nowhere on purpose. |
+| 549 | 2026-09-12 | Why does that matter for what we do next? | Because a guess at an undocumented message would ship a safety promise resting on an assumption, which is the thing being avoided. |
+| 550 | 2026-09-12 | So what changed here instead? | GitWyrm now counts how many times it was asked, and says so in the log when a run that could change files was asked nothing. |
+| 551 | 2026-09-12 | Why is being asked nothing worth saying out loud? | Because it looks exactly like a run somebody approved, and that is the only state where silence is dangerous. |
+| 552 | 2026-09-12 | Does a read-only chat trip that warning? | No -- it is asked nothing by design, and the warning checks both facts before it fires. |

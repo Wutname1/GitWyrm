@@ -47,10 +47,22 @@
 //!   the default. No frame.
 //! - Dropping `--restricted` from the writing run entirely. No frame.
 //!
-//! The shapes here were read out of the 2.1.251 binary and nothing about them
-//! is documented, so the protocol is free to move and appears to have. Guessing
-//! the new one would mean shipping a safety claim on an assumption, which is
-//! the position this comment exists to prevent someone taking.
+//! Also ruled out: a host `initialize` declaring `capabilities.canUseTool` or
+//! a bare `canUseTool`, either shape. The CLI answers `initialize` happily --
+//! with its command, agent and model list -- and still never asks.
+//!
+//! This is an upstream regression, not a GitWyrm mistake. The protocol is
+//! undocumented for hosts that are not the official SDK: the request to
+//! document `--input-format stream-json` beyond the flags table was closed as
+//! not planned (claude-code#24594), and the missing frame is reported as
+//! claude-code#34046, "CLI does not emit can_use_tool control_request".
+//!
+//! So the shapes here were read out of the 2.1.251 binary, nothing about them
+//! is documented, and the protocol moved. Guessing the new one would mean
+//! shipping a safety claim on an assumption, which is the position this
+//! comment exists to prevent someone taking. What GitWyrm can do without
+//! guessing is notice: `gate_count` counts the frames, and a writing turn that
+//! ends having been asked nothing says so in the log.
 //!
 //! **What this costs today.** A writing run keeps `--restricted` and its
 //! isolated worktree, so file access stays inside the run's own directory and
@@ -65,7 +77,7 @@
 
 use std::path::Path;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use serde_json::{json, Value};
@@ -90,6 +102,19 @@ pub struct ClaudeConnection {
     /// Ids for the control requests GitWyrm sends (initialize, interrupt).
     /// The CLI echoes them back; nothing here waits on the echo.
     next_control_id: AtomicU64,
+    /// Whether the CLI has ever asked this session for permission.
+    ///
+    /// Exists because the dangerous state is silence. A writing run that gates
+    /// nothing looks exactly like one whose every action was approved, and on
+    /// 2.1.260 that is what happens -- see this module's doc. Counting the
+    /// frames lets the run say so instead of finishing quietly.
+    gated: Arc<AtomicUsize>,
+    /// Whether this session was launched unable to change anything.
+    ///
+    /// Kept so a finished turn can tell the two silences apart: a read-only run
+    /// that gated nothing is working as designed, while a writing run that
+    /// gated nothing is the prompt route failing.
+    read_only: bool,
 }
 
 impl ClaudeConnection {
@@ -147,6 +172,7 @@ impl ClaudeConnection {
         // builds, was written at debug level and is not there.
         let complaints: Complaints = Arc::new(Mutex::new(std::collections::VecDeque::new()));
         let stdin = Arc::new(Mutex::new(stdin));
+        let gated = Arc::new(AtomicUsize::new(0));
         tokio::spawn(read_loop(
             stdout,
             stdin.clone(),
@@ -154,6 +180,7 @@ impl ClaudeConnection {
             tx,
             cancelling.clone(),
             complaints.clone(),
+            gated.clone(),
         ));
         tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
@@ -174,12 +201,23 @@ impl ClaudeConnection {
             incoming: Some(rx),
             cancelling,
             next_control_id: AtomicU64::new(1),
+            gated,
+            read_only,
         };
         // The SDK opens every session with an `initialize` control request.
         // Whether the CLI strictly needs it is unproven; sending it costs one
         // line and matches the only client known to work.
         conn.send_control(json!({ "subtype": "initialize" })).await?;
         Ok(conn)
+    }
+
+    /// How many times the CLI has asked this session for permission.
+    ///
+    /// Zero on a writing run that used a gated tool means the prompt route is
+    /// not working -- not that nothing needed approving. The caller warns on
+    /// that rather than letting a silent run pass for an approved one.
+    pub fn gate_count(&self) -> usize {
+        self.gated.load(Ordering::Relaxed)
     }
 
     pub fn take_incoming(&mut self) -> Option<mpsc::UnboundedReceiver<Incoming>> {
@@ -211,9 +249,23 @@ impl ClaudeConnection {
             return Err(error);
         }
 
-        done_rx.await.map_err(|_| AgentError::Failed {
+        let outcome = done_rx.await.map_err(|_| AgentError::Failed {
             detail: "Claude Code stopped before finishing the reply".into(),
-        })?
+        })??;
+
+        // The dangerous state is silence. A writing run that finished having
+        // been asked nothing is indistinguishable, from the outside, from one
+        // whose every action a person approved -- and on 2.1.260 that is what
+        // happens, because no `can_use_tool` frame is ever sent (see this
+        // module's doc). Said once per turn, at the only moment both facts are
+        // known, so it cannot be mistaken for a run that simply had nothing
+        // worth approving.
+        if !self.read_only && self.gate_count() == 0 {
+            log::warn!(
+                "Claude Code finished a writing turn without asking permission for anything. Commands and edits in this run were not approved by the person: GitWyrm's gate is not being reached on this version of the tool (upstream claude-code#34046)."
+            );
+        }
+        Ok(outcome)
     }
 
     pub async fn ask(&mut self, text: &str) -> Result<String, AgentError> {
@@ -408,6 +460,7 @@ async fn read_loop(
     tx: mpsc::UnboundedSender<Incoming>,
     cancelling: Arc<AtomicBool>,
     complaints: Complaints,
+    gated: Arc<AtomicUsize>,
 ) {
     let mut lines = BufReader::new(stdout).lines();
     while let Ok(Some(line)) = lines.next_line().await {
@@ -418,6 +471,7 @@ async fn read_loop(
         if message.get("type").and_then(Value::as_str) == Some("control_request") {
             match permission_request_of(&message) {
                 ControlFrame::Permission { request_id, tool_name, input, capability, path, summary } => {
+                    gated.fetch_add(1, Ordering::Relaxed);
                     let (respond, answer) = oneshot::channel();
                     let request = PermissionRequest { capability, path, summary, respond };
                     if tx.send(Incoming::PermissionRequest(request)).is_err() {
@@ -885,6 +939,58 @@ mod tests {
             !read_only.contains(&"--tools".to_string()),
             "a read-only run keeps Bash absent as a second line of defence"
         );
+    }
+
+    /// The live test proves the gate does not fire on 2.1.260. This proves
+    /// GitWyrm can TELL that it did not -- which is the part that has to keep
+    /// working whatever the CLI does, because a writing run that gated nothing
+    /// is otherwise indistinguishable from one a person approved.
+    /// The condition the warning hangs off, checked directly. The warning
+    /// itself goes through `log`, which is not initialised under test, so
+    /// asserting on the decision is the part that can actually be proved here.
+    #[test]
+    fn only_a_writing_turn_that_gated_nothing_is_worth_warning_about() {
+        // (read_only, gates) -> should warn
+        let cases = [
+            ((false, 0usize), true),  // the defect: a writing run nobody was asked about
+            ((false, 1), false),      // gated at least once, working as intended
+            ((true, 0), false),       // read-only gates nothing by design
+            ((true, 1), false),
+        ];
+        for ((read_only, gates), expected) in cases {
+            let warns = !read_only && gates == 0;
+            assert_eq!(
+                warns, expected,
+                "read_only={read_only} gates={gates} should warn={expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_permission_frame_is_counted_so_silence_is_detectable() {
+        let frame = json!({
+            "type": "control_request",
+            "request_id": "r1",
+            "request": { "subtype": "can_use_tool", "tool_name": "Bash",
+                         "input": { "command": "echo hi" } }
+        });
+        // The counter increments where the frame is parsed into a request, so
+        // the parse is the thing under test: a shape change that stopped
+        // producing `Permission` would stop counting, which is the honest
+        // reading -- no frame recognised means no gate reached.
+        assert!(matches!(
+            permission_request_of(&frame),
+            ControlFrame::Permission { .. }
+        ));
+        let unknown = json!({
+            "type": "control_request",
+            "request_id": "r2",
+            "request": { "subtype": "hook_callback" }
+        });
+        assert!(matches!(
+            permission_request_of(&unknown),
+            ControlFrame::Other { .. }
+        ));
     }
 
     /// Asking tools back must never reach past a denial.

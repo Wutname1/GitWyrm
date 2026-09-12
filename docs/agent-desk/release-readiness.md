@@ -126,6 +126,22 @@ every frame the CLI sends. Ruled out by experiment: `--permission-mode manual`
 explicitly, and dropping `--restricted` entirely. The frame shapes were read
 out of the 2.1.251 binary and are undocumented; the installed CLI is 2.1.260.
 
+Traced further on 2026-09-12 and confirmed upstream. The CLI answers a host
+`initialize` control request happily -- returning its command, agent and model
+lists -- so the control channel itself is alive; it simply never asks. Also
+ruled out: declaring `capabilities.canUseTool` or a bare `canUseTool` in that
+initialize, in either shape. The protocol is undocumented for hosts that are
+not the official SDK (the request to document `--input-format stream-json`
+beyond the flags table was closed as not planned, claude-code#24594) and the
+missing frame is filed as claude-code#34046, "CLI does not emit can_use_tool
+control_request". So this is an upstream regression to track, not a GitWyrm
+defect to guess a fix for.
+
+What GitWyrm does without guessing is notice. `ClaudeConnection::gate_count`
+counts permission frames, and a writing turn that ends having been asked
+nothing now logs a warning naming the upstream issue -- so the silent state
+stops being indistinguishable from an approved one.
+
 Blast radius is consent, not containment: `--restricted` and the isolated
 worktree still hold, and read-only runs are unaffected because they are held by
 launch-flag denial before the process starts. Codex and the ACP tools still
