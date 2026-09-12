@@ -150,3 +150,13 @@ A: The tally as the headline and the first reason as the detail, since a bare "3
 | 590 | 2026-09-12 | Then what changed? | It is written down where somebody counting six kinds of approval would otherwise assume six kinds happen. |
 | 591 | 2026-09-12 | What stops that note going stale? | A test that fails the moment a fifth kind becomes reachable, telling whoever did it to update the note. |
 | 592 | 2026-09-12 | Was a second test written and then removed? | Yes -- it repeated one that already existed, and a check that catches nothing new reads like a guard without being one. |
+| 593 | 2026-09-12 | What was looked for this pass? | Logic that exists, is tested, and nothing in the app ever calls -- the fault this project has hit before. |
+| 594 | 2026-09-12 | Did the first sweep find any? | It found seventeen, and the first one checked turned out to be called from a line the search itself excluded. |
+| 595 | 2026-09-12 | What did the corrected sweep find? | Nine with no caller anywhere, seven of which nothing explains. |
+| 596 | 2026-09-12 | Which of those matter? | The two that build a chat started from a diff or from the uncommitted changes, both named in the product's own description of how work begins. |
+| 597 | 2026-09-12 | How far along are they? | The backend stores them fully and they have tests; there is simply no menu item in the app that reaches them. |
+| 598 | 2026-09-12 | Is starting from a failed check in the same state? | No, worse -- the backend has the shape and there is no way to build one from the app side at all. |
+| 599 | 2026-09-12 | Were those three built this pass? | No -- three entry points is a feature, not something to add on a sweep, so what changed is that they are written down instead of waiting to be rediscovered. |
+| 600 | 2026-09-12 | What keeps the list honest? | A test that fails when a builder gains a caller and when one loses it, telling whoever did it which list to move it to. |
+| 601 | 2026-09-12 | Did that test earn its place immediately? | Yes -- it failed on its first run and corrected two mistakes in the note being written alongside it. |
+| 602 | 2026-09-12 | Which mistakes? | A builder nobody had counted, and one named in the note that does not exist at all. |

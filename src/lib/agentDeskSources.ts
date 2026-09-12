@@ -228,6 +228,21 @@ export function commitSourceInput(
 }
 
 /**
+ * **No caller yet.** The backend accepts this source kind in full -- durable
+ * identity, a cached snapshot, a stable key -- and nothing in the app offers
+ * a way to start a chat from a diff. Same for `workingChangesSourceInput`
+ * below.
+ *
+ * Worth naming rather than leaving to be rediscovered. The product describes
+ * what starts a chat as "an issue, a pull request, a diff, a failed check, or
+ * an OpenSpec task". Issue, pull request, commit and both OpenSpec kinds are
+ * reachable from a screen. These two are built, stored and tested with no
+ * menu item anywhere. A failed check is further behind still: the backend has
+ * the shape, and there is no builder here at all.
+ *
+ * Kept because the plumbing is right and only the entry point is absent, so
+ * the day a diff view grows a "Fix with AI" action this is what it calls.
+ *
  * A chat started from a set of changed files -- a commit's diff, or the
  * staged/unstaged view.
  *
