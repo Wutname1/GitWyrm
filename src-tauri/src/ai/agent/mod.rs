@@ -19,5 +19,6 @@ pub mod registry;
 pub mod run;
 pub mod select;
 pub mod shell_path;
+pub mod tool_updates;
 pub mod transport;
 pub mod wire;

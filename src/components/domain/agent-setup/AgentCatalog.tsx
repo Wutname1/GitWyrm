@@ -230,6 +230,24 @@ function AgentRow({ row }: { row: AgentProvider }) {
             Updating it is enough — GitWyrm found it, but this version is older than it can drive.
           </span>
         )}
+
+        {/* A working tool that could be newer. Deliberately quiet and
+            deliberately NOT the amber "too old" treatment: that one is a
+            refusal, this is a note about something that works fine. Shown
+            only when GitWyrm actually found out -- a check that could not run
+            says nothing here rather than implying the tool is current.
+
+            No update button: running an install command on someone's behalf
+            means choosing a package manager for them, which is the same
+            reason `installHint` is shown to be copied and never run. */}
+        {row.installed && !row.tooOld && row.update.kind === 'newerAvailable' && (
+          <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-2xs leading-snug text-muted-foreground">
+            <span>Version {row.update.latest} is out. Yours still works.</span>
+            <code className="rounded bg-panel3 px-1.5 py-0.5 font-mono text-2xs text-foreground">
+              {row.installHint}
+            </code>
+          </span>
+        )}
       </div>
 
       {/* One control, both states. Its wording changes; the destination does

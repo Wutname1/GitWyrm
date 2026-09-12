@@ -13,6 +13,7 @@
 use std::collections::HashMap;
 
 use crate::ai::agent::codex_models::{ModelCatalog, ModelSource};
+use crate::ai::agent::tool_updates::UpdateCheck;
 use crate::ai::agent::copilot_cli::{detect_agent, CliState};
 use crate::ai::agent::registry::{self, Denial};
 
@@ -38,6 +39,16 @@ pub struct AgentProvider {
     /// Distinct from `installed: false`, which sends the person to install
     /// something they already have.
     pub unresponsive: bool,
+    /// Whether a newer release exists.
+    ///
+    /// Deliberately not folded into `too_old`. That one is a refusal -- the
+    /// tool is below a floor GitWyrm has measured and will not drive. This is
+    /// an FYI about a tool that works: merging them would either nag people
+    /// about healthy installs or block them over a version nobody tested.
+    ///
+    /// `notChecked` when GitWyrm could not find out, which is never the same
+    /// as up to date.
+    pub update: UpdateCheck,
     /// Whether this tool can be told to leave files alone, which decides
     /// whether it may run Ask, Explain, Review, Summarize, or a Plan before
     /// Start.
@@ -136,9 +147,9 @@ pub async fn agent_providers_list(
     // Asked before the blocking work: listing models talks to a child process
     // over stdio, which is async, and the answer is cached so this is free on
     // every render after the first.
-    let catalogs = resolve_catalogs().await;
+    let learned = resolve_learned().await;
     tauri::async_runtime::spawn_blocking(move || AgentProviderChoices {
-        providers: list(&catalogs),
+        providers: list(&learned),
         read_only: session_id
             .map(|id| session_is_read_only(&root, &id))
             .unwrap_or(false),
@@ -186,14 +197,18 @@ pub async fn agent_providers_refresh(
         // remembered would make the button that exists to pick up a newly
         // installed or updated tool keep showing that tool's old models.
         crate::ai::agent::codex_models::forget_all_cached();
+        // And what was learnt about newer releases: refresh means ask
+        // everything again, and somebody who has just updated a tool should
+        // not keep reading that a newer one is available.
+        crate::ai::agent::tool_updates::forget_all_cached();
         log::info!("agent refresh: {added} new PATH folders, cached probes dropped");
     })
     .await
     .map_err(|e| crate::error::AppError::Other(e.to_string()))?;
 
-    let catalogs = resolve_catalogs().await;
+    let learned = resolve_learned().await;
     tauri::async_runtime::spawn_blocking(move || AgentProviderChoices {
-        providers: list(&catalogs),
+        providers: list(&learned),
         read_only: session_id
             .map(|id| session_is_read_only(&root, &id))
             .unwrap_or(false),
@@ -202,43 +217,91 @@ pub async fn agent_providers_refresh(
     .map_err(|e| crate::error::AppError::Other(e.to_string()))
 }
 
-/// Every tool's row, with each model list already resolved.
+/// Everything learnt about one tool before its row is built.
 ///
-/// `catalogs` is keyed by agent id and holds whatever could be learnt before
-/// this ran. A tool with no entry falls back to its built-in list, which is
-/// also what every tool that cannot be asked gets.
-fn list(catalogs: &HashMap<&'static str, ModelCatalog>) -> Vec<AgentProvider> {
+/// One struct rather than a map per fact: `row` already takes a spec, and a
+/// parameter per feature is how a signature becomes unreadable.
+#[derive(Default)]
+struct Learned {
+    catalog: Option<ModelCatalog>,
+    update: Option<UpdateCheck>,
+}
+
+/// Every tool's row, with whatever could be learnt already resolved.
+///
+/// A tool with nothing learnt gets its built-in model list and an unchecked
+/// update state -- which is what every tool gets on a machine where none of
+/// them can be reached.
+fn list(learned: &HashMap<&'static str, Learned>) -> Vec<AgentProvider> {
+    let nothing = Learned::default();
     registry::AGENTS
         .iter()
         .map(|spec| {
-            let owned;
-            let catalog = match catalogs.get(spec.id) {
+            let known = learned.get(spec.id).unwrap_or(&nothing);
+            let fallback;
+            let catalog = match &known.catalog {
                 Some(c) => c,
                 None => {
-                    owned = ModelCatalog::fallback(spec);
-                    &owned
+                    fallback = ModelCatalog::fallback(spec);
+                    &fallback
                 }
             };
-            row(spec, catalog)
+            row(
+                spec,
+                catalog,
+                known.update.clone().unwrap_or(UpdateCheck::NotChecked),
+            )
         })
         .collect()
 }
 
-/// Asks every tool that can answer for its own model list.
+/// Asks each tool, and the place its releases are published, what they know.
 ///
-/// Only Codex speaks a protocol that can be asked today. The others keep their
-/// built-in lists, which is why this returns a map rather than assuming one
-/// shape for all of them -- a second tool that grows the ability slots in here
-/// without changing anything downstream.
-async fn resolve_catalogs() -> HashMap<&'static str, ModelCatalog> {
-    let mut out = HashMap::new();
+/// Both halves are best-effort and neither can fail the list: a tool that
+/// cannot be asked keeps its built-in models, and a release source that cannot
+/// be reached leaves the update state unchecked.
+///
+/// The update checks run together rather than one after another, because they
+/// are independent network calls and a picker should not wait five times.
+async fn resolve_learned() -> HashMap<&'static str, Learned> {
+    let mut out: HashMap<&'static str, Learned> = HashMap::new();
+
     if let Some(codex) = registry::find("codex") {
-        out.insert(codex.id, crate::ai::agent::codex_models::catalog(codex).await);
+        out.entry(codex.id).or_default().catalog =
+            Some(crate::ai::agent::codex_models::catalog(codex).await);
     }
+
+    let mut checks = tokio::task::JoinSet::new();
+    for spec in registry::AGENTS.iter() {
+        // The version already probed, rather than a second probe: detection is
+        // cached, so this is a map lookup in the common case.
+        let installed = match detect_agent(spec).state {
+            CliState::Ready { version, .. } => Some(version),
+            _ => None,
+        };
+        checks.spawn(async move {
+            (
+                spec.id,
+                crate::ai::agent::tool_updates::check(spec, installed.as_deref()).await,
+            )
+        });
+    }
+    while let Some(joined) = checks.join_next().await {
+        // A panicking check must not take the picker with it; the tool simply
+        // stays unchecked, which is a state the reader already understands.
+        if let Ok((id, check)) = joined {
+            out.entry(id).or_default().update = Some(check);
+        }
+    }
+
     out
 }
 
-fn row(spec: &'static registry::AgentSpec, catalog: &ModelCatalog) -> AgentProvider {
+fn row(
+    spec: &'static registry::AgentSpec,
+    catalog: &ModelCatalog,
+    update: UpdateCheck,
+) -> AgentProvider {
     let probe = detect_agent(spec);
     // `unresponsive` is separate from `installed` on purpose: the tool IS on
     // disk, so telling the person to install it -- which is what an
@@ -259,6 +322,7 @@ fn row(spec: &'static registry::AgentSpec, catalog: &ModelCatalog) -> AgentProvi
         version,
         too_old,
         unresponsive,
+        update,
         can_do_read_only_work: spec.can_guarantee_read_only(),
         read_only_limit: read_only_limit(spec),
         homepage_url: spec.homepage_url.to_string(),
@@ -514,7 +578,7 @@ mod tests {
     #[test]
     fn the_binary_name_shown_is_one_that_is_probed_for() {
         for spec in registry::AGENTS {
-            let shown = row(spec, &ModelCatalog::fallback(spec)).binary_name;
+            let shown = row(spec, &ModelCatalog::fallback(spec), UpdateCheck::NotChecked).binary_name;
             assert!(
                 spec.candidate_names().contains(&shown.as_str()),
                 "{} shows {shown} but probes for {:?}",

@@ -18,6 +18,7 @@ const READY: AgentProvider = {
   models: [],
   effortLevels: [],
   modelSource: 'fallback',
+  update: { kind: 'notChecked' },
 }
 
 describe('blockedReason', () => {

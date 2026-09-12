@@ -192,6 +192,19 @@ pub struct AgentSpec {
     /// choosing a package manager for them and writing outside anywhere
     /// GitWyrm owns. Showing it lets them decide.
     pub install_hint: &'static str,
+    /// The npm package whose version is the one to compare against.
+    ///
+    /// Deliberately NOT `install_hint`'s package, because for one tool they
+    /// are different things. Claude Code's row installs the ACP adapter
+    /// (`@agentclientprotocol/claude-agent-acp`, 0.76.x) but probes the
+    /// `claude` binary (Claude Code, 2.1.x). Comparing the probed version
+    /// against the adapter's would report a working install as wildly behind.
+    ///
+    /// So this names the package that ships the binary `version_args` asks --
+    /// the only version the answer can honestly be about. `None` means GitWyrm
+    /// has no way to learn what the newest release is, which reads as "not
+    /// checked" rather than as "up to date".
+    pub release_package: Option<&'static str>,
     /// How this tool is told which model to use, if it can be.
     pub model: ModelSupport,
     /// How this tool is told how hard to think, if it can be.
@@ -437,6 +450,7 @@ pub const AGENTS: &[AgentSpec] = &[
         },
         homepage_url: "https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli",
         install_hint: "npm install -g @github/copilot",
+        release_package: Some("@github/copilot"),
         // `copilot --help` on 1.0.76: `--model <model> (use 'auto' to let
         // Copilot pick automatically)`, with `--model gpt-5.4` as its own
         // example. "Auto" is offered first because it is the tool's own
@@ -477,6 +491,7 @@ pub const AGENTS: &[AgentSpec] = &[
         tool_names: NO_TOOL_NAMES,
         homepage_url: "https://github.com/google-gemini/gemini-cli#quickstart",
         install_hint: "npm install -g @google/gemini-cli",
+        release_package: Some("@google/gemini-cli"),
         // Gemini CLI takes `--model`/`-m`. Not installed on the machine this
         // row was written on, so the flag is from the tool's published usage
         // rather than from its own `--help` -- weaker evidence than every
@@ -546,6 +561,9 @@ pub const AGENTS: &[AgentSpec] = &[
         // Code alone still ends up with nothing GitWyrm can drive.
         homepage_url: "https://www.npmjs.com/package/@agentclientprotocol/claude-agent-acp",
         install_hint: "npm install -g @agentclientprotocol/claude-agent-acp",
+        // The binary `version_args` asks is `claude`, which ships in Claude
+        // Code itself -- not in the adapter the install hint names.
+        release_package: Some("@anthropic-ai/claude-code"),
         // `claude --help` on 2.1.260: "Provide an alias for the latest model
         // (e.g. 'fable', 'opus', or 'sonnet') or a model's full name (e.g.
         // 'claude-fable-5')". Aliases rather than full names, so the choice
@@ -598,6 +616,7 @@ pub const AGENTS: &[AgentSpec] = &[
         tool_names: NO_TOOL_NAMES,
         homepage_url: "https://opencode.ai/docs/",
         install_hint: "npm install -g opencode-ai",
+        release_package: Some("opencode-ai"),
         // `opencode --help`: `-m, --model  model to use in the format of
         // provider/model`. The pair is the whole identifier, so the ids below
         // carry it verbatim.
@@ -635,6 +654,7 @@ pub const AGENTS: &[AgentSpec] = &[
         tool_names: NO_TOOL_NAMES,
         homepage_url: "https://developers.openai.com/codex/cli/",
         install_hint: "npm install -g @openai/codex",
+        release_package: Some("@openai/codex"),
         // `codex --help` on 0.151.0: `-m, --model <MODEL>  Model the agent
         // should use`. The long form is used here so the launch line reads the
         // same shape as every other row.

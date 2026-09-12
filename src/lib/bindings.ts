@@ -4112,6 +4112,18 @@ tooOld: boolean;
  */
 unresponsive: boolean; 
 /**
+ * Whether a newer release exists.
+ * 
+ * Deliberately not folded into `too_old`. That one is a refusal -- the
+ * tool is below a floor GitWyrm has measured and will not drive. This is
+ * an FYI about a tool that works: merging them would either nag people
+ * about healthy installs or block them over a version nobody tested.
+ * 
+ * `notChecked` when GitWyrm could not find out, which is never the same
+ * as up to date.
+ */
+update: UpdateCheck; 
+/**
  * Whether this tool can be told to leave files alone, which decides
  * whether it may run Ask, Explain, Review, Summarize, or a Plan before
  * Start.
@@ -9117,6 +9129,29 @@ export type UnpushedTag = { name: string; target_sha: string;
  */
 commit_on_remote: boolean }
 export type UpdateChannel = "stable" | "beta"
+/**
+ * What GitWyrm knows about whether a tool could be newer.
+ */
+export type UpdateCheck = 
+/**
+ * The installed version is the newest published one.
+ */
+{ kind: "upToDate" } | 
+/**
+ * A newer release exists. `latest` is what the source published.
+ * 
+ * Never a demand: the tool keeps working, and GitWyrm never updates it.
+ */
+{ kind: "newerAvailable"; latest: string } | 
+/**
+ * GitWyrm could not find out.
+ * 
+ * Offline, the source refused, the tool prints a version nothing can
+ * read, or nobody has said where its releases are published. All of them
+ * mean the same thing to a reader -- nobody looked -- and none of them
+ * mean the tool is current.
+ */
+{ kind: "notChecked" }
 /**
  * Whether this installation can replace itself with the updater artifact.
  * 

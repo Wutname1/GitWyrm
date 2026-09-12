@@ -68,3 +68,13 @@ A: The tally as the headline and the first reason as the detail, since a bare "3
 | 508 | 2026-09-12 | What did this fix by accident? | How hard the tool can be asked to think, which was recorded as not possible because it is a property of each model rather than of the tool. |
 | 509 | 2026-09-12 | How much does that vary? | Enough to matter -- of six models, three offer six levels, one offers five and one offers four. |
 | 510 | 2026-09-12 | Is a broken or missing tool asked again next time? | Yes -- only a good answer is remembered, so someone who fixes their install is not told the old answer until they restart. |
+| 511 | 2026-09-12 | What question was nobody asking? | Whether a newer version of a tool exists, as opposed to whether the installed one is too old to work at all. |
+| 512 | 2026-09-12 | Why does the difference matter? | One is a refusal and the other is a note, and a tool five releases behind answers no to the first while serving badly out-of-date information. |
+| 513 | 2026-09-12 | Are the two kept apart? | Yes, in the data and on screen: the refusal keeps its warning colour and the note is quiet text under a tool that works. |
+| 514 | 2026-09-12 | Where does the newest version come from? | The place each tool publishes its releases, asked for one small record per tool and nothing else. |
+| 515 | 2026-09-12 | Is that the same place the install command names? | For four of the five, yes -- but not for Claude, whose install line names a connector while the program GitWyrm measures is Claude Code itself. |
+| 516 | 2026-09-12 | What would have happened without that distinction? | A current install would have been reported as many versions behind, because the two things number themselves completely differently. |
+| 517 | 2026-09-12 | Was the network part proved or assumed? | Proved, and it failed the first time -- the request asked for a short form of the answer that this address does not serve, and was refused. |
+| 518 | 2026-09-12 | Would a unit test have caught that? | No, and that is the point of keeping one check that really goes out and asks. |
+| 519 | 2026-09-12 | What happens when the check cannot run? | Nothing is said about that tool, because "we could not look" must never be shown as "you are up to date". |
+| 520 | 2026-09-12 | Does GitWyrm update anything itself? | No -- it shows the command to copy, for the same reason it has never run an install on anyone's behalf. |

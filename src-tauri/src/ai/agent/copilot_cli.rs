@@ -284,7 +284,10 @@ fn run_version(spec: &AgentSpec, path: &PathBuf) -> Option<String> {
 /// around the number, and both are the tool's to reword. The four tools in the
 /// registry each print a different shape -- `GitHub Copilot CLI 1.0.80.`,
 /// `2.1.220 (Claude Code)`, a bare `1.18.10` -- and this reads all of them.
-fn parse_version(raw: &str) -> Option<(u32, u32, u32)> {
+/// Shared with `tool_updates`, which compares this against what a package
+/// registry publishes. One parser for both sides of that comparison: two would
+/// eventually disagree about the same string.
+pub(crate) fn parse_version(raw: &str) -> Option<(u32, u32, u32)> {
     let bytes = raw.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
@@ -414,6 +417,8 @@ mod tests {
             },
             model: registry::ModelSupport::None,
             effort: registry::EffortSupport::None,
+            // Nowhere to ask about releases, which is its own true answer.
+            release_package: None,
             homepage_url: "https://example.invalid",
             install_hint: "",
 
