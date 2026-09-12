@@ -58,3 +58,13 @@ A: No - sync runs on a timer, and clearing would discard chats someone was midwa
 **Q: What does a person see when some chats in a batch refuse?**
 A: The tally as the headline and the first reason as the detail, since a bare "3 could not be brought in" says nothing about whether a file is damaged or the tool has gone.
 
+| 501 | 2026-09-12 | Why was the Codex model list wrong? | It was typed into the program by hand against a version of the tool from three releases earlier, and a written-down list cannot notice when the thing it describes moves on. |
+| 502 | 2026-09-12 | Can the tool be asked instead? | Yes -- it answers a request for its own models over the connection GitWyrm already opens to it, needing no project, no folder and no conversation. |
+| 503 | 2026-09-12 | Was that checked against a running copy? | Yes -- it returned all six models the tool's own picker shows, including which one it would choose for itself. |
+| 504 | 2026-09-12 | Is the old list gone? | No -- it is what gets shown when the tool cannot be reached, because a stale menu is still better than an empty one. |
+| 505 | 2026-09-12 | How does anyone tell the two apart? | The answer now carries where it came from, so a built-in list can never quietly pass itself off as what the tool actually said. |
+| 506 | 2026-09-12 | Why not just infer that from an empty list? | Because "we could not ask" and "there is nothing to offer" are different facts, and collapsing them is the mistake this project keeps finding. |
+| 507 | 2026-09-12 | Does the fallback claim anything it cannot back up? | No -- it names no default and no thinking levels, because the written-down list never knew either and guessing is what made it wrong. |
+| 508 | 2026-09-12 | What did this fix by accident? | How hard the tool can be asked to think, which was recorded as not possible because it is a property of each model rather than of the tool. |
+| 509 | 2026-09-12 | How much does that vary? | Enough to matter -- of six models, three offer six levels, one offers five and one offers four. |
+| 510 | 2026-09-12 | Is a broken or missing tool asked again next time? | Yes -- only a good answer is remembered, so someone who fixes their install is not told the old answer until they restart. |

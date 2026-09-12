@@ -17,6 +17,7 @@ const READY: AgentProvider = {
   binaryName: 'copilot',
   models: [],
   effortLevels: [],
+  modelSource: 'fallback',
 }
 
 describe('blockedReason', () => {

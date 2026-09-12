@@ -61,6 +61,99 @@ type Pending = Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, AgentError>>
 type Complaints = Arc<Mutex<std::collections::VecDeque<String>>>;
 const COMPLAINT_LINES: usize = 8;
 
+/// One model Codex says it offers.
+///
+/// Only the fields GitWyrm shows or sends. The response carries a dozen more
+/// (`serviceTiers`, `inputModalities`, `multiAgentVersion`, ...) that nothing
+/// here reads; leaving them out keeps this a statement of what GitWyrm uses
+/// rather than a second copy of Codex's schema that would need maintaining.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodexModel {
+    /// Passed to Codex verbatim. Never shown as-is.
+    pub id: String,
+    /// What the user sees, as Codex writes it (e.g. "GPT-5.6-Sol").
+    pub display_name: String,
+    /// Codex's own one-line description, or empty when it gives none.
+    pub description: String,
+    /// The model Codex would pick for itself.
+    pub is_default: bool,
+    /// How hard this model can be asked to think, in the order Codex lists
+    /// them (lowest first).
+    ///
+    /// Per model, not per tool: on 0.154.0 `gpt-5.5` accepts four levels while
+    /// every other model accepts six. The registry row had no way to say that,
+    /// which is why Codex's effort support was recorded as none at all.
+    pub efforts: Vec<String>,
+    /// The effort Codex would use if none is chosen, when it names one.
+    pub default_effort: Option<String>,
+}
+
+impl CodexModel {
+    /// Reads one entry, or `None` when it is hidden or has no usable id.
+    ///
+    /// Tolerant by design: a model missing a display name still renders under
+    /// its id, and one missing efforts simply cannot be asked to think harder.
+    /// Refusing the whole list over one unfamiliar row would turn a tool that
+    /// added a field into a tool GitWyrm cannot read at all.
+    fn parse(entry: &Value) -> Option<Self> {
+        if entry.get("hidden").and_then(Value::as_bool).unwrap_or(false) {
+            return None;
+        }
+        let id = entry
+            .get("id")
+            .or_else(|| entry.get("model"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())?
+            .to_string();
+        let display_name = entry
+            .get("displayName")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&id)
+            .to_string();
+        let efforts = entry
+            .get("supportedReasoningEfforts")
+            .and_then(Value::as_array)
+            .map(|levels| {
+                levels
+                    .iter()
+                    .filter_map(|l| {
+                        l.get("reasoningEffort")
+                            .or(Some(l))
+                            .and_then(Value::as_str)
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .map(str::to_string)
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        Some(Self {
+            id,
+            display_name,
+            description: entry
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .trim()
+                .to_string(),
+            is_default: entry
+                .get("isDefault")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            default_effort: entry
+                .get("defaultReasoningEffort")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string),
+            efforts,
+        })
+    }
+}
+
 /// A live Codex app-server session.
 pub struct CodexConnection {
     child: Child,
@@ -184,6 +277,61 @@ impl CodexConnection {
             .to_string();
         self.thread_id = Some(id.clone());
         Ok(id)
+    }
+
+    /// Every model this Codex offers, asked of Codex rather than remembered.
+    ///
+    /// The registry's `choices` were written by hand against codex-cli 0.151.0
+    /// and pinned two `gpt-5.4` entries. By 0.154.0 the tool offered six, none
+    /// of them 5.4, and nothing noticed -- a compile-time list cannot tell when
+    /// the thing it describes has moved on. `model/list` is the tool's own
+    /// answer to the same question, on the connection GitWyrm already uses.
+    ///
+    /// Needs `initialize` and nothing else: no thread, no repository, no
+    /// sandbox. Listing models is not a turn.
+    ///
+    /// `hidden` models are dropped. Codex marks its internal rows that way
+    /// (`gpt-reserve`, `codex-auto-review` on 0.154.0) and its own picker does
+    /// not show them, so neither does this.
+    pub async fn list_models(&self) -> Result<Vec<CodexModel>, AgentError> {
+        self.request(
+            "initialize",
+            json!({ "clientInfo": { "name": "GitWyrm", "version": env!("CARGO_PKG_VERSION") } }),
+        )
+        .await?;
+
+        let mut models = Vec::new();
+        let mut cursor: Option<String> = None;
+        // Paginated even though 0.154.0 answers in one page: `nextCursor` is
+        // in the protocol, so a build that starts using it must not silently
+        // truncate the list.
+        loop {
+            let mut params = json!({});
+            if let Some(c) = &cursor {
+                params["cursor"] = json!(c);
+            }
+            let res = self.request("model/list", params).await?;
+            let page = res.get("data").and_then(Value::as_array).ok_or_else(|| {
+                AgentError::Failed {
+                    detail: "Codex answered its model list without any models in it".into(),
+                }
+            })?;
+            for entry in page {
+                if let Some(model) = CodexModel::parse(entry) {
+                    models.push(model);
+                }
+            }
+            cursor = res
+                .get("nextCursor")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            // A server that keeps handing back a cursor would loop forever;
+            // an empty page with a cursor is the shape that would do it.
+            if cursor.is_none() || page.is_empty() {
+                break;
+            }
+        }
+        Ok(models)
     }
 
     pub fn take_incoming(&mut self) -> Option<mpsc::UnboundedReceiver<Incoming>> {
@@ -900,5 +1048,83 @@ mod tests {
     fn the_turn_done_slot_cannot_collide_with_a_request() {
         // Request ids count up from 1, so a negative reserved key is safe.
         assert!(TURN_DONE_KEY < 1);
+    }
+
+    /// Shaped exactly like one entry from codex-cli 0.154.0's `model/list`.
+    fn live_entry() -> Value {
+        json!({
+            "id": "gpt-5.6-sol",
+            "model": "gpt-5.6-sol",
+            "displayName": "GPT-5.6-Sol",
+            "description": "Reliable agentic workhorse for everyday tasks.",
+            "hidden": false,
+            "isDefault": false,
+            "defaultReasoningEffort": "low",
+            "supportedReasoningEfforts": [
+                { "reasoningEffort": "low", "description": "Fast responses with lighter reasoning" },
+                { "reasoningEffort": "high", "description": "Greater reasoning depth for complex problems" }
+            ],
+            "inputModalities": ["text", "image"],
+            "serviceTiers": [{ "id": "priority", "name": "Fast" }]
+        })
+    }
+
+    #[test]
+    fn a_live_model_entry_reads_the_fields_gitwyrm_shows() {
+        let m = CodexModel::parse(&live_entry()).expect("a visible model");
+        assert_eq!(m.id, "gpt-5.6-sol");
+        assert_eq!(m.display_name, "GPT-5.6-Sol");
+        assert_eq!(m.efforts, vec!["low", "high"]);
+        assert_eq!(m.default_effort.as_deref(), Some("low"));
+        assert!(!m.is_default);
+    }
+
+    /// Codex marks its internal rows hidden (`gpt-reserve`,
+    /// `codex-auto-review` on 0.154.0) and its own picker does not show them.
+    #[test]
+    fn a_hidden_model_is_not_offered() {
+        let mut entry = live_entry();
+        entry["hidden"] = json!(true);
+        assert!(CodexModel::parse(&entry).is_none());
+    }
+
+    #[test]
+    fn the_default_model_is_carried_through() {
+        let mut entry = live_entry();
+        entry["isDefault"] = json!(true);
+        assert!(CodexModel::parse(&entry).expect("model").is_default);
+    }
+
+    /// A tool that adds a field must not become a tool GitWyrm cannot read.
+    /// An entry with nothing but an id still renders, under that id.
+    #[test]
+    fn a_sparse_entry_still_renders_rather_than_failing_the_whole_list() {
+        let m = CodexModel::parse(&json!({ "id": "gpt-future" })).expect("model");
+        assert_eq!(m.display_name, "gpt-future");
+        assert!(m.description.is_empty());
+        assert!(m.efforts.is_empty(), "no efforts means the control is not offered, not that it has none");
+        assert!(!m.is_default);
+    }
+
+    /// An entry with no usable id cannot be sent to the tool, so it is dropped
+    /// rather than shown as a choice that would fail at launch.
+    #[test]
+    fn an_entry_with_no_id_is_dropped() {
+        assert!(CodexModel::parse(&json!({ "displayName": "Nameless" })).is_none());
+        assert!(CodexModel::parse(&json!({ "id": "   " })).is_none());
+    }
+
+    /// Efforts are per model, not per tool: on 0.154.0 `gpt-5.5` accepts four
+    /// levels while every other model accepts six. That is the fact the
+    /// registry row had no way to record, which is why Codex's effort support
+    /// was written down as none at all.
+    #[test]
+    fn two_models_can_offer_different_efforts() {
+        let mut fewer = live_entry();
+        fewer["id"] = json!("gpt-5.5");
+        fewer["supportedReasoningEfforts"] = json!([{ "reasoningEffort": "low" }]);
+        let a = CodexModel::parse(&live_entry()).expect("model");
+        let b = CodexModel::parse(&fewer).expect("model");
+        assert_ne!(a.efforts, b.efforts);
     }
 }

@@ -4056,7 +4056,25 @@ id: string;
 /**
  * What the user sees.
  */
-displayName: string }
+displayName: string; 
+/**
+ * The tool's own one-line description, when it gives one.
+ */
+description: string; 
+/**
+ * The model the tool would choose for itself, marked the way the tool's
+ * own picker marks it.
+ */
+isDefault: boolean; 
+/**
+ * How hard THIS model can be asked to think, lowest first.
+ * 
+ * Per model, not per tool: Codex accepts six levels on most models and
+ * four on `gpt-5.5`. `AgentProvider::effort_levels` is the tool-wide
+ * list and stays for the tools whose levels really are tool-wide; this
+ * is empty when the tool does not say.
+ */
+efforts: string[] }
 /**
  * One row in the provider picker.
  */
@@ -4134,7 +4152,16 @@ models: AgentModelChoice[];
  * Thinking-effort levels this tool accepts, lowest first, spelled the way
  * the tool spells them. Empty when it cannot be asked.
  */
-effortLevels: string[] }
+effortLevels: string[]; 
+/**
+ * Where `models` came from.
+ * 
+ * `fallback` means GitWyrm could not ask the tool and is showing the list
+ * built into it, which may be out of date -- exactly how two `gpt-5.4`
+ * entries survived three Codex releases. Never collapse this into the
+ * list itself: a stale list that cannot say it is stale is the defect.
+ */
+modelSource: ModelSource }
 /**
  * What the picker needs to render itself for one chat.
  */
@@ -6172,6 +6199,23 @@ export type ModelList = { models: CatalogModel[];
  * `enabled` reflects real entitlements rather than a static assumption.
  */
 live: boolean }
+/**
+ * Where a model list came from.
+ * 
+ * The same distinction `UsageSource` draws for usage figures: a value GitWyrm
+ * obtained is not the same kind of thing as one it fell back to, and the UI
+ * must be able to tell the reader which it is holding.
+ */
+export type ModelSource = 
+/**
+ * The tool was asked and answered.
+ */
+"live" | 
+/**
+ * The tool could not be asked, so this is the list built into GitWyrm.
+ * It may be out of date, and says so.
+ */
+"fallback"
 export type OpenResultDiffOutcome = 
 /**
  * The main window was found and told to open the diff.

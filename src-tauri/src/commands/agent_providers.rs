@@ -10,6 +10,9 @@
 //! that offered it anyway would let the user choose an option that then fails
 //! at launch. Better to show it greyed out with the reason attached.
 
+use std::collections::HashMap;
+
+use crate::ai::agent::codex_models::{ModelCatalog, ModelSource};
 use crate::ai::agent::copilot_cli::{detect_agent, CliState};
 use crate::ai::agent::registry::{self, Denial};
 
@@ -63,6 +66,13 @@ pub struct AgentProvider {
     /// Thinking-effort levels this tool accepts, lowest first, spelled the way
     /// the tool spells them. Empty when it cannot be asked.
     pub effort_levels: Vec<String>,
+    /// Where `models` came from.
+    ///
+    /// `fallback` means GitWyrm could not ask the tool and is showing the list
+    /// built into it, which may be out of date -- exactly how two `gpt-5.4`
+    /// entries survived three Codex releases. Never collapse this into the
+    /// list itself: a stale list that cannot say it is stale is the defect.
+    pub model_source: ModelSource,
 }
 
 /// One model a tool offers.
@@ -73,6 +83,18 @@ pub struct AgentModelChoice {
     pub id: String,
     /// What the user sees.
     pub display_name: String,
+    /// The tool's own one-line description, when it gives one.
+    pub description: String,
+    /// The model the tool would choose for itself, marked the way the tool's
+    /// own picker marks it.
+    pub is_default: bool,
+    /// How hard THIS model can be asked to think, lowest first.
+    ///
+    /// Per model, not per tool: Codex accepts six levels on most models and
+    /// four on `gpt-5.5`. `AgentProvider::effort_levels` is the tool-wide
+    /// list and stays for the tools whose levels really are tool-wide; this
+    /// is empty when the tool does not say.
+    pub efforts: Vec<String>,
 }
 
 /// What the picker needs to render itself for one chat.
@@ -111,8 +133,12 @@ pub async fn agent_providers_list(
 ) -> Result<AgentProviderChoices, crate::error::AppError> {
     let root = crate::agentdesk::store::SessionStoreRoot::resolve(&app)
         .map_err(|e| crate::error::AppError::Other(e.to_string()))?;
+    // Asked before the blocking work: listing models talks to a child process
+    // over stdio, which is async, and the answer is cached so this is free on
+    // every render after the first.
+    let catalogs = resolve_catalogs().await;
     tauri::async_runtime::spawn_blocking(move || AgentProviderChoices {
-        providers: list(),
+        providers: list(&catalogs),
         read_only: session_id
             .map(|id| session_is_read_only(&root, &id))
             .unwrap_or(false),
@@ -153,26 +179,66 @@ pub async fn agent_providers_refresh(
 ) -> Result<AgentProviderChoices, crate::error::AppError> {
     let root = crate::agentdesk::store::SessionStoreRoot::resolve(&app)
         .map_err(|e| crate::error::AppError::Other(e.to_string()))?;
-    tauri::async_runtime::spawn_blocking(move || {
+    tauri::async_runtime::spawn_blocking(|| {
         let added = crate::ai::agent::shell_path::rehydrate();
         crate::ai::agent::copilot_cli::forget_all_cached();
+        // Refresh means "ask everything again". Leaving the model lists
+        // remembered would make the button that exists to pick up a newly
+        // installed or updated tool keep showing that tool's old models.
+        crate::ai::agent::codex_models::forget_all_cached();
         log::info!("agent refresh: {added} new PATH folders, cached probes dropped");
-        AgentProviderChoices {
-            providers: list(),
-            read_only: session_id
-                .map(|id| session_is_read_only(&root, &id))
-                .unwrap_or(false),
-        }
+    })
+    .await
+    .map_err(|e| crate::error::AppError::Other(e.to_string()))?;
+
+    let catalogs = resolve_catalogs().await;
+    tauri::async_runtime::spawn_blocking(move || AgentProviderChoices {
+        providers: list(&catalogs),
+        read_only: session_id
+            .map(|id| session_is_read_only(&root, &id))
+            .unwrap_or(false),
     })
     .await
     .map_err(|e| crate::error::AppError::Other(e.to_string()))
 }
 
-fn list() -> Vec<AgentProvider> {
-    registry::AGENTS.iter().map(row).collect()
+/// Every tool's row, with each model list already resolved.
+///
+/// `catalogs` is keyed by agent id and holds whatever could be learnt before
+/// this ran. A tool with no entry falls back to its built-in list, which is
+/// also what every tool that cannot be asked gets.
+fn list(catalogs: &HashMap<&'static str, ModelCatalog>) -> Vec<AgentProvider> {
+    registry::AGENTS
+        .iter()
+        .map(|spec| {
+            let owned;
+            let catalog = match catalogs.get(spec.id) {
+                Some(c) => c,
+                None => {
+                    owned = ModelCatalog::fallback(spec);
+                    &owned
+                }
+            };
+            row(spec, catalog)
+        })
+        .collect()
 }
 
-fn row(spec: &'static registry::AgentSpec) -> AgentProvider {
+/// Asks every tool that can answer for its own model list.
+///
+/// Only Codex speaks a protocol that can be asked today. The others keep their
+/// built-in lists, which is why this returns a map rather than assuming one
+/// shape for all of them -- a second tool that grows the ability slots in here
+/// without changing anything downstream.
+async fn resolve_catalogs() -> HashMap<&'static str, ModelCatalog> {
+    let mut out = HashMap::new();
+    if let Some(codex) = registry::find("codex") {
+        out.insert(codex.id, crate::ai::agent::codex_models::catalog(codex).await);
+    }
+    out
+}
+
+fn row(spec: &'static registry::AgentSpec, catalog: &ModelCatalog) -> AgentProvider {
     let probe = detect_agent(spec);
     // `unresponsive` is separate from `installed` on purpose: the tool IS on
     // disk, so telling the person to install it -- which is what an
@@ -203,22 +269,24 @@ fn row(spec: &'static registry::AgentSpec) -> AgentProvider {
             .copied()
             .unwrap_or(spec.id)
             .to_string(),
-        models: match spec.model {
-            crate::ai::agent::registry::ModelSupport::Flag { choices, .. } => choices
-                .iter()
-                .map(|c| AgentModelChoice {
-                    id: c.id.to_string(),
-                    display_name: c.display_name.to_string(),
-                })
-                .collect(),
-            crate::ai::agent::registry::ModelSupport::None => Vec::new(),
-        },
+        models: catalog
+            .models
+            .iter()
+            .map(|m| AgentModelChoice {
+                id: m.id.clone(),
+                display_name: m.display_name.clone(),
+                description: m.description.clone(),
+                is_default: m.is_default,
+                efforts: m.efforts.clone(),
+            })
+            .collect(),
         effort_levels: match spec.effort {
             crate::ai::agent::registry::EffortSupport::Flag { levels, .. } => {
                 levels.iter().map(|l| (*l).to_string()).collect()
             }
             crate::ai::agent::registry::EffortSupport::None => Vec::new(),
         },
+        model_source: catalog.source,
     }
 }
 
@@ -259,6 +327,14 @@ fn read_only_limit(spec: &registry::AgentSpec) -> Option<String> {
         )),
         _ => None,
     }
+}
+
+#[cfg(test)]
+/// Rows with nothing asked of any tool -- every model list is the built-in
+/// one. What the picker shows on a machine where no tool can be reached, which
+/// is the state most of these tests are about.
+fn list_without_asking_any_tool() -> Vec<AgentProvider> {
+    list(&HashMap::new())
 }
 
 #[cfg(test)]
@@ -368,7 +444,7 @@ mod tests {
 
     #[test]
     fn every_registered_tool_appears_once() {
-        let rows = list();
+        let rows = list_without_asking_any_tool();
         assert_eq!(rows.len(), registry::AGENTS.len());
         for spec in registry::AGENTS {
             assert!(
@@ -381,7 +457,7 @@ mod tests {
 
     #[test]
     fn exactly_one_tool_is_the_default() {
-        let rows = list();
+        let rows = list_without_asking_any_tool();
         assert_eq!(rows.iter().filter(|r| r.is_default).count(), 1);
         assert!(rows.iter().any(|r| r.is_default && r.id == "copilot"));
     }
@@ -391,7 +467,7 @@ mod tests {
         // opencode is the one in the table today. The picker has to be able
         // to explain the limit at the point of choosing, not only after a
         // refusal at launch.
-        let rows = list();
+        let rows = list_without_asking_any_tool();
         let opencode = rows.iter().find(|r| r.id == "opencode").expect("opencode is listed");
         assert!(!opencode.can_do_read_only_work);
         let limit = opencode.read_only_limit.as_ref().expect("the limit must be explained");
@@ -401,7 +477,7 @@ mod tests {
 
     #[test]
     fn a_tool_that_can_refuse_a_write_carries_no_limit_text() {
-        let rows = list();
+        let rows = list_without_asking_any_tool();
         for id in ["copilot", "gemini", "claude"] {
             let row = rows.iter().find(|r| r.id == id).expect("listed");
             assert!(row.can_do_read_only_work, "{id} can enforce read-only");
@@ -418,7 +494,7 @@ mod tests {
     /// so an empty one silently turns a row back into a dead end.
     #[test]
     fn every_tool_says_where_to_get_it() {
-        for row in list() {
+        for row in list_without_asking_any_tool() {
             assert!(
                 row.homepage_url.starts_with("https://"),
                 "{} has no install page",
@@ -438,7 +514,7 @@ mod tests {
     #[test]
     fn the_binary_name_shown_is_one_that_is_probed_for() {
         for spec in registry::AGENTS {
-            let shown = row(spec).binary_name;
+            let shown = row(spec, &ModelCatalog::fallback(spec)).binary_name;
             assert!(
                 spec.candidate_names().contains(&shown.as_str()),
                 "{} shows {shown} but probes for {:?}",
@@ -542,7 +618,7 @@ mod tests {
     fn a_missing_tool_is_reported_as_not_installed_rather_than_too_old() {
         // The two states need different words -- one asks for an install, the
         // other for an update -- so they must never collapse into each other.
-        let rows = list();
+        let rows = list_without_asking_any_tool();
         for row in &rows {
             assert!(
                 !(row.installed && row.too_old),
@@ -566,7 +642,7 @@ mod tests {
 #[test]
 #[ignore]
 fn real_picker_rows_on_this_machine() {
-    for row in list() {
+    for row in list_without_asking_any_tool() {
         println!(
             "{:<16} installed={:<5} tooOld={:<5} readOnlyOk={:<5} version={:?}",
             row.id, row.installed, row.too_old, row.can_do_read_only_work, row.version
