@@ -4659,6 +4659,29 @@ export type ChangelogEntry = { version: string; released_at: string | null; item
  * markdown.
  */
 export type ChangelogItem = { section: string; text: string; tags?: string[] }
+/**
+ * Who established a check's outcome.
+ * 
+ * Same rule as `UsageSource`: a value GitWyrm produced itself is the only
+ * kind it may vouch for. Anything else is attributed to whoever said it.
+ */
+export type CheckEvidenceSource = 
+/**
+ * The agent said so. GitWyrm did not run the command and cannot confirm
+ * the outcome -- it only confirms the report is about the right command.
+ */
+"agentReported" | 
+/**
+ * GitWyrm ran the command itself and read the exit status.
+ * 
+ * **Nothing constructs this today, deliberately.** Re-running an agent's
+ * checks is a refusal recorded in `completion.rs`'s module doc, not an
+ * oversight. The variant exists so that a check GitWyrm ever does run
+ * can be labelled honestly rather than borrowing the agent's label --
+ * and so the UI has something to key off when it may legitimately stop
+ * hedging.
+ */
+"gitwyrmExecuted"
 export type CheckRunOutcome = "passed" | "failed" | 
 /**
  * The check was configured but never ran (execution stopped first).
@@ -6956,7 +6979,22 @@ commandName: string; outcome: CheckRunOutcome;
  * A short, plain-language summary line (e.g. "3 errors"), never the raw
  * stdout/stderr stream.
  */
-summary: string | null }
+summary: string | null; 
+/**
+ * Who says so.
+ * 
+ * `completion.rs`'s `judge` is careful to write down that a check's
+ * `passed` flag is "the helper's own report -- nothing here re-runs the
+ * check to see for itself", and that "a helper that reported a check it
+ * never ran would be believed". That honesty stopped at this struct: the
+ * review panel drew a green tick and "2 passed" with nothing saying who
+ * had witnessed it, at the exact moment the person decides whether to
+ * keep the work.
+ * 
+ * Modelled on `UsageSource`, which already makes this distinction for
+ * every usage figure.
+ */
+source: CheckEvidenceSource }
 /**
  * A reference to the commit a kept result landed as, once one exists.
  */

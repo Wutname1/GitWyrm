@@ -53,6 +53,40 @@ pub struct ResultCheckOutcome {
     /// A short, plain-language summary line (e.g. "3 errors"), never the raw
     /// stdout/stderr stream.
     pub summary: Option<String>,
+    /// Who says so.
+    ///
+    /// `completion.rs`'s `judge` is careful to write down that a check's
+    /// `passed` flag is "the helper's own report -- nothing here re-runs the
+    /// check to see for itself", and that "a helper that reported a check it
+    /// never ran would be believed". That honesty stopped at this struct: the
+    /// review panel drew a green tick and "2 passed" with nothing saying who
+    /// had witnessed it, at the exact moment the person decides whether to
+    /// keep the work.
+    ///
+    /// Modelled on `UsageSource`, which already makes this distinction for
+    /// every usage figure.
+    pub source: CheckEvidenceSource,
+}
+
+/// Who established a check's outcome.
+///
+/// Same rule as `UsageSource`: a value GitWyrm produced itself is the only
+/// kind it may vouch for. Anything else is attributed to whoever said it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum CheckEvidenceSource {
+    /// The agent said so. GitWyrm did not run the command and cannot confirm
+    /// the outcome -- it only confirms the report is about the right command.
+    AgentReported,
+    /// GitWyrm ran the command itself and read the exit status.
+    ///
+    /// **Nothing constructs this today, deliberately.** Re-running an agent's
+    /// checks is a refusal recorded in `completion.rs`'s module doc, not an
+    /// oversight. The variant exists so that a check GitWyrm ever does run
+    /// can be labelled honestly rather than borrowing the agent's label --
+    /// and so the UI has something to key off when it may legitimately stop
+    /// hedging.
+    GitwyrmExecuted,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -664,6 +698,7 @@ mod tests {
             command_name: "npm run typecheck".into(),
             outcome: CheckRunOutcome::Passed,
             summary: Some("no errors".into()),
+            source: CheckEvidenceSource::AgentReported,
         });
         r.commit = Some(ResultCommitRef {
             oid: "def456".into(),

@@ -174,6 +174,9 @@ pub(crate) fn checks_for_execution(session: &AgentSession, execution_id: &str) -
                         crate::agentdesk::result::CheckRunOutcome::Failed
                     },
                     summary: if detail.trim().is_empty() { None } else { Some(detail) },
+                    // Straight out of the agent's own transcript: `passed` is
+                    // what it told us, and nothing here re-ran the command.
+                    source: crate::agentdesk::result::CheckEvidenceSource::AgentReported,
                 }),
                 _ => None,
             }
@@ -1785,7 +1788,7 @@ mod tests {
         AgentSession, AgentSessionHeader, ExecutionRecord, SessionIntent, SessionSource,
         SessionState, CURRENT_SCHEMA_VERSION,
     };
-    use crate::agentdesk::result::{CheckRunOutcome, ResultCheckOutcome};
+    use crate::agentdesk::result::{CheckEvidenceSource, CheckRunOutcome, ResultCheckOutcome};
 
     /// A check that reported no name is not recorded as evidence.
     ///
@@ -2153,6 +2156,7 @@ mod tests {
                 command_name: "npm run typecheck".into(),
                 outcome: CheckRunOutcome::Passed,
                 summary: None,
+                source: CheckEvidenceSource::AgentReported,
             }],
             Some("add-thing".into()),
         );

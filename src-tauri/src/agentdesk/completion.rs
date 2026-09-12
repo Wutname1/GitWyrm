@@ -297,13 +297,16 @@ fn normalize(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agentdesk::result::{ResultChangedPath, ResultOutcomeKind, ResultState};
+    use crate::agentdesk::result::{
+        CheckEvidenceSource, ResultChangedPath, ResultOutcomeKind, ResultState,
+    };
 
     fn check(name: &str, outcome: CheckRunOutcome) -> ResultCheckOutcome {
         ResultCheckOutcome {
             command_name: name.to_string(),
             outcome,
             summary: None,
+            source: CheckEvidenceSource::AgentReported,
         }
     }
 

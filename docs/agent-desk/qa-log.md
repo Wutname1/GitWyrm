@@ -452,3 +452,13 @@ competing sub-agents, the answer names the losing option too.
 | 443 | 2026-10-10 | What about the line saying what started the chat? | It was cut short on screen at a fixed width, and the rest of the sentence was in a tooltip no screen reader ever reaches. |
 | 444 | 2026-10-10 | And the row of suggested starting points? | It was a loose run of buttons with nothing saying what they were or that ignoring them was fine, so each is now part of a named set. |
 | 445 | 2026-10-10 | Was the "still says Opening… over a live form" complaint fixed too? | It fixed itself -- with the four sections gone there is no live form behind it, so the greyed-out chip is now an accurate statement. |
+| 446 | 2026-10-10 | What did checking the four carried-over findings turn up? | That two were stale in the way this log keeps finding, and one named the wrong problem entirely. |
+| 447 | 2026-10-10 | Which named the wrong problem? | The one about checks: it described a path no live run can currently enter, while the real fault sat on screen in plain sight. |
+| 448 | 2026-10-10 | What was on screen? | A green tick and "2 passed" over checks nobody had run except the agent that was being judged by them. |
+| 449 | 2026-10-10 | Was that dishonesty anywhere in the code? | No -- the engine says in writing that an agent claiming a check it never ran would be believed, and the screen simply never repeated it. |
+| 450 | 2026-10-10 | What changed? | Each check now records who established it, and a result nobody but the agent witnessed says so beside the count. |
+| 451 | 2026-10-10 | Why drop the green tick as well as adding words? | Because a tick is GitWyrm vouching for something, and here it was vouching for an agent's account of its own work. |
+| 452 | 2026-10-10 | Was a new way of saying this invented? | No -- usage figures have drawn the same line between what GitWyrm measured and what it was told since an earlier pass, and this copies it. |
+| 453 | 2026-10-10 | Does anything actually run a check yet? | No, and the second option exists only so the hedge disappears by itself on the day something does. |
+| 454 | 2026-10-10 | Did the new tests hold up? | Yes -- with the change taken back out, two of them failed, naming the sentence that had gone missing. |
+| 455 | 2026-10-10 | Were the other two findings worth keeping open? | One is a decision already recorded twice as a decision, and the other waits on a real installation to read, not on code. |

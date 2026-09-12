@@ -236,6 +236,38 @@ export function hasFailingCheck(checks: ResultCheckOutcome[]): boolean {
 }
 
 /**
+ * Whether GitWyrm ran any of these checks itself.
+ *
+ * `false` means every line came from the agent's own transcript: it said it
+ * ran the command and said what happened, and nothing re-ran it to see. The
+ * Rust side has always been exact about this -- `completion.rs` writes down
+ * that "a helper that reported a check it never ran would be believed" -- but
+ * the review panel drew a green tick and "2 passed" with no witness named, on
+ * the screen where the person decides whether to keep the work.
+ *
+ * Nothing constructs `gitwyrmExecuted` today, so this is `false` for every
+ * real record. It is written as a question about the data rather than a
+ * constant so that the day GitWyrm does run a check, the hedge disappears on
+ * its own instead of having to be remembered.
+ */
+export function hasVerifiedCheck(checks: ResultCheckOutcome[]): boolean {
+  return checks.some((c) => c.source === 'gitwyrmExecuted')
+}
+
+/**
+ * Who to credit for a check summary, or `null` when GitWyrm ran them itself.
+ *
+ * Deliberately plain: "the agent" is who the person was just watching, and
+ * naming it is the whole point -- "reported" alone would leave them to guess
+ * by whom.
+ */
+export function checksAttribution(checks: ResultCheckOutcome[]): string | null {
+  if (checks.length === 0) return null
+  if (hasVerifiedCheck(checks)) return null
+  return 'as reported by the agent -- GitWyrm did not run these'
+}
+
+/**
  * Plain-language explanation for a Keep outcome that was not a plain
  * success, for a toast. `null` for `Kept` (the caller shows a positive
  * confirmation instead, not an explanation).

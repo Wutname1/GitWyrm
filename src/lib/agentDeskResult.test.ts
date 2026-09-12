@@ -41,7 +41,9 @@ import {
   explainEscalateToFixOutcome,
   explainKeepOutcome,
   explainUndoOutcome,
+  checksAttribution,
   hasFailingCheck,
+  hasVerifiedCheck,
   resultActionAvailability,
   undoCountLine,
   resultNeedsReview,
@@ -257,7 +259,7 @@ describe('changedPathStatusLabel', () => {
 
 describe('checksSummaryLine', () => {
   function check(outcome: ResultCheckOutcome['outcome']): ResultCheckOutcome {
-    return { commandName: 'npm run test', outcome, summary: null }
+    return { commandName: 'npm run test', outcome, summary: null, source: 'agentReported' }
   }
   it('is null for no checks', () => {
     expect(checksSummaryLine([])).toBeNull()
@@ -274,10 +276,78 @@ describe('checksSummaryLine', () => {
 
 describe('hasFailingCheck', () => {
   it('is true when any check failed', () => {
-    expect(hasFailingCheck([{ commandName: 'x', outcome: 'passed', summary: null }, { commandName: 'y', outcome: 'failed', summary: null }])).toBe(true)
+    expect(
+      hasFailingCheck([
+        { commandName: 'x', outcome: 'passed', summary: null, source: 'agentReported' },
+        { commandName: 'y', outcome: 'failed', summary: null, source: 'agentReported' },
+      ])
+    ).toBe(true)
   })
   it('is false when none failed', () => {
-    expect(hasFailingCheck([{ commandName: 'x', outcome: 'passed', summary: null }])).toBe(false)
+    expect(hasFailingCheck([{ commandName: 'x', outcome: 'passed', summary: null, source: 'agentReported' }])).toBe(false)
+  })
+})
+
+describe('checksAttribution', () => {
+  const reported = (outcome: ResultCheckOutcome['outcome']): ResultCheckOutcome => ({
+    commandName: 'npm run test',
+    outcome,
+    summary: null,
+    source: 'agentReported',
+  })
+  const executed = (outcome: ResultCheckOutcome['outcome']): ResultCheckOutcome => ({
+    commandName: 'npm run test',
+    outcome,
+    summary: null,
+    source: 'gitwyrmExecuted',
+  })
+
+  it('says nothing when there are no checks', () => {
+    expect(checksAttribution([])).toBeNull()
+  })
+
+  // The defect this exists for: an all-passed set of checks the agent merely
+  // reported was drawn with a green tick and "2 passed", at the moment the
+  // person decides whether to keep the work. `completion.rs` has always said
+  // in writing that "a helper that reported a check it never ran would be
+  // believed"; nothing said it on screen.
+  it('credits the agent when it is the only witness', () => {
+    const credit = checksAttribution([reported('passed'), reported('passed')])
+    expect(credit).not.toBeNull()
+    expect(credit).toContain('agent')
+    // Names who, rather than leaving "reported" to be guessed at.
+    expect(credit).not.toBe('reported')
+  })
+
+  it('credits the agent for a failing set too -- the witness is the point, not the verdict', () => {
+    expect(checksAttribution([reported('failed')])).not.toBeNull()
+  })
+
+  it('drops the hedge once GitWyrm has run one itself', () => {
+    expect(checksAttribution([executed('passed')])).toBeNull()
+  })
+
+  // A mixed set must not be credited to the agent alone, but nor may it claim
+  // GitWyrm saw all of it. Today this cannot arise -- nothing constructs
+  // `gitwyrmExecuted` -- and this pins the intended reading for when it can.
+  it('does not blame the agent for a set GitWyrm partly ran', () => {
+    expect(checksAttribution([reported('passed'), executed('passed')])).toBeNull()
+  })
+})
+
+describe('hasVerifiedCheck', () => {
+  it('is false for every record GitWyrm can build today', () => {
+    // Nothing constructs `gitwyrmExecuted`, by the deliberate refusal recorded
+    // in `completion.rs`. If this ever starts failing, a check really is being
+    // run here and the UI hedge should disappear on its own.
+    expect(hasVerifiedCheck([{ commandName: 'x', outcome: 'passed', summary: null, source: 'agentReported' }])).toBe(
+      false
+    )
+  })
+  it('is true once one is', () => {
+    expect(
+      hasVerifiedCheck([{ commandName: 'x', outcome: 'passed', summary: null, source: 'gitwyrmExecuted' }])
+    ).toBe(true)
   })
 })
 

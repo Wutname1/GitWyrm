@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { CheckCircle2, CircleAlert, ExternalLink, FileCheck2, FileDiff, GitCommitHorizontal, RotateCcw, Wrench } from 'lucide-react'
+import { CheckCircle2, CircleAlert, ClipboardCheck, ExternalLink, FileCheck2, FileDiff, GitCommitHorizontal, RotateCcw, Wrench } from 'lucide-react'
 import { commands, type ResultRecord, type SessionIntent } from '@/lib/bindings'
 import { invalidateAfterResultLanding, keys, unwrap } from '@/lib/queryKeys'
 import { useCompleteOpenSpecTask } from '@/hooks/useOpenspecSessionSource'
@@ -35,6 +35,7 @@ import {
   explainCompleteOpenSpecTaskOutcome,
   explainKeepOutcome,
   explainUndoOutcome,
+  checksAttribution,
   hasFailingCheck,
   resultActionAvailability,
   undoCountLine,
@@ -222,6 +223,7 @@ export function ResultReviewPanel({
   const destination = describeCommitDestination(record)
   const checksLine = checksSummaryLine(record.checks)
   const failingChecks = hasFailingCheck(record.checks)
+  const checksCredit = checksAttribution(record.checks)
 
   async function withBusy(fn: () => Promise<void>) {
     setBusy(true)
@@ -568,6 +570,12 @@ export function ResultReviewPanel({
         >
           {failingChecks ? (
             <CircleAlert size={12} className="mt-px flex-none text-[var(--gw-amber)]" aria-hidden />
+          ) : checksCredit ? (
+            // No green tick for a pass GitWyrm did not witness. The tick is
+            // GitWyrm vouching for the result, and here it would be vouching
+            // for the agent's account of its own work -- at the moment the
+            // person decides whether to keep it.
+            <ClipboardCheck size={12} className="mt-px flex-none text-muted-foreground" aria-hidden />
           ) : (
             <CheckCircle2 size={12} className="mt-px flex-none text-success" aria-hidden />
           )}
@@ -575,6 +583,7 @@ export function ResultReviewPanel({
             <span className={cn('text-muted-foreground', failingChecks && 'font-medium text-foreground')}>
               {checksLine}
             </span>
+            {checksCredit && <span className="text-muted-foreground"> ({checksCredit})</span>}
             {failingChecks && (
               <ul className="mt-0.5 flex flex-col gap-0.5">
                 {failingCheckLines(record.checks).map((line) => (
