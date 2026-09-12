@@ -10,9 +10,15 @@ import {
   linkedImportedSessionId,
   projectLabel,
   unlinkConfirmCopy,
+  summarizeBatchImport,
+  explainBatchRefusal,
+  syncToggleCopy,
+  explainSyncImport,
+  SYNC_POLL_MS,
 } from './agentImportDisplay'
 import type {
   AdapterListEntry,
+  BatchImportItem,
   AgentSession,
   ContinuationOutcome,
   ImportSessionOutcome,
@@ -393,5 +399,123 @@ describe('every place that shows a project name checks whether it is real', () =
       return src.includes('repoName') && !src.includes('isUnresolvedProject')
     })
     expect(missing, 'these show a project name without checking it is a real one').toEqual([])
+  })
+})
+
+describe('bringing in many chats at once', () => {
+  function item(
+    id: string,
+    outcome: BatchImportItem['outcome'],
+    title = id
+  ): BatchImportItem {
+    return { externalSessionId: id, title, outcome }
+  }
+  const session = { header: { sessionId: 'gw-1' } } as never
+
+  it('tells apart new chats, updated ones, and ones already up to date', () => {
+    const summary = summarizeBatchImport(
+      [
+        item('a', { kind: 'created', session }),
+        item('b', { kind: 'created', session }),
+        item('c', { kind: 'refreshed', session, newMessageCount: 4 }),
+        item('d', { kind: 'refreshed', session, newMessageCount: 0 }),
+      ],
+      'claude-code'
+    )
+    expect(summary).toMatchObject({ created: 2, updated: 1, unchanged: 1, ok: true })
+    expect(summary.message).toBe('2 chats brought in - 1 updated - 1 already up to date')
+  })
+
+  /**
+   * A press that did nothing still has to say so, or it reads as a click that
+   * never registered -- Rule #1.
+   */
+  it('says something even when nothing changed', () => {
+    const summary = summarizeBatchImport([], 'claude-code')
+    expect(summary.message).toBe('Nothing to bring in')
+  })
+
+  /**
+   * Refusals inside a batch are counted AND explained. A tally alone
+   * ("3 could not be brought in") leaves nothing to act on.
+   */
+  it('carries a reason for every chat that refused', () => {
+    const summary = summarizeBatchImport(
+      [
+        item('a', { kind: 'created', session }),
+        item('b', { kind: 'corruptSession', detail: 'bad json at line 4' }, 'Broken chat'),
+      ],
+      'claude-code'
+    )
+    expect(summary.ok).toBe(false)
+    expect(summary.failed).toHaveLength(1)
+    expect(summary.failed[0]?.title).toBe('Broken chat')
+    expect(summary.failed[0]?.reason).toContain('bad json at line 4')
+    expect(summary.message).toContain('1 could not be brought in')
+  })
+
+  it('uses singular wording for a single chat', () => {
+    const summary = summarizeBatchImport([item('a', { kind: 'created', session })], 'claude-code')
+    expect(summary.message).toBe('1 chat brought in')
+  })
+
+  /**
+   * Both numbers, not just "too many". The limit is what turns a refusal into
+   * a step someone can take.
+   */
+  it('names how many were asked for and how many are allowed', () => {
+    const message = explainBatchRefusal(
+      { kind: 'tooMany', requested: 800, limit: 500 },
+      'claude-code'
+    )
+    expect(message).toContain('800')
+    expect(message).toContain('500')
+    expect(message).toContain('Nothing was brought in')
+  })
+
+  it('names the tool by the name a person would recognise', () => {
+    expect(explainBatchRefusal({ kind: 'clientNotDetected' }, 'vscode-copilot')).toContain(
+      'VS Code Copilot Chat'
+    )
+  })
+})
+
+describe('keeping in sync', () => {
+  /**
+   * The toggle's copy is load-bearing. Turning it on makes GitWyrm read
+   * another application's saved conversations on a timer and copy new ones in
+   * with nobody present, so the label has to say that BEFORE the switch is
+   * flipped -- not in a toast afterwards.
+   */
+  it('says chats will arrive on their own, and that it is off by default', () => {
+    const copy = syncToggleCopy('Claude Code')
+    expect(copy.description).toContain('Claude Code')
+    expect(copy.description.toLowerCase()).toContain('on its own')
+    expect(copy.description.toLowerCase()).toContain('off unless you turn it on')
+  })
+
+  it('reports what arrived on its own', () => {
+    const line = explainSyncImport(
+      { created: 3, updated: 1, unchanged: 0, failed: [], message: '', ok: true },
+      'Codex'
+    )
+    expect(line).toContain('Codex')
+    expect(line).toContain('3 new chats')
+    expect(line).toContain('updated 1')
+  })
+
+  /** Nothing arrived, so nothing is announced -- a toast every few minutes
+   * saying "no change" is noise, not feedback. */
+  it('says nothing when nothing arrived', () => {
+    expect(
+      explainSyncImport(
+        { created: 0, updated: 0, unchanged: 12, failed: [], message: '', ok: true },
+        'Codex'
+      )
+    ).toBeNull()
+  })
+
+  it('checks in minutes, not seconds', () => {
+    expect(SYNC_POLL_MS).toBeGreaterThanOrEqual(60_000)
   })
 })

@@ -1,5 +1,7 @@
 import type {
   AdapterError,
+  BatchImportItem,
+  BatchImportOutcome,
   ImportScanOutcome,
   AdapterListEntry,
   ContinuationOutcome,
@@ -311,4 +313,130 @@ function explainAdapterError(error: AdapterError): string {
  */
 export function isUnresolvedProject(repoId: string | null | undefined): boolean {
   return typeof repoId === 'string' && repoId.startsWith('unresolved:')
+}
+
+/**
+ * What a batch import actually did, as one line a person can act on.
+ *
+ * A tally, not a list: bringing in two hundred chats produces two hundred
+ * outcomes, and two hundred toasts is not a report. The counts that matter are
+ * kept separate because they need different responses -- new chats and
+ * refreshes are both successes, "already up to date" is a no-op worth saying
+ * so nobody presses again, and refusals are the only part anyone has to do
+ * something about.
+ */
+export interface BatchImportSummary {
+  /** Chats that became a new GitWyrm chat. */
+  created: number
+  /** Chats already in GitWyrm that gained new messages. */
+  updated: number
+  /** Chats already in GitWyrm that had nothing new. */
+  unchanged: number
+  /** Chats that refused, with a reason each. */
+  failed: { title: string; reason: string }[]
+  message: string
+  ok: boolean
+}
+
+export function summarizeBatchImport(
+  items: readonly BatchImportItem[],
+  adapterId: string
+): BatchImportSummary {
+  let created = 0
+  let updated = 0
+  let unchanged = 0
+  const failed: { title: string; reason: string }[] = []
+
+  for (const item of items) {
+    switch (item.outcome.kind) {
+      case 'created':
+        created += 1
+        break
+      case 'refreshed':
+        if (item.outcome.newMessageCount === 0) unchanged += 1
+        else updated += 1
+        break
+      default: {
+        const { message } = explainImportOutcome(item.outcome, item.title, adapterId)
+        failed.push({ title: item.title, reason: message })
+      }
+    }
+  }
+
+  const parts: string[] = []
+  if (created > 0) parts.push(`${created} ${created === 1 ? 'chat' : 'chats'} brought in`)
+  if (updated > 0) parts.push(`${updated} updated`)
+  if (unchanged > 0) parts.push(`${unchanged} already up to date`)
+  if (failed.length > 0) parts.push(`${failed.length} could not be brought in`)
+
+  return {
+    created,
+    updated,
+    unchanged,
+    failed,
+    // Never empty: a press that did nothing at all still has to say so, or it
+    // reads as a click that did not register.
+    message: parts.length > 0 ? parts.join(' - ') : 'Nothing to bring in',
+    ok: failed.length === 0,
+  }
+}
+
+/**
+ * Why a whole batch was refused before any chat was attempted.
+ *
+ * `tooMany` names both numbers on purpose. "Too many chats" alone leaves
+ * someone guessing how much to deselect; the limit turns it into a step they
+ * can take.
+ */
+export function explainBatchRefusal(
+  outcome: Exclude<BatchImportOutcome, { kind: 'completed' }>,
+  adapterId: string
+): string {
+  const client = adapterDisplayName(adapterId)
+  switch (outcome.kind) {
+    case 'adapterDisabled':
+      return `GitWyrm cannot read ${client} chats yet.`
+    case 'clientNotDetected':
+      return `${client} is not on this computer any more.`
+    case 'tooMany':
+      return `That is ${outcome.requested} chats, and GitWyrm brings in up to ${outcome.limit} at a time. Nothing was brought in. Pick fewer and try again.`
+  }
+}
+
+/**
+ * How often a synced tool is checked for new chats.
+ *
+ * Minutes, not seconds. Each check re-reads the tool's saved conversations
+ * from disk, and a chat finished in another window is not urgent -- the person
+ * asked GitWyrm to keep up, not to watch. Long enough that the cost is
+ * invisible, short enough that "every few minutes" is a true description.
+ */
+export const SYNC_POLL_MS = 3 * 60 * 1000
+
+/**
+ * What the keep-in-sync toggle promises, in the words it has to be true in.
+ *
+ * This copy is load-bearing. Turning it on makes GitWyrm read another
+ * application's saved conversations on a timer and copy new ones in with
+ * nobody present, so the label cannot stop at "keep in sync" -- it has to say
+ * that chats will arrive on their own, before the switch is flipped rather
+ * than after.
+ */
+export function syncToggleCopy(adapterName: string): { label: string; description: string } {
+  return {
+    label: 'Keep in sync',
+    description: `Check ${adapterName} for new chats every few minutes while this is open, and bring in anything new on its own. Off unless you turn it on.`,
+  }
+}
+
+/** What just arrived on its own, for the line that says so. Sync that brings
+ * chats in without being asked has to report every time it does. */
+export function explainSyncImport(summary: BatchImportSummary, adapterName: string): string | null {
+  if (summary.created === 0 && summary.updated === 0) return null
+  const parts: string[] = []
+  if (summary.created > 0) {
+    parts.push(`brought in ${summary.created} new ${summary.created === 1 ? 'chat' : 'chats'}`)
+  }
+  if (summary.updated > 0) parts.push(`updated ${summary.updated}`)
+  return `Keeping in sync with ${adapterName}: ${parts.join(', ')}.`
 }

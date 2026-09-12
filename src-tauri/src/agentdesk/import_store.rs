@@ -314,6 +314,95 @@ pub fn remove_link(
     }
 }
 
+// -- keep-in-sync preferences --
+
+/// Which adapters the person asked GitWyrm to keep checking for new chats.
+///
+/// A separate file from the per-adapter ledgers, and a separate concern: a
+/// ledger records what has already been brought in, this records whether to
+/// keep looking. Lives in the same `imports/` directory so everything GitWyrm
+/// knows about an import stays in GitWyrm's own app data.
+///
+/// Absent means off for everything. There is no default-on entry anywhere,
+/// because turning this on means another application's saved conversations
+/// get read on a timer and copied in without anyone present -- which is the
+/// person's decision to make, every time, per adapter.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncPreferences {
+    /// Keyed by adapter id. An adapter absent from the map is off.
+    pub adapters: BTreeMap<String, bool>,
+}
+
+fn sync_preferences_path(root: &SessionStoreRoot) -> PathBuf {
+    imports_dir(root).join("sync-preferences.json")
+}
+
+/// Every adapter's keep-in-sync choice, as `(adapter_id, enabled)` pairs.
+///
+/// An unreadable or damaged file reads as "nothing is synced". That is the
+/// safe direction for this particular setting and the opposite of the ledger's
+/// rule: losing a ledger risks a duplicate import, so it refuses; losing this
+/// only means a background check the person opted into stops happening, which
+/// they will see (the toggle is off) and can turn back on. Guessing ON from a
+/// damaged file would start reading another app's files on a choice nobody
+/// can show was made.
+pub fn read_sync_preferences(root: &SessionStoreRoot) -> Vec<(String, bool)> {
+    let path = sync_preferences_path(root);
+    let Ok(raw) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    match serde_json::from_str::<SyncPreferences>(&raw) {
+        Ok(prefs) => prefs.adapters.into_iter().collect(),
+        Err(e) => {
+            log::warn!("keep-in-sync choices could not be read, treating every tool as not synced: {e}");
+            Vec::new()
+        }
+    }
+}
+
+/// Whether one adapter is set to keep in sync.
+pub fn is_sync_enabled(root: &SessionStoreRoot, adapter_id: &str) -> bool {
+    read_sync_preferences(root)
+        .into_iter()
+        .any(|(id, enabled)| id == adapter_id && enabled)
+}
+
+/// Record one adapter's keep-in-sync choice, leaving every other adapter's
+/// alone. Atomic (temp file + rename), same discipline as the ledger.
+///
+/// Read-modify-write over a file that may be damaged, which for the ledger
+/// would be a refusal. Here the prior content is a set of on/off choices with
+/// nothing irreplaceable in it, and refusing would leave the person unable to
+/// turn sync OFF for one tool because of an unrelated tool's bad entry -- so a
+/// damaged file is rebuilt around the choice just made.
+pub fn write_sync_preference(
+    root: &SessionStoreRoot,
+    adapter_id: &str,
+    enabled: bool,
+) -> Result<(), LedgerWriteError> {
+    let dir = imports_dir(root);
+    std::fs::create_dir_all(&dir).map_err(|e| LedgerWriteError::Write(e.to_string()))?;
+
+    let mut prefs = SyncPreferences {
+        adapters: read_sync_preferences(root).into_iter().collect(),
+    };
+    prefs.adapters.insert(adapter_id.to_string(), enabled);
+
+    let json =
+        serde_json::to_vec_pretty(&prefs).map_err(|e| LedgerWriteError::Serialize(e.to_string()))?;
+    let mut temp =
+        NamedTempFile::new_in(&dir).map_err(|e| LedgerWriteError::Write(e.to_string()))?;
+    temp.write_all(&json)
+        .map_err(|e| LedgerWriteError::Write(e.to_string()))?;
+    temp.as_file_mut()
+        .sync_all()
+        .map_err(|e| LedgerWriteError::Write(e.to_string()))?;
+    temp.persist(sync_preferences_path(root))
+        .map_err(|e| LedgerWriteError::Write(e.error.to_string()))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -617,5 +706,37 @@ mod tests {
 
         assert!(!remove_link(&root, "codex", "ext-1").unwrap());
         assert!(!remove_link(&root, "never-written", "ext-1").unwrap());
+    }
+
+    /// A damaged preferences file must read as "nothing is synced".
+    ///
+    /// The opposite direction from the ledger, deliberately. A lost ledger can
+    /// duplicate a whole conversation, so it refuses; a lost preference only
+    /// stops a background check the person opted into, which they can see and
+    /// turn back on. Guessing ON would start reading another application's
+    /// files on a choice nobody can show was ever made.
+    #[test]
+    fn a_damaged_keep_in_sync_file_means_nothing_is_synced() {
+        let (_dir, root) = temp_root();
+        write_sync_preference(&root, "claude-code", true).unwrap();
+        assert!(is_sync_enabled(&root, "claude-code"));
+
+        std::fs::write(sync_preferences_path(&root), b"{ this is not json").unwrap();
+
+        assert!(read_sync_preferences(&root).is_empty());
+        assert!(!is_sync_enabled(&root, "claude-code"));
+    }
+
+    /// A damaged file is rebuilt around the choice just made, so a person can
+    /// still turn sync off for one tool when an unrelated entry went bad.
+    #[test]
+    fn a_choice_can_still_be_saved_over_a_damaged_keep_in_sync_file() {
+        let (_dir, root) = temp_root();
+        std::fs::create_dir_all(imports_dir(&root)).unwrap();
+        std::fs::write(sync_preferences_path(&root), b"not json at all").unwrap();
+
+        write_sync_preference(&root, "codex", true).unwrap();
+
+        assert!(is_sync_enabled(&root, "codex"));
     }
 }

@@ -65,6 +65,8 @@ export const keys = {
 
   /** External chat import: adapter detection/enabled list (agent-desk-external-chat-import). */
   agentImportAdapters: ['agentImportAdapters'] as const,
+  /** External chat import: which adapters are set to keep in sync. */
+  agentImportSyncPreferences: ['agentImportSyncPreferences'] as const,
   /** External chat import: one adapter's scanned external sessions. */
   agentImportScan: (adapterId: string) => ['agentImportScan', adapterId] as const,
   /** External chat import: whether/how a specific external session can be continued externally. */

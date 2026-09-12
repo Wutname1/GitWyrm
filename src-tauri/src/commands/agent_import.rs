@@ -1097,6 +1097,220 @@ fn unlink_at(locks: &SessionLocks, root: &SessionStoreRoot, session_id: &str) ->
     })
 }
 
+// -- 4.6: bringing in many chats at once --
+
+/// What one chat in a batch turned into.
+///
+/// Carried per chat rather than collapsed into a tally because the outcomes
+/// are not interchangeable: a chat that was already up to date, one that was
+/// damaged, and one that could not be saved need different things said about
+/// them, and a batch of two hundred will usually contain several kinds at
+/// once.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchImportItem {
+    pub external_session_id: String,
+    pub title: String,
+    pub outcome: ImportSessionOutcome,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum BatchImportOutcome {
+    /// Every chat was attempted. Individual chats may still have refused --
+    /// see each item's own outcome.
+    Completed { items: Vec<BatchImportItem> },
+    AdapterDisabled,
+    ClientNotDetected,
+    /// More chats were asked for than one press is allowed to bring in, so
+    /// nothing was attempted rather than importing an arbitrary prefix.
+    TooMany { requested: u32, limit: u32 },
+}
+
+/// How many chats one press may bring in.
+///
+/// A batch holds the session lock per chat and writes a session file each
+/// time, so an unbounded list is a long unattended write loop. This is high
+/// enough that a realistic "select all" of a year's chats goes through in one
+/// press, and low enough that a runaway selection is refused with a number
+/// the person can act on rather than silently truncated.
+pub const BATCH_IMPORT_LIMIT: u32 = 500;
+
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_import_session_batch(
+    app: AppHandle,
+    locks: tauri::State<'_, std::sync::Arc<SessionLocks>>,
+    adapter_id: String,
+    external_session_ids: Vec<String>,
+) -> Result<BatchImportOutcome, AppError> {
+    let root = resolve_root(&app)?;
+    let known_repos = known_repos_from_settings(&app);
+    let locks = locks.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        batch_import_at(&locks, &root, &adapter_id, &external_session_ids, &known_repos)
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))
+}
+
+/// The chats a batch will actually act on: each id once, in the order asked
+/// for.
+///
+/// The same id twice in one press is ordinary -- shift-selecting a range and
+/// then ctrl-clicking inside it produces one -- and it must not become two
+/// imports. The create path builds a session with a fresh id without consulting
+/// the one it just wrote, so a repeated id processed twice yields two complete
+/// copies of the same conversation with no error anywhere.
+///
+/// A named function rather than an inline filter so the behavior is reachable
+/// from a test directly, instead of only through a scan that needs a real
+/// client installed.
+fn dedupe_preserving_order(ids: &[String]) -> Vec<&String> {
+    let mut seen = std::collections::HashSet::new();
+    ids.iter().filter(|id| seen.insert((*id).clone())).collect()
+}
+
+fn batch_import_at(
+    locks: &SessionLocks,
+    root: &SessionStoreRoot,
+    adapter_id: &str,
+    external_session_ids: &[String],
+    known_repos: &[KnownRepo],
+) -> BatchImportOutcome {
+    if !is_enabled(adapter_id) {
+        return BatchImportOutcome::AdapterDisabled;
+    }
+
+    // The same id twice in one batch would import, then immediately "refresh"
+    // its own fresh copy -- harmless, but it reports two results for one chat
+    // and makes the tally disagree with what the person selected. Order is
+    // kept so results come back in the order they were asked for.
+    let unique = dedupe_preserving_order(external_session_ids);
+
+    if unique.len() as u32 > BATCH_IMPORT_LIMIT {
+        return BatchImportOutcome::TooMany {
+            requested: unique.len() as u32,
+            limit: BATCH_IMPORT_LIMIT,
+        };
+    }
+
+    let registry = AdapterRegistry::with_default_adapters();
+    let Some(adapter) = registry.get(adapter_id) else {
+        return BatchImportOutcome::ClientNotDetected;
+    };
+    // Detected once for the whole batch rather than per chat: detection walks
+    // the client's home directory, and a two-hundred-chat batch would pay for
+    // that two hundred times over.
+    let detected = match adapter.detect() {
+        Ok(Some(d)) => d,
+        Ok(None) => return BatchImportOutcome::ClientNotDetected,
+        Err(_) => return BatchImportOutcome::ClientNotDetected,
+    };
+
+    let titles: HashMap<String, String> = adapter
+        .list_sessions(&detected)
+        .map(|list| {
+            list.into_iter()
+                .map(|s| (s.external_session_id, s.title))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let items = unique
+        .into_iter()
+        .map(|external_session_id| {
+            // Each chat goes through the single-chat path, so the ledger
+            // check, the create-vs-refresh decision, and the per-message
+            // provenance dedup are the same code -- a batch cannot grow its
+            // own second copy of a chat the single path would have refreshed.
+            let outcome =
+                import_session_at(locks, root, adapter_id, external_session_id, known_repos);
+            BatchImportItem {
+                title: titles
+                    .get(external_session_id)
+                    .cloned()
+                    .unwrap_or_else(|| external_session_id.clone()),
+                external_session_id: external_session_id.clone(),
+                outcome,
+            }
+        })
+        .collect();
+
+    BatchImportOutcome::Completed { items }
+}
+
+// -- 4.7: opt-in "keep in sync" --
+
+/// Which adapters the person asked GitWyrm to keep checking, stored beside the
+/// import ledgers in GitWyrm's own app data.
+///
+/// Off for every adapter until explicitly turned on. Watching another
+/// application's saved conversations, and copying them in unattended, is a
+/// decision that belongs to the person -- so the absence of a record means
+/// off, and there is no default-on path anywhere.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportSyncPreference {
+    pub adapter_id: String,
+    pub enabled: bool,
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_import_get_sync_preferences(
+    app: AppHandle,
+) -> Result<Vec<ImportSyncPreference>, AppError> {
+    let root = resolve_root(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        import_store::read_sync_preferences(&root)
+            .into_iter()
+            .map(|(adapter_id, enabled)| ImportSyncPreference {
+                adapter_id,
+                enabled,
+            })
+            .collect()
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum SetSyncPreferenceOutcome {
+    Saved { enabled: bool },
+    /// The preference could not be written, so it is NOT in effect. Reported
+    /// rather than swallowed: a toggle that springs back with no explanation
+    /// is worse than one that says why.
+    Failed { detail: String },
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_import_set_sync_preference(
+    app: AppHandle,
+    adapter_id: String,
+    enabled: bool,
+) -> Result<SetSyncPreferenceOutcome, AppError> {
+    let root = resolve_root(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        match import_store::write_sync_preference(&root, &adapter_id, enabled) {
+            Ok(()) => SetSyncPreferenceOutcome::Saved { enabled },
+            Err(e) => {
+                log::warn!(
+                    "could not save the keep-in-sync choice for {adapter_id}: {}",
+                    redact_for_log(&e.to_string())
+                );
+                SetSyncPreferenceOutcome::Failed {
+                    detail: e.to_string(),
+                }
+            }
+        }
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -1260,6 +1474,106 @@ mod tests {
             model: None,
             raw_unrecognized: false,
         }
+    }
+
+    // -- bringing in many chats at once (4.6) --
+
+    /// The same chat named twice in one press must be brought in ONCE.
+    ///
+    /// Shift-selecting a range and then Ctrl-clicking inside it is an ordinary
+    /// way to end up with a repeated id, and the create path builds a session
+    /// with a fresh id without consulting the one it just wrote -- so a batch
+    /// that processed both entries would produce two complete copies of the
+    /// same conversation with no error anywhere.
+    #[test]
+    fn the_same_chat_twice_in_one_batch_is_brought_in_once() {
+        let ids = vec![
+            "ext-1".to_string(),
+            "ext-2".to_string(),
+            "ext-1".to_string(),
+            "ext-2".to_string(),
+        ];
+
+        let unique = dedupe_preserving_order(&ids);
+
+        assert_eq!(unique.len(), 2, "repeated ids must collapse to one entry each");
+        assert_eq!(unique[0], "ext-1");
+        assert_eq!(unique[1], "ext-2", "the order asked for is kept");
+    }
+
+    /// More chats than one press may bring in is refused whole, not truncated.
+    ///
+    /// Importing the first 500 of 800 and reporting success would leave 300
+    /// chats silently absent, and the person no way to tell which.
+    #[test]
+    fn asking_for_more_chats_than_the_limit_refuses_instead_of_truncating() {
+        let (_dir, root) = temp_root();
+        let locks = test_locks();
+        let ids: Vec<String> = (0..(BATCH_IMPORT_LIMIT + 1))
+            .map(|i| format!("ext-{i}"))
+            .collect();
+
+        let outcome = batch_import_at(&locks, &root, "claude-code", &ids, &[]);
+
+        match outcome {
+            BatchImportOutcome::TooMany { requested, limit } => {
+                assert_eq!(requested, BATCH_IMPORT_LIMIT + 1);
+                assert_eq!(limit, BATCH_IMPORT_LIMIT);
+            }
+            other => panic!("expected a refusal naming both numbers, got {other:?}"),
+        }
+    }
+
+    /// A batch for a tool GitWyrm cannot read says so, and imports nothing.
+    #[test]
+    fn a_batch_for_a_disabled_tool_imports_nothing() {
+        let (_dir, root) = temp_root();
+        let locks = test_locks();
+
+        let outcome =
+            batch_import_at(&locks, &root, "openchamber", &["ext-1".to_string()], &[]);
+
+        assert!(matches!(outcome, BatchImportOutcome::AdapterDisabled));
+    }
+
+    // -- keep-in-sync preferences (4.7) --
+
+    /// Nothing is synced until someone turns it on.
+    ///
+    /// This is the whole privacy promise of the toggle: sync reads another
+    /// application's saved conversations on a timer and copies them in
+    /// unattended, so a fresh install, a missing file, and a damaged file must
+    /// all mean OFF.
+    #[test]
+    fn no_tool_is_kept_in_sync_until_it_is_turned_on() {
+        let (_dir, root) = temp_root();
+
+        assert!(import_store::read_sync_preferences(&root).is_empty());
+        for id in ["codex", "claude-code", "opencode", "vscode-copilot"] {
+            assert!(!import_store::is_sync_enabled(&root, id), "{id} must start off");
+        }
+    }
+
+    #[test]
+    fn turning_sync_on_for_one_tool_leaves_the_others_alone() {
+        let (_dir, root) = temp_root();
+
+        import_store::write_sync_preference(&root, "claude-code", true).unwrap();
+        import_store::write_sync_preference(&root, "codex", false).unwrap();
+
+        assert!(import_store::is_sync_enabled(&root, "claude-code"));
+        assert!(!import_store::is_sync_enabled(&root, "codex"));
+        assert!(!import_store::is_sync_enabled(&root, "opencode"));
+    }
+
+    #[test]
+    fn turning_sync_back_off_sticks() {
+        let (_dir, root) = temp_root();
+
+        import_store::write_sync_preference(&root, "claude-code", true).unwrap();
+        import_store::write_sync_preference(&root, "claude-code", false).unwrap();
+
+        assert!(!import_store::is_sync_enabled(&root, "claude-code"));
     }
 
     #[test]

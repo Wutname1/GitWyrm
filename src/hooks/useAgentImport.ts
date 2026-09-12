@@ -50,9 +50,21 @@ export function useAgentImportScan(adapterId: string | null, enabled: boolean) {
   })
 }
 
-/** Whether/how "Continue externally" can work for one external session,
- * queried lazily (only once a session row actually renders that action) so
- * scanning a list of 100 sessions does not fire 100 extra probes. */
+/**
+ * Whether/how "Continue externally" can work for ONE external session.
+ *
+ * `enabled` is the whole point of this hook and callers must treat it as
+ * mandatory, not optional. The doc comment here used to claim the probe was
+ * "queried lazily (only once a session row actually renders that action)" --
+ * it was not. Every row mounted this unconditionally the moment it rendered,
+ * so opening Claude Code with 400 saved chats fired 400 probes at once, each
+ * of which opens and reads a file. That is what made the surface unusable at
+ * real scale, and the comment describing the intent is why it went unnoticed.
+ *
+ * A row must never call this. The list renders hundreds of rows; only the ONE
+ * chat whose details are open asks, which is why `ImportPicker` calls it once
+ * for the expanded chat and nowhere else.
+ */
 export function useAgentImportContinuation(
   adapterId: string | null,
   externalSessionId: string | null
@@ -62,6 +74,101 @@ export function useAgentImportContinuation(
     enabled: adapterId != null && externalSessionId != null,
     queryFn: async () =>
       unwrap(await commands.agentImportContinuationCapability(adapterId!, externalSessionId!)),
+    // Whether a client can resume a given chat does not change while a window
+    // is open, and re-probing on focus re-reads the file for no new answer.
+    staleTime: IMPORT_SCAN_STALE_MS,
+  })
+}
+
+/**
+ * Bring in many chats with one press.
+ *
+ * One command rather than N mutations: the backend detects the client once for
+ * the whole batch instead of per chat, and a single in-flight request is what
+ * lets the action bar show one honest pending state. Firing 200 single-chat
+ * mutations would also mean 200 cache invalidations and 200 toasts.
+ *
+ * The failure handler lives here, not at the call site, for the reason the
+ * single-chat import already documents: a per-call callback is dropped if its
+ * component unmounts before the mutation settles, and a long batch is exactly
+ * when that happens.
+ */
+export function useImportExternalSessionBatch() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      adapterId,
+      externalSessionIds,
+    }: {
+      adapterId: string
+      externalSessionIds: string[]
+    }) => unwrap(await commands.agentImportSessionBatch(adapterId, externalSessionIds)),
+    onError: (error, variables) => {
+      log.error(
+        `batch import of ${variables.externalSessionIds.length} chats failed: ${describeError(error)}`
+      )
+      toast.error('Those chats could not be brought in.', {
+        description: 'Nothing was changed. You can try again.',
+      })
+    },
+    onSuccess: (result, variables) => {
+      qc.invalidateQueries({ queryKey: keys.agentImportScan(variables.adapterId) })
+      qc.invalidateQueries({ queryKey: keys.agentSessionsAll })
+      if (result.kind !== 'completed') return
+      // Each chat that changed may be open in the conversation pane. Same
+      // reasoning as the single import: telling someone messages arrived while
+      // the transcript on screen still shows the old ones is worse than saying
+      // nothing.
+      for (const item of result.items) {
+        const sessionId = importedSessionId(item.outcome)
+        if (sessionId) qc.invalidateQueries({ queryKey: keys.agentSession(sessionId) })
+      }
+    },
+  })
+}
+
+/**
+ * Which tools are set to keep checking themselves for new chats.
+ *
+ * A failed read is NOT the same as "nothing is synced", so this stays a query
+ * with its own error state rather than defaulting to an empty list -- the
+ * caller has to be able to tell the difference, the same rule the scan list
+ * follows.
+ */
+export function useAgentImportSyncPreferences() {
+  return useQuery({
+    queryKey: keys.agentImportSyncPreferences,
+    queryFn: async () => unwrap(await commands.agentImportGetSyncPreferences()),
+  })
+}
+
+/**
+ * Turn keep-in-sync on or off for one tool.
+ *
+ * A refused write reports and leaves the toggle where it was. A switch that
+ * silently springs back is the worst outcome here: the person believes GitWyrm
+ * is watching a folder it is not, or the reverse.
+ */
+export function useSetImportSyncPreference() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ adapterId, enabled }: { adapterId: string; enabled: boolean }) =>
+      unwrap(await commands.agentImportSetSyncPreference(adapterId, enabled)),
+    onError: (error, { adapterId }) => {
+      log.error(`could not save keep-in-sync for ${adapterId}: ${describeError(error)}`)
+      toast.error('That choice could not be saved.', {
+        description: 'Keep in sync is unchanged. You can try again.',
+      })
+    },
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: keys.agentImportSyncPreferences })
+      if (result.kind === 'failed') {
+        log.error(`keep-in-sync choice was refused: ${result.detail}`)
+        toast.error('That choice could not be saved.', {
+          description: 'Keep in sync is unchanged. You can try again.',
+        })
+      }
+    },
   })
 }
 

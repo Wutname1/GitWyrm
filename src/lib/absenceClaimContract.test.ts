@@ -69,3 +69,58 @@ describe('a failed read is never shown as an absence', () => {
     expect(offenders, 'these treat a failed read as empty data').toEqual([])
   })
 })
+
+/**
+ * The second shape of the same defect: a failure branch that states an
+ * absence.
+ *
+ * The check above catches `query.data ?? []` followed by an empty state. It
+ * does not catch the other way in, which an early-return component takes: an
+ * explicit `if (query.isError) return <"nothing here">`. That branch KNOWS the
+ * read failed and says "none" anyway, which is the more confident version of
+ * the same lie, and the narrow pattern above passes it without comment
+ * (verified by reverting the import surface's failure branch to "No chats
+ * found for this AI tool." -- every existing check stayed green).
+ *
+ * Scoped to the phrasings that assert emptiness about the person's own work.
+ * "Looking for…" and "GitWyrm could not…" are not absence claims and are meant
+ * to appear near a failure branch.
+ */
+const ABSENCE_CLAIMS = [
+  /\bno chats found\b/i,
+  /\bno sessions found\b/i,
+  /\bnothing (?:here|found|to show)\b/i,
+  /\bhas no saved\b/i,
+  /\bno .{0,24}\b(?:yet|available)\b/i,
+]
+
+/** The body of every `if (<something>.isError) { ... }` early return. */
+function errorBranches(source: string): string[] {
+  const out: string[] = []
+  // Deliberately simple: matches the early-return shape this codebase uses,
+  // `if (x.isError) {` ... up to the closing brace at the same indentation.
+  for (const m of source.matchAll(/if\s*\([^)]*\.isError[^)]*\)\s*\{([\s\S]*?)\n\s{0,4}\}/g)) {
+    if (m[1]) out.push(m[1])
+  }
+  // And the single-expression form, `if (x.isError) return <... />`.
+  for (const m of source.matchAll(/if\s*\([^)]*\.isError[^)]*\)\s*return([^\n]*(?:\n[^\n]*){0,6})/g)) {
+    if (m[1]) out.push(m[1])
+  }
+  return out
+}
+
+describe('a failure branch never states an absence', () => {
+  it('no component answers a failed read with "there are none"', () => {
+    const offenders: string[] = []
+    for (const { name, source } of componentsInScope()) {
+      for (const branch of errorBranches(source)) {
+        const claim = ABSENCE_CLAIMS.find((re) => re.test(branch))
+        if (claim) offenders.push(`${name} (matched ${claim})`)
+      }
+    }
+    expect(
+      offenders,
+      'these tell someone nothing is there when the truth is GitWyrm could not look'
+    ).toEqual([])
+  })
+})

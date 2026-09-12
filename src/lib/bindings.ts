@@ -3921,6 +3921,30 @@ async agentImportUnlink(sessionId: string) : Promise<Result<UnlinkOutcome, strin
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+async agentImportSessionBatch(adapterId: string, externalSessionIds: string[]) : Promise<Result<BatchImportOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_import_session_batch", { adapterId, externalSessionIds }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentImportGetSyncPreferences() : Promise<Result<ImportSyncPreference[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_import_get_sync_preferences") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async agentImportSetSyncPreference(adapterId: string, enabled: boolean) : Promise<Result<SetSyncPreferenceOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_import_set_sync_preference", { adapterId, enabled }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -4518,6 +4542,27 @@ export type BatchApplyOutcome = { outcomes: ApplyOutcome[] }
  * applied in sequence (task 2.4).
  */
 export type BatchApplyRequest = { planIds: string[] }
+/**
+ * What one chat in a batch turned into.
+ * 
+ * Carried per chat rather than collapsed into a tally because the outcomes
+ * are not interchangeable: a chat that was already up to date, one that was
+ * damaged, and one that could not be saved need different things said about
+ * them, and a batch of two hundred will usually contain several kinds at
+ * once.
+ */
+export type BatchImportItem = { externalSessionId: string; title: string; outcome: ImportSessionOutcome }
+export type BatchImportOutcome = 
+/**
+ * Every chat was attempted. Individual chats may still have refused --
+ * see each item's own outcome.
+ */
+{ kind: "completed"; items: BatchImportItem[] } | { kind: "adapterDisabled" } | { kind: "clientNotDetected" } | 
+/**
+ * More chats were asked for than one press is allowed to bring in, so
+ * nothing was attempted rather than importing an arbitrary prefix.
+ */
+{ kind: "tooMany"; requested: number; limit: number }
 /**
  * One line of a file, tagged with the commit that last changed it.
  */
@@ -5878,6 +5923,16 @@ export type ImportSessionOutcome =
  * someone looking for a broken file that is not broken.
  */
 { kind: "ambiguousSession" } | { kind: "corruptSession"; detail: string } | { kind: "writeFailed"; detail: string }
+/**
+ * Which adapters the person asked GitWyrm to keep checking, stored beside the
+ * import ledgers in GitWyrm's own app data.
+ * 
+ * Off for every adapter until explicitly turned on. Watching another
+ * application's saved conversations, and copying them in unattended, is a
+ * decision that belongs to the person -- so the absence of a record means
+ * off, and there is no default-on path anywhere.
+ */
+export type ImportSyncPreference = { adapterId: string; enabled: boolean }
 /**
  * What happened when an install was attempted.
  * 
@@ -7534,6 +7589,13 @@ export type SetProjectOutcome = { kind: "moved"; session: AgentSession } |
  * The chat already has messages, a run, or a source of its own.
  */
 { kind: "alreadyStarted" } | { kind: "notFound" } | { kind: "failed"; detail: string }
+export type SetSyncPreferenceOutcome = { kind: "saved"; enabled: boolean } | 
+/**
+ * The preference could not be written, so it is NOT in effect. Reported
+ * rather than swallowed: a toggle that springs back with no explanation
+ * is worse than one that says why.
+ */
+{ kind: "failed"; detail: string }
 export type Settings = { 
 /**
  * Paths of repos open in tabs, in tab order, so they can be reopened on launch.

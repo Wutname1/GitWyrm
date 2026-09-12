@@ -384,6 +384,9 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::agent_import::agent_import_continuation_capability,
             commands::agent_import::agent_import_continue_here,
             commands::agent_import::agent_import_unlink,
+            commands::agent_import::agent_import_session_batch,
+            commands::agent_import::agent_import_get_sync_preferences,
+            commands::agent_import::agent_import_set_sync_preference,
         ])
         .typ::<watcher::RepoChangedPayload>()
         .typ::<commands::remote::GitProgressPayload>()
