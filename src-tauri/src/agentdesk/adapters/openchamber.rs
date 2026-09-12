@@ -1,22 +1,31 @@
 //! OpenChamber adapter.
 //!
-//! # Status: detection only, not shipped enabled (task 3.5 / Gate 6)
+//! # Status: detection only, and file-based import is not possible (task 3.5 / Gate 6)
 //!
-//! OpenChamber was not present on the machine this change was built and
-//! verified on (checked `~/.config`, `~/.local/share`, and every path this
-//! adapter's `data_dir()` probes below -- nothing exists). Every other
-//! adapter in this change was built against a *real* installation's on-disk
-//! layout; this one could not be, and design.md's instruction to "reuse
-//! OpenCode parsing only where fixtures prove schema compatibility" cannot
-//! be honored without a real (or credibly documented) sample to prove
-//! compatibility against.
+//! This was long recorded as "blocked on a fixture": OpenChamber had not been
+//! installed on the machine the change was built on, so its on-disk session
+//! schema could not be proved against a real sample, and design.md's rule to
+//! "reuse OpenCode parsing only where fixtures prove schema compatibility"
+//! could not be honored. That framing was wrong, and reading OpenChamber's
+//! own source settled it.
 //!
-//! Rather than guess a schema and risk either silently importing garbage or
-//! claiming a capability that does not work, this adapter implements
-//! `detect()` honestly (it looks for a plausible data directory and reports
-//! whether one exists) and returns [`AdapterError::ClientNotDetected`]-style
-//! honesty everywhere else: `list_sessions`/`read_session` return
-//! [`AdapterError::MissingPath`] rather than fabricated data, and
+//! **OpenChamber does not keep session history on disk at all.** It is a
+//! frontend over the OpenCode CLI, and its data directory holds configuration
+//! only -- `settings.json`, `tunnel-profiles.json`, `tunnel-cli-state.json`
+//! and `cloudflare-managed-remote-tunnels.json` are the only files its own
+//! `cli-paths.js` names. Every session read goes through an HTTP control API
+//! against a *running* server (`requestControlAction(port, 'session.list' |
+//! 'session.messages' | 'session.status', ...)` in its
+//! `packages/web/bin/lib/commands-session.js`), and the transcripts
+//! themselves belong to OpenCode, which already has its own adapter here.
+//!
+//! So there is no fixture to find and no schema to verify. A future import
+//! would have to talk to a live OpenChamber server on a port -- a different
+//! shape of adapter from every file-reading one in this module, and a
+//! different trust question (a network service rather than a file the user
+//! already has). Until that is designed, this adapter stays detection-only,
+//! and it stays honest everywhere else: `list_sessions`/`read_session`
+//! return [`AdapterError::MissingPath`] rather than fabricated data, and
 //! `continuation_capability` returns [`ContinuationCapability::Unsupported`].
 //!
 //! Per build-order.md Gate 6: "An adapter that fails its gate stays hidden
@@ -34,7 +43,8 @@ use super::{
     ExternalSessionDetail, ExternalSessionSummary,
 };
 
-const SUPPORTED_RANGE: &str = "not verified against a real installation; adapter stays behind its capability flag";
+const SUPPORTED_RANGE: &str =
+    "no on-disk session history to read; import would need a live server connection, not a file parser";
 
 pub struct OpenChamberAdapter {
     home_override: Option<PathBuf>,
@@ -111,9 +121,10 @@ impl AgentClientAdapter for OpenChamberAdapter {
         if !dir.is_dir() {
             return Ok(None);
         }
-        // Detected, but never marked supported -- the schema has not been
-        // verified, so import must not be offered even when the directory
-        // exists. This still lets the detected-clients UI say "found, not
+        // Detected, but never marked supported. The directory existing means
+        // OpenChamber is installed; it does not mean there is anything here to
+        // import, because what this folder holds is settings and tunnel state,
+        // not chats. This still lets the detected-clients UI say "found, not
         // yet supported" instead of "not found," which is the honest
         // distinction to draw.
         Ok(Some(DetectedClient {
@@ -127,10 +138,11 @@ impl AgentClientAdapter for OpenChamberAdapter {
         &self,
         client: &DetectedClient,
     ) -> Result<Vec<ExternalSessionSummary>, AdapterError> {
-        // No verified session location to scan -- returning an empty list
-        // would look like "zero sessions found," which is a claim this
-        // adapter cannot back up. MissingPath is the honest typed outcome:
-        // the expected data is not known to exist at any specific path.
+        // There is no session file anywhere to scan: OpenChamber serves its
+        // sessions from a running server, and the transcripts belong to
+        // OpenCode. Returning an empty list would read as "zero sessions
+        // found", a measurement this adapter never took. MissingPath is the
+        // honest typed outcome: the expected data is not at any path.
         Err(AdapterError::MissingPath {
             path: client.home_dir.display().to_string(),
         })
@@ -220,7 +232,7 @@ mod tests {
     }
 
     #[test]
-    fn list_sessions_is_honest_about_having_no_verified_source_rather_than_claiming_empty() {
+    fn list_sessions_is_honest_about_having_no_source_rather_than_claiming_empty() {
         let dir = tempfile::TempDir::new().unwrap();
         let adapter = OpenChamberAdapter::at(dir.path().to_path_buf());
         let client = adapter.detect().unwrap().unwrap();

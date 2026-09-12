@@ -1271,8 +1271,14 @@ mod tests {
         }
     }
 
+    /// Not "pending a verified schema", which is what this was called while
+    /// the blocker was thought to be a missing fixture. OpenChamber keeps no
+    /// session history on disk at all -- it serves sessions from a running
+    /// server and the transcripts belong to OpenCode -- so there is no file
+    /// format to verify and the flag stays off until a live-server adapter
+    /// is designed. See `adapters::openchamber`'s module doc.
     #[test]
-    fn openchamber_is_disabled_by_default_pending_a_verified_schema() {
+    fn openchamber_is_disabled_because_it_has_no_session_files_to_read() {
         assert!(!is_enabled("openchamber"));
     }
 
