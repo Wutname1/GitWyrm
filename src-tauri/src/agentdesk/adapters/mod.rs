@@ -7,13 +7,18 @@
 //! a foreign client's files.** Every adapter method in [`AgentClientAdapter`]
 //! takes `&self` and returns owned data -- there is no method here that
 //! accepts anything to write back into the client's directory. Adapters open
-//! foreign files with [`open_read_only`], which asks the OS for a read handle
-//! only (`OpenOptions::new().read(true).write(false)`); nothing under
-//! `adapters/` ever constructs an `OpenOptions` with `.write(true)`,
-//! `.append(true)`, `.create(true)`, or `.truncate(true)` pointed at a
-//! foreign path, and [`tests::no_adapter_source_opens_foreign_paths_for_writing`]
-//! greps every adapter source file to keep that true mechanically, not just
-//! by convention. Any GitWyrm-side bookkeeping (cursors, dedupe state) is
+//! foreign files with [`open_read_only`], which is `File::open` -- a read
+//! handle and nothing else, stronger than the `OpenOptions` form this comment
+//! used to describe, since there is no builder to set the wrong flag on.
+//! Nothing under `adapters/` opens a foreign path for writing, and
+//! [`tests::no_adapter_source_opens_foreign_paths_for_writing`] scans every
+//! adapter source line to keep that true mechanically, not by convention.
+//!
+//! That scan used to skip this file whole, on the grounds that it names the
+//! write markers in its own text. The reason was sound and the remedy too
+//! wide: the file defining the read-only seam was the one place a real write
+//! could be added unseen, which a planted `fs::write` confirmed. It now skips
+//! comments and test fixtures rather than files. Any GitWyrm-side bookkeeping (cursors, dedupe state) is
 //! kept entirely under GitWyrm's own app-data directory, never inside a
 //! detected client's directory -- see `super::store` for where that lives.
 //!
@@ -936,22 +941,42 @@ three
 
         let mut offenders = Vec::new();
         visit_rs_files(&adapters_dir, &mut |path| {
-            // This file defines `open_read_only`/`read_foreign_file_to_string`
-            // themselves and documents why they are the sanctioned read-only
-            // seam; skip it so the doc comment text above (which mentions
-            // `.write(true)` etc. by name) is not mistaken for a violation.
-            if path.file_name().and_then(|n| n.to_str()) == Some("mod.rs")
-                && path.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str())
-                    == Some("adapters")
-            {
-                return;
-            }
             let Ok(contents) = std::fs::read_to_string(path) else {
                 return;
             };
-            for marker in write_markers {
-                if contents.contains(marker) {
-                    offenders.push(format!("{}: contains {marker:?}", path.display()));
+            // Skipped per LINE, not per file.
+            //
+            // This used to skip `adapters/mod.rs` whole, because that file
+            // names the write markers in its own doc comment and in the list
+            // below. The reason was sound and the remedy was too wide: the
+            // file that DEFINES the read-only seam was the one file where a
+            // real write could be added unnoticed. Proved by adding
+            // `fs::write` to a production function here -- the check passed.
+            //
+            // Comments and the test's own fixtures are what need excusing, so
+            // those are what is excused. Everything else in every file,
+            // including this one, is scanned.
+            let mut in_tests = false;
+            for (i, raw) in contents.lines().enumerate() {
+                let line = raw.trim();
+                if line == "mod tests {" || line.starts_with("mod tests ") {
+                    in_tests = true;
+                }
+                // A test writing to its own `tempfile` is not a write to
+                // somebody else's client directory.
+                if in_tests || line.starts_with("//") || line.starts_with("*") {
+                    continue;
+                }
+                for marker in write_markers {
+                    // The marker list itself, quoted, is a definition rather
+                    // than a call.
+                    if line.contains(marker) && !line.trim_start().starts_with('"') {
+                        offenders.push(format!(
+                            "{}:{}: contains {marker:?}",
+                            path.display(),
+                            i + 1
+                        ));
+                    }
                 }
             }
         });

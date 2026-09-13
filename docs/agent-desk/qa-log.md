@@ -230,3 +230,13 @@ A: The tally as the headline and the first reason as the detail, since a bare "3
 | 670 | 2026-09-13 | Does it ignore the comment that names those calls? | Yes, deliberately -- otherwise the explanation would have to be moved out of the file that most needs it. |
 | 671 | 2026-09-13 | Did it work first time? | No -- it failed on its own search terms, so those are now assembled in pieces that cannot match the lines defining them. |
 | 672 | 2026-09-13 | Was it proved on a real one? | Yes -- a push was added to the file and the check named the line and quoted it back. |
+| 673 | 2026-09-13 | What was swept this pass? | The other absolute promises stated in prose, after last time found one that nothing enforced. |
+| 674 | 2026-09-13 | Was the promise never to write into another tool's folder enforced? | Yes -- and better than the one fixed last time, by scanning a whole directory rather than a single file. |
+| 675 | 2026-09-13 | So it was already sound? | Almost -- it skipped one file entirely, and that file was the one defining the read-only rule. |
+| 676 | 2026-09-13 | Why was it skipped? | Because it names the forbidden operations in its own explanation, which would otherwise read as breaking the rule. |
+| 677 | 2026-09-13 | Was that a real hole or a theoretical one? | Real -- a genuine write into somebody else's folder was added to that file and the check passed. |
+| 678 | 2026-09-13 | What changed? | It now excuses comments and test fixtures rather than whole files, so every line of every file is looked at. |
+| 679 | 2026-09-13 | Does it still catch the original case? | Yes -- a deletion planted in another adapter is still caught and named. |
+| 680 | 2026-09-13 | Was anything else wrong there? | Yes -- the explanation described opening files a way the code does not actually use. |
+| 681 | 2026-09-13 | Is the real way weaker? | No, stronger: it asks for a read handle outright, so there is no setting that could be turned the wrong way. |
+| 682 | 2026-09-13 | Is the promise itself still kept? | Yes -- the only writes in that file belong to its own tests and go to temporary folders. |
