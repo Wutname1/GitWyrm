@@ -307,6 +307,42 @@ describe('commit, diff and working-changes sources', () => {
     expect(src.summary).toMatch(/2 days ago/)
   })
 
+  // The subject says WHAT changed and the body says WHY, and "explain this
+  // commit" is a question about the why. It matters more here than it looks:
+  // an Explain run is `can_write: false`, so the shell is denied at launch and
+  // the agent cannot run `git show` to read what it was not handed.
+  it('a commit message body reaches the agent', () => {
+    const src = commitSourceInput(
+      'abc1234def',
+      'Fix the login redirect',
+      'Ada',
+      '2 days ago',
+      'The callback dropped the query string, so the return URL was lost.'
+    )
+    expect(src.summary).toContain('The callback dropped the query string')
+  })
+
+  it('the body goes under the one-line description, not into the title', () => {
+    const src = commitSourceInput('abc1234def', 'Fix it', 'Ada', 'today', 'Because it was broken.')
+    // The title is a one-line chip in the sidebar; a pasted body would turn it
+    // into a paragraph.
+    expect(src.title).toBe('Fix it')
+    expect(src.title).not.toContain('Because')
+    // And the body reads as prose rather than as another dotted field.
+    expect(src.summary).not.toContain('today · Because')
+    expect(src.summary.split('\n\n')[1]).toBe('Because it was broken.')
+  })
+
+  it('a commit with no body reads exactly as it did before', () => {
+    const src = commitSourceInput('abc1234def', 'Fix it', 'Ada', 'today')
+    expect(src.summary).toBe('Fix it · by Ada · today')
+  })
+
+  it('a body of only whitespace is treated as no body', () => {
+    const src = commitSourceInput('abc1234def', 'Fix it', 'Ada', 'today', '   \n  ')
+    expect(src.summary).toBe('Fix it · by Ada · today')
+  })
+
   it('a commit with no subject still gets a readable title', () => {
     expect(commitSourceInput('abc1234def', '', '', '').title).toBe('Commit abc1234')
   })

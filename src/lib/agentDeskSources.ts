@@ -216,14 +216,33 @@ export function commitSourceInput(
   oid: string,
   subject: string,
   author: string,
-  when: string
+  when: string,
+  /**
+   * The rest of the commit message, when there is any.
+   *
+   * A subject says what changed and a body says why, and "explain this
+   * commit" is a question about the why. It matters here more than it looks:
+   * an Explain run is `can_write: false`, so the shell is denied at launch and
+   * the agent cannot run `git show` to read what it was not given.
+   *
+   * Its own argument rather than folded into `subject`, because the title is
+   * a one-line chip in the sidebar and a pasted body turns it into a
+   * paragraph.
+   */
+  body?: string
 ): Extract<SessionSourceInput, { kind: 'commit' }> {
   const shortOid = oid.slice(0, 7)
+  const trailer = [author ? `by ${author}` : '', when].filter(Boolean).join(' · ')
+  const trimmedBody = body?.trim() ?? ''
   return {
     kind: 'commit',
     oid,
     title: subject || `Commit ${shortOid}`,
-    summary: [subject, author ? `by ${author}` : '', when].filter(Boolean).join(' · '),
+    // The body goes on its own lines under the one-line description, so the
+    // reasoning reads as prose rather than as another dotted field.
+    summary: [[subject, trailer].filter(Boolean).join(' · '), trimmedBody]
+      .filter(Boolean)
+      .join('\n\n'),
   }
 }
 

@@ -20,7 +20,9 @@ import { copyToClipboard } from '@/lib/clipboard'
 import { commitSourceInput } from '@/lib/agentDeskSources'
 import { formatRelativeTime } from '@/lib/gitDisplay'
 import { useStartAgentSession } from '@/hooks/useStartAgentSession'
-import type { CommitEntry, ResetMode } from '@/lib/bindings'
+import { commands, type CommitEntry, type ResetMode } from '@/lib/bindings'
+import { useQueryClient } from '@tanstack/react-query'
+import { keys, unwrap } from '@/lib/queryKeys'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -66,6 +68,7 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
   const revealShaInGraph = useUiStore((s) => s.revealShaInGraph)
   const [pending, setPending] = useState<Pending>(null)
   const { startSession } = useStartAgentSession()
+  const qc = useQueryClient()
 
   // Only fetched when the reword dialog opens, so most right-clicks cost nothing.
   const detail = useCommitDetail(repo?.id ?? null, pending?.kind === 'reword' ? commit.sha : null)
@@ -136,19 +139,39 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
           {repo && (
             <ContextMenuItem
               onSelect={() =>
-                void startSession({
-                  key: `commit:${commit.sha}`,
-                  repoId: repo.id,
-                  repoPath: repo.path,
-                  repoName: repo.name,
-                  intent: 'explain',
-                  source: commitSourceInput(
-                    commit.sha,
-                    commit.summary,
-                    commit.author_name,
-                    formatRelativeTime(commit.time)
-                  ),
-                })
+                void (async () => {
+                  // The graph row carries the subject and no body, and an
+                  // Explain run cannot go and read the rest: it is
+                  // `can_write: false`, so the shell is denied at launch and
+                  // `git show` is not available to it. The subject says what
+                  // changed and the body says why, and "explain this commit"
+                  // is a question about the why.
+                  //
+                  // Fetched on select rather than on hover, so the deliberate
+                  // gate above -- most right-clicks costing nothing -- stays
+                  // intact. This shares that query's key, so opening the
+                  // reword dialog first makes this free.
+                  const full = await qc
+                    .fetchQuery({
+                      queryKey: keys.commitDetail(repo.id, commit.sha),
+                      queryFn: async () => unwrap(await commands.getCommitDetail(repo.id, commit.sha)),
+                    })
+                    .catch(() => null)
+                  void startSession({
+                    key: `commit:${commit.sha}`,
+                    repoId: repo.id,
+                    repoPath: repo.path,
+                    repoName: repo.name,
+                    intent: 'explain',
+                    source: commitSourceInput(
+                      commit.sha,
+                      commit.summary,
+                      commit.author_name,
+                      formatRelativeTime(commit.time),
+                      full?.body
+                    ),
+                  })
+                })()
               }
             >
               <Sparkles />

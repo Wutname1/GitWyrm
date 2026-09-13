@@ -191,3 +191,13 @@ A: The tally as the headline and the first reason as the detail, since a bare "3
 | 631 | 2026-09-12 | And if that fetch fails? | The chat still starts from the row, because starting knowing less is better than not starting. |
 | 632 | 2026-09-12 | Was the builder at fault? | No -- its own tests already covered both shapes, including one named for the case with no text; the fault was which shape a screen handed it. |
 | 633 | 2026-09-12 | So where is it guarded? | At the screen, where the mistake was, with the reason in the failure message. |
+| 634 | 2026-09-12 | Was the missing-context fault anywhere else? | Yes -- asking an AI to explain a commit sent the first line of its message and nothing else. |
+| 635 | 2026-09-12 | Why does the rest of the message matter? | Because the first line says what changed and the rest says why, and explaining a commit is a question about the why. |
+| 636 | 2026-09-12 | Could the agent have looked it up itself? | No -- a chat that only explains is not allowed to run commands, so it cannot read anything it was not handed. |
+| 637 | 2026-09-12 | Is that different from the diff decision last pass? | Yes, and it is the reason they came out differently: that one could read the repository for itself, and this one cannot. |
+| 638 | 2026-09-12 | Where does the rest of the message go? | Under the one-line description rather than into it, because the title is a single-line chip in the sidebar. |
+| 639 | 2026-09-12 | Is the message fetched on every right-click? | No -- only when the chat is actually started, so the deliberate choice to keep right-clicks cheap still holds. |
+| 640 | 2026-09-12 | What if that fetch fails? | The chat starts with what the row had, which is what it always sent before. |
+| 641 | 2026-09-12 | Did the first check of the new tests hold up? | No -- it reported them passing with the fix removed, because the revert itself had silently failed to match. |
+| 642 | 2026-09-12 | How was that caught? | By reading the file afterwards instead of trusting the result, which showed the fix had never actually been taken out. |
+| 643 | 2026-09-12 | Do they hold up now? | Yes -- with the fix genuinely removed, both fail. |
