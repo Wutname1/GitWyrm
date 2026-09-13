@@ -220,3 +220,13 @@ A: The tally as the headline and the first reason as the detail, since a bare "3
 | 660 | 2026-09-13 | Was a new lookup written for that? | Briefly, and then deleted -- an identical one already existed a few hundred lines below and simply was not being used here. |
 | 661 | 2026-09-13 | What about a tool nobody recognises? | It falls back to the short name, matching what the screen already does rather than inventing a second behaviour. |
 | 662 | 2026-09-13 | Did the test hold up? | Yes -- with the old wording put back it fails, printing both spellings side by side. |
+| 663 | 2026-09-13 | What was checked once the sources were done? | The other end: what happens when the work comes back and somebody decides whether to keep it. |
+| 664 | 2026-09-13 | Was the wording there wrong anywhere? | No -- every outcome is accounted for, including one that admits a commit was made while the record moved underneath it. |
+| 665 | 2026-09-13 | So what was found? | The product's strongest promise, that nothing is ever pushed or posted without being asked, was written down and never checked. |
+| 666 | 2026-09-13 | How was it written down? | As an instruction to grep for two names by hand, which names the check without ever running it. |
+| 667 | 2026-09-13 | Was the promise actually being kept? | Yes -- both names appear only inside the comment making the promise, and nothing transmits anything. |
+| 668 | 2026-09-13 | Then why change anything? | Because nothing would have failed if somebody added a push, and this is the one promise where finding out later is too late. |
+| 669 | 2026-09-13 | What does the check do? | Reads the file itself and fails on a line that would send something, since what is being promised is the absence of a call. |
+| 670 | 2026-09-13 | Does it ignore the comment that names those calls? | Yes, deliberately -- otherwise the explanation would have to be moved out of the file that most needs it. |
+| 671 | 2026-09-13 | Did it work first time? | No -- it failed on its own search terms, so those are now assembled in pieces that cannot match the lines defining them. |
+| 672 | 2026-09-13 | Was it proved on a real one? | Yes -- a push was added to the file and the check named the line and quoted it back. |

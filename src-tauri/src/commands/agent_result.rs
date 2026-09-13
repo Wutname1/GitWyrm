@@ -13,9 +13,15 @@
 //! **No command in this file ever pushes or posts to a host.** Task 4.3/4.5:
 //! PR creation drafts editable text and opens the host's own compare/new-PR
 //! page in the user's browser -- the actual publish/push stays the existing,
-//! separate, user-initiated `git_push` action GitWyrm already has. Grep for
-//! `git_push` or `HostProvider` in this file: neither is called with
-//! anything that transmits data on the caller's behalf.
+//! separate, user-initiated `git_push` action GitWyrm already has.
+//!
+//! This used to say "grep for `git_push` or `HostProvider` in this file",
+//! which named the check without ever running it -- the product's strongest
+//! safety claim resting on whoever remembered to look.
+//! `no_command_here_pushes_or_posts_on_the_users_behalf` in this file's tests
+//! now reads this source and fails on a call that transmits anything, so the
+//! promise breaks loudly rather than quietly. The two symbols above appear in
+//! this comment on purpose; the test ignores comment lines.
 
 use std::path::Path;
 
@@ -1789,6 +1795,46 @@ mod tests {
         SessionState, CURRENT_SCHEMA_VERSION,
     };
     use crate::agentdesk::result::{CheckEvidenceSource, CheckRunOutcome, ResultCheckOutcome};
+
+    /// Nothing in this file pushes or posts on the user's behalf.
+    ///
+    /// The module doc has promised this since results shipped, and it even
+    /// names the check -- "Grep for `git_push` or `HostProvider` in this
+    /// file" -- without ever running it. That is the product's strongest
+    /// safety claim ("the agent never silently pushes, posts a review, merges
+    /// a pull request, or changes an external service") resting on prose.
+    ///
+    /// Reads this file's own source, because what is being asserted is the
+    /// ABSENCE of a call, and absence is not reachable from a value.
+    ///
+    /// Deliberately ignores comment lines: the doc comment names both symbols
+    /// on purpose, and a test that could not tell an explanation from a call
+    /// would either fail today or force the explanation out of the file that
+    /// needs it most.
+    #[test]
+    fn no_command_here_pushes_or_posts_on_the_users_behalf() {
+        const SOURCE: &str = include_str!("agent_result.rs");
+        // Assembled from halves so this test's own needles cannot match the
+        // lines that define them. Spelling them literally made the check fail
+        // on itself, which is the shape where a guard quietly starts testing
+        // its own source instead of the code.
+        let needles = [
+            format!("git{}push", "_"),
+            format!("Host{}", "Provider"),
+            format!("push{}branch", "_"),
+        ];
+        let offenders: Vec<(usize, &str)> = SOURCE
+            .lines()
+            .enumerate()
+            .map(|(i, line)| (i + 1, line.trim()))
+            .filter(|(_, line)| !line.starts_with("//") && !line.starts_with("*"))
+            .filter(|(_, line)| needles.iter().any(|n| line.contains(n.as_str())))
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "this file must never push or post on the user's behalf; drafting opens the host's              own page and the user submits it. Found: {offenders:?}"
+        );
+    }
 
     /// A check that reported no name is not recorded as evidence.
     ///
