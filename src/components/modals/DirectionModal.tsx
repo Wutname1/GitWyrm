@@ -194,7 +194,7 @@ export function DirectionModal() {
                 )}
                 {analysis.can_fast_forward && (
                   <span className="flex items-center gap-1.5 text-added">
-                    <Zap size={12} /> Clean update — {target} just catches up to {source}.
+                    <Zap size={12} /> Clean update: {target} just catches up to {source}.
                   </span>
                 )}
                 {analysis.normal && !analysis.can_fast_forward && (

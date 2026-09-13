@@ -60,7 +60,7 @@ export function SpecCard() {
             {run.state === 'needsYou'
               ? `Task ${run.session.task_number} needs your OK`
               : `The AI is on task ${run.session.task_number}${
-                  run.latest ? ` — ${run.latest}` : ''
+                  run.latest ? `: ${run.latest}` : ''
                 }`}
           </span>
           {/* A gate is answered, not watched. Saying "View" for something that is

@@ -87,7 +87,7 @@ export function AskTab({
       <div className="flex flex-none items-center gap-2 border-b border-border bg-panel2 px-3 py-2">
         <Eye size={12} strokeWidth={2.2} className="flex-none text-accent-text" />
         <p className="min-w-0 flex-1 text-2xs leading-snug text-sub">
-          Read-only — the AI reads this change and the code, but changes nothing.
+          Read-only: the AI reads this change and the code, but changes nothing.
         </p>
         {ai.configured && (
           <span className="flex-none text-2xs text-muted-foreground">

@@ -226,7 +226,7 @@ export function AddWorktreeModal() {
         ) : isNewBranch ? (
           <p className="text-2xs leading-tight text-muted-foreground">
             No branch called <span className="font-mono text-foreground">{trimmedBranch}</span> yet
-            — it will be made, starting from{' '}
+            . It will be made, starting from{' '}
             <span className="font-mono text-foreground">{startPoint}</span>.
           </p>
         ) : (
@@ -305,7 +305,7 @@ export function AddWorktreeModal() {
             ))}
           </div>
           <p className="text-2xs leading-tight text-muted-foreground">
-            These are files git doesn't track — settings and keys the project needs to run. Installed
+            These are files git doesn't track: settings and keys the project needs to run. Installed
             packages aren't copied; you'll need to install them in the new folder before it runs.
           </p>
         </div>

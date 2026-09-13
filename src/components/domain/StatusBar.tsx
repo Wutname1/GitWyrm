@@ -140,7 +140,7 @@ function AiRunSegment() {
       </TooltipTrigger>
       <TooltipContent side="top">
         Task {run.session.task_number} · {run.session.task_text}
-        {run.latest ? ` — ${run.latest}` : ''}
+        {run.latest ? `: ${run.latest}` : ''}
         {isActive(run.state) ? '' : ' (this run has ended)'}
       </TooltipContent>
     </Tooltip>
@@ -282,7 +282,7 @@ export function StatusBar() {
       <UpdateButton />
       {inWorktree && current && (
         <TooltipHint
-          label={`You're working in the ${current.folder_name} worktree — this project checked out in its own folder. Commits here don't touch the main checkout.`}
+          label={`You're working in the ${current.folder_name} worktree: this project checked out in its own folder. Commits here don't touch the main checkout.`}
         >
           <span className="flex items-center gap-1 text-[var(--gw-accent-text)]">
             <FolderGit2 size={9} />

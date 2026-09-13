@@ -38,7 +38,7 @@ function count(n: number, noun: string): string {
  */
 export function brokenExplanation(state: WorktreeState): string | null {
   if (state === 'missing') {
-    return "This worktree's folder is no longer on your computer. Nothing is at risk — tidying up just removes the leftover reference."
+    return "This worktree's folder is no longer on your computer. Nothing is at risk. Tidying up just removes the leftover reference."
   }
   if (state === 'moved') {
     return "This worktree's folder moved, so the link to it broke. Your files are still there; repairing points the project back at them."
@@ -171,7 +171,7 @@ export function removeConfirmCopy(
     title: `Remove the ${worktree.folder_name} worktree?`,
     body: dirtySummary(dirt),
     branchNote: worktree.branch
-      ? `The ${worktree.branch} branch stays exactly as it is — only this checkout of the files goes away.`
+      ? `The ${worktree.branch} branch stays exactly as it is. Only this checkout of the files goes away.`
       : 'Only this checkout of the files goes away.',
   }
 }
@@ -194,7 +194,7 @@ export function branchCleanupOffer(
   if (merged) {
     return {
       canDelete: true,
-      text: `The ${branch} branch is finished with — its work is already saved elsewhere. Delete it too?`,
+      text: `The ${branch} branch is finished with, and its work is already saved elsewhere. Delete it too?`,
     }
   }
   return {

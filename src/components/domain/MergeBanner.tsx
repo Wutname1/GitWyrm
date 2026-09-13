@@ -74,9 +74,9 @@ export function MergeBanner() {
               {remaining} conflict{remaining === 1 ? '' : 's'} left to resolve
             </>
           ) : isRebase ? (
-            'All conflicts resolved — ready to continue.'
+            'All conflicts resolved. Ready to continue.'
           ) : (
-            'All conflicts resolved — ready to commit.'
+            'All conflicts resolved. Ready to commit.'
           )}
         </div>
       </div>

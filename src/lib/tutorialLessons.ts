@@ -166,7 +166,7 @@ export const LESSONS: Lesson[] = [
     dock: 'right',
     title: 'Double-click to switch branches',
     body: 'Your work lives on branches. This practice repo has two. Double-clicking a branch moves you onto it, so the files you see become that branch’s files. Both spots below are the same branch: the row in the list on the left, and the tag on the commit itself.',
-    instruction: 'Double-click either highlighted branch — the row or the tag.',
+    instruction: 'Double-click either highlighted branch: the row or the tag.',
     gesture: 'double-click',
     completeOn: 'branch-switched',
     success: 'You switched branches.',
@@ -196,7 +196,7 @@ export const LESSONS: Lesson[] = [
     // Same reason as above, plus the Sync panel opens dead centre.
     dock: 'right',
     title: 'Drag one branch onto another',
-    body: 'These two branches have both moved on, so each has work the other is missing. Dragging one onto the other asks GitWyrm to sort that out, and it offers only what makes sense for the pair. Every glowing spot is one of those two branches — the rows on the left, or the tags on the commits.',
+    body: 'These two branches have both moved on, so each has work the other is missing. Dragging one onto the other asks GitWyrm to sort that out, and it offers only what makes sense for the pair. Every glowing spot is one of those two branches: the rows on the left, or the tags on the commits.',
     instruction: 'Drag either branch onto the other one.',
     gesture: 'drag',
     // Indexes into `targets`: the feature row (2) onto the main row (3), and
@@ -210,7 +210,7 @@ export const LESSONS: Lesson[] = [
     success: 'That opened the sync panel.',
     followUp: {
       title: 'This is the sync panel',
-      body: 'It shows the two branches, which way the work will move, and what will happen when it does. GitWyrm only offers what actually makes sense for these two, so there is nothing here that can catch you out. Have a look, then close it — you do not have to sync anything right now.',
+      body: 'It shows the two branches, which way the work will move, and what will happen when it does. GitWyrm only offers what actually makes sense for these two, so there is nothing here that can catch you out. Have a look, then close it. You do not have to sync anything right now.',
       until: 'sync-closed',
     },
   },
@@ -238,7 +238,7 @@ export const LESSONS: Lesson[] = [
     // graph, so the card sits fully outside it over the branch sidebar.
     dock: 'left',
     title: 'Right-click a commit for its actions',
-    body: 'Right-clicking a commit opens a menu of everything you can do to it — undo it, copy it to another branch, rename its message, or tag it. Branches, tags, tabs, files and stashes each have their own menu too, so it is worth a try whenever you are hunting for an action.',
+    body: 'Right-clicking a commit opens a menu of everything you can do to it: undo it, copy it to another branch, rename its message, or tag it. Branches, tags, tabs, files and stashes each have their own menu too, so it is worth a try whenever you are hunting for an action.',
     instruction: 'Right-click any commit in the list.',
     gesture: 'right-click',
     completeOn: 'context-menu-opened',

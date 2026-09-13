@@ -52,7 +52,7 @@ export function SpecChip({ repoId, changeId, progress }: SpecChipProps) {
       </TooltipTrigger>
       <TooltipContent>
         {showProgress
-          ? `${changeId} — ${progress.done} of ${progress.total} tasks done. Click to open the Spec Desk.`
+          ? `${changeId}: ${progress.done} of ${progress.total} tasks done. Click to open the Spec Desk.`
           : `Part of ${changeId}. Click to open the Spec Desk.`}
       </TooltipContent>
     </Tooltip>

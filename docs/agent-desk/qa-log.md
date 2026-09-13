@@ -240,3 +240,13 @@ A: The tally as the headline and the first reason as the detail, since a bare "3
 | 680 | 2026-09-13 | Was anything else wrong there? | Yes -- the explanation described opening files a way the code does not actually use. |
 | 681 | 2026-09-13 | Is the real way weaker? | No, stronger: it asks for a read handle outright, so there is no setting that could be turned the wrong way. |
 | 682 | 2026-09-13 | Is the promise itself still kept? | Yes -- the only writes in that file belong to its own tests and go to temporary folders. |
+| 683 | 2026-09-13 | What was checked this pass? | My own checks, after two passes running found the same blind spot in somebody else's. |
+| 684 | 2026-09-13 | Did they have it? | Yes -- the punctuation check looked at two folders and six name prefixes, and everything else was invisible to it. |
+| 685 | 2026-09-13 | Was anything hiding there? | Eighteen sentences people read, in tutorial steps, worktree explanations, merge banners, the onboarding tour and four dialogs. |
+| 686 | 2026-09-13 | Was the list widened again? | No -- a list is what failed twice, so it now reads every screen and every module and keeps no list at all. |
+| 687 | 2026-09-13 | Does that flag things that are fine? | It did once: a lone dash standing in for a missing value is a typographic mark, not a sentence joining two thoughts. |
+| 688 | 2026-09-13 | How is that told apart? | By whether the dash stands alone between quotes or tags, which was checked against real examples of both kinds. |
+| 689 | 2026-09-13 | Were the sentences reworded or just repunctuated? | Reworded where a colon or a full stop read better, since swapping one character for another is not the same as writing it properly. |
+| 690 | 2026-09-13 | Was the wider reach proved? | Yes -- one fixed sentence was put back and the check named the file and the line it had been blind to. |
+| 691 | 2026-09-13 | Is this the same fault as the last two passes? | Yes, three times now: a check that skips something to avoid matching itself goes blind exactly where it is most needed. |
+| 692 | 2026-09-13 | Does anything stop a fourth? | Nothing structural -- but no check written here now carries a list of what to look at. |

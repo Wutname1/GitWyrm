@@ -89,7 +89,7 @@ function StreamRow({
                 <span className={cn(item.done ? 'text-sub' : 'text-muted-foreground')}>
                   {item.label}
                   {item.detail && (
-                    <span className="text-muted-foreground"> — {item.detail}</span>
+                    <span className="text-muted-foreground"> {item.detail}</span>
                   )}
                 </span>
               </li>

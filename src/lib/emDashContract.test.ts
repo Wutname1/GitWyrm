@@ -21,32 +21,50 @@ import { fileURLToPath } from 'node:url'
  * rule covers comments too, but a comment is read by whoever is already in the
  * file, while this text is read by somebody who cannot see it coming.
  */
-const DIRS = ['../components/domain/agent-desk', '../components/domain/agent-setup']
+/**
+ * Every screen, not two folders.
+ *
+ * This began as the two Agent Desk directories, which left four em dashes in
+ * tooltips and labels a folder away -- a worktree row, a spec chip. The rule
+ * in CLAUDE.md is about text people read, and text people read is not
+ * confined to one feature.
+ */
+const COMPONENT_ROOT = '../components'
 
 /**
- * The pure-logic modules behind those screens, found rather than listed.
+ * Every module under `lib/`, rather than a chosen few.
  *
- * The first version of this named four files by hand, which covered four of
- * the twenty-six that exist -- an allowlist that protects whatever somebody
- * remembered on the day and silently stops covering anything added later. The
- * files that hold this text all start with the same few prefixes, so matching
- * the prefix keeps a new one in scope on the day it is created.
+ * This started as four filenames, then became six name prefixes, and both
+ * were the same mistake one step apart: a list somebody has to remember to
+ * add to. The prefixes missed `tutorialLessons.ts` and `worktreeCopy.ts`,
+ * which between them held seven em dashes in sentences people read -- the
+ * exact defect this file exists to prevent, sitting outside its reach the
+ * whole time.
+ *
+ * Scanning everything needs no maintenance and cannot develop a blind spot.
+ * A module with no user-facing strings simply has nothing to match.
  */
-const LIB_PREFIXES = ['agentDesk', 'agentImport', 'agentSession', 'agentWorkspace', 'aiModel', 'specSync']
-
 function sourcesInScope(): { name: string; source: string }[] {
   const out: { name: string; source: string }[] = []
-  for (const dir of DIRS) {
-    const path = fileURLToPath(new URL(dir, import.meta.url))
-    for (const name of readdirSync(path) as string[]) {
-      if (!name.endsWith('.tsx')) continue
-      out.push({ name, source: readFileSync(`${path}/${name}`, 'utf8') })
+  const walk = (dir: string, label: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true }) as {
+      name: string
+      isDirectory(): boolean
+    }[]) {
+      const full = `${dir}/${entry.name}`
+      if (entry.isDirectory()) walk(full, `${label}${entry.name}/`)
+      else if (entry.name.endsWith('.tsx')) {
+        out.push({ name: `${label}${entry.name}`, source: readFileSync(full, 'utf8') })
+      }
     }
   }
+  walk(fileURLToPath(new URL(COMPONENT_ROOT, import.meta.url)), '')
   const libPath = fileURLToPath(new URL('.', import.meta.url))
   for (const name of readdirSync(libPath) as string[]) {
     if (!name.endsWith('.ts') || name.endsWith('.test.ts')) continue
-    if (!LIB_PREFIXES.some((prefix) => name.startsWith(prefix))) continue
+    // `bindings.ts` is generated, and its contents are the backend's doc
+    // comments rather than anything written for this screen.
+    if (name === 'bindings.ts') continue
     out.push({ name, source: readFileSync(`${libPath}/${name}`, 'utf8') })
   }
   return out
@@ -65,6 +83,11 @@ function offendingLines(source: string): string[] {
     .map((line, i) => ({ line: line.trim(), n: i + 1 }))
     .filter(({ line }) => line.includes('\u2014'))
     .filter(({ line }) => !line.startsWith('*') && !line.startsWith('//') && !line.startsWith('/*'))
+    // A dash standing alone, quoted, is the typographic "no value here" mark
+    // -- what a version field shows before the build is known. The rule is
+    // about a dash joining two clauses in a sentence, and that one joins
+    // nothing.
+    .filter(({ line }) => !/(['"`>]\s*)—(\s*['"`<])/.test(line))
     .map(({ line, n }) => `${n}: ${line.slice(0, 100)}`)
 }
 

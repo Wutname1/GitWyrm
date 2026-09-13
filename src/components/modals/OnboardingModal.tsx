@@ -77,7 +77,7 @@ const TOUR_SLIDES: Slide[] = [
   {
     icon: <Sparkles size={22} strokeWidth={1.8} />,
     title: 'Welcome to GitWyrm',
-    body: 'A fast, focused Git client. This quick tour shows the essentials — it takes about fifteen seconds.',
+    body: 'A fast, focused Git client. This quick tour shows the essentials, and takes about fifteen seconds.',
   },
   {
     icon: <Palette size={22} strokeWidth={1.8} />,
@@ -101,7 +101,7 @@ const TOUR_SLIDES: Slide[] = [
       <>
         Hit <span className="font-semibold text-foreground">Merge</span> in the toolbar, or
         right-click any branch. When a merge hits conflicts, GitWyrm shows both sides side by side
-        so you can keep yours, keep theirs, or edit the result — then commit.
+        so you can keep yours, keep theirs, or edit the result, then commit.
       </>
     ),
   },

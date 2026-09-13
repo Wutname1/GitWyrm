@@ -260,7 +260,7 @@ function WorktreeRow({ worktree, canAdd }: { worktree: Worktree; canAdd: boolean
     ? (brokenExplanation(worktree.state) ?? '')
     : worktree.is_main
       ? `The project's main checkout${worktree.branch ? `, on ${worktree.branch}` : ''}. Double-click to open it.`
-      : `A worktree${worktree.branch ? ` on ${worktree.branch}` : ''} — this project checked out in its own folder. Double-click to open it in its own tab.`
+      : `A worktree${worktree.branch ? ` on ${worktree.branch}` : ''}: this project checked out in its own folder. Double-click to open it in its own tab.`
 
   return (
     <>
@@ -321,7 +321,7 @@ function WorktreeRow({ worktree, canAdd }: { worktree: Worktree; canAdd: boolean
               >
                 <Trash2 />
                 {worktree.is_current
-                  ? 'Open in this tab — switch away first'
+                  ? 'Open in this tab: switch away first'
                   : 'Remove this worktree'}
               </ContextMenuItem>
             </>
@@ -486,7 +486,7 @@ export function WorktreesSection() {
               e.stopPropagation()
               openModal('addWorktree')
             }}
-            tooltip="Add a worktree — another branch checked out in its own folder"
+            tooltip="Add a worktree: another branch checked out in its own folder"
             className="ml-auto flex size-4 flex-none items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-panel3 hover:text-foreground focus:opacity-100 group-hover/section:opacity-100"
           >
             <Plus size={12} strokeWidth={2.4} />
