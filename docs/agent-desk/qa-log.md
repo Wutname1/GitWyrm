@@ -201,3 +201,13 @@ A: The tally as the headline and the first reason as the detail, since a bare "3
 | 641 | 2026-09-12 | Did the first check of the new tests hold up? | No -- it reported them passing with the fix removed, because the revert itself had silently failed to match. |
 | 642 | 2026-09-12 | How was that caught? | By reading the file afterwards instead of trusting the result, which showed the fix had never actually been taken out. |
 | 643 | 2026-09-12 | Do they hold up now? | Yes -- with the fix genuinely removed, both fail. |
+| 644 | 2026-09-13 | Does asking for a review of a pull request tell the agent what changed? | No -- it gets the description, the author and the state, and never learns which files moved. |
+| 645 | 2026-09-13 | Can it find out for itself? | No -- a review is refused both commands and the network, so it can only read, and only what is already on disk. |
+| 646 | 2026-09-13 | Is what is on disk even the right thing? | Not reliably -- the run uses whatever branch the person has open, which for a fork or an unfetched branch is not the change at all. |
+| 647 | 2026-09-13 | Should the changed files be sent then? | Two sub-agents argued it and no: that list moves every time somebody pushes, and it would be frozen into a record the product says is never updated. |
+| 648 | 2026-09-13 | Would sending the patches instead have worked? | It would have been correct and unaffordable -- thirty files of patch text already exceeds the whole budget the rest of the conversation gets. |
+| 649 | 2026-09-13 | Is there a cap that would have caught that? | No, and that is the danger: the budget covers the conversation only, and source text is deliberately outside it. |
+| 650 | 2026-09-13 | What was done instead? | The two ends of the change are now named, which were stored the whole time and thrown away when the prompt was built. |
+| 651 | 2026-09-13 | Why is that enough to matter? | Because it turns an agent that does not know where to look into one that does, without freezing anything that goes stale. |
+| 652 | 2026-09-13 | Did both sides agree on that much? | Yes -- it was the one change neither argued against, and each reached it separately. |
+| 653 | 2026-09-13 | Is the bigger gap now hidden? | No -- it is written where the source is built, including why paths alone would not have helped. |

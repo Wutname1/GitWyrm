@@ -1960,8 +1960,37 @@ fn source_summary(source: &SessionSource) -> (String, String) {
             };
             (snapshot.title.clone(), summary)
         }
+        // A pull request names the two ends of the change.
+        //
+        // They are stored on the variant and were being thrown away here,
+        // reaching the agent only when the frontend happened to fold them into
+        // the display string. That matters more for this kind than any other:
+        // a review is denied `shell` and `url`, so it cannot run `git diff`
+        // or ask the host, and `WorktreePolicy::Never` means it is reading
+        // whatever branch the person has open -- which may not be the pull
+        // request's at all. Naming the range is the difference between an
+        // agent that can look and one that does not know where.
+        //
+        // The refs and not the files: the changed files are a moving target
+        // that the snapshot is explicitly never refreshed to match, so storing
+        // them would freeze a list that is wrong after the next push.
+        SessionSource::PullRequest {
+            snapshot,
+            head,
+            base,
+            ..
+        } => {
+            let range = format!("Comparing {head} into {base}.");
+            let summary = if snapshot.summary.trim().is_empty() {
+                range
+            } else {
+                format!("{}
+
+{}", snapshot.summary, range)
+            };
+            (snapshot.title.clone(), summary)
+        }
         SessionSource::Issue { snapshot, .. }
-        | SessionSource::PullRequest { snapshot, .. }
         | SessionSource::OpenSpecChange { snapshot, .. }
         | SessionSource::OpenSpecTask { snapshot, .. }
         | SessionSource::Commit { snapshot, .. }
@@ -3517,6 +3546,52 @@ mod tests {
             captured_at: "2026-01-01T00:00:00Z".into(),
             live_unavailable: false,
         }
+    }
+
+    /// A review is told which two ends to compare.
+    ///
+    /// It cannot work this out for itself: `shell` and `url` are both denied
+    /// for a review (see `cli_agent`'s own test), and it runs against whatever
+    /// branch the person has open rather than a worktree of the change. The
+    /// refs were stored on the source and dropped here, so the agent was asked
+    /// to review something without being told where it was.
+    #[test]
+    fn a_pull_request_names_the_two_ends_of_the_change() {
+        let source = SessionSource::PullRequest {
+            host_id: "github".into(),
+            owner: "acme".into(),
+            repo: "widgets".into(),
+            number: 7,
+            url: "https://example.test/pull/7".into(),
+            head: "feature/login".into(),
+            base: "main".into(),
+            snapshot: snap("Fix the login redirect", "Drops the query string."),
+        };
+        let (title, summary) = source_summary(&source);
+        assert_eq!(title, "Fix the login redirect");
+        assert!(summary.contains("feature/login"), "{summary:?}");
+        assert!(summary.contains("main"), "{summary:?}");
+        // The description is still there; the range is added, not swapped in.
+        assert!(summary.contains("Drops the query string."), "{summary:?}");
+    }
+
+    /// A pull request with no description still says what to compare.
+    #[test]
+    fn a_pull_request_with_no_description_still_names_the_range() {
+        let source = SessionSource::PullRequest {
+            host_id: "github".into(),
+            owner: "acme".into(),
+            repo: "widgets".into(),
+            number: 7,
+            url: "https://example.test/pull/7".into(),
+            head: "feature/login".into(),
+            base: "main".into(),
+            snapshot: snap("Fix the login redirect", ""),
+        };
+        let (_, summary) = source_summary(&source);
+        assert!(summary.contains("feature/login") && summary.contains("main"));
+        assert!(!summary.starts_with("
+"), "no empty line where the body would be: {summary:?}");
     }
 
     /// A chat about a set of files tells the agent every one of them.

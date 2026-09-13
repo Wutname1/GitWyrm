@@ -56,6 +56,33 @@ export function issueSourceInput(
  * (`PrDetail`). Task 4.3: "Snapshot PR metadata, head/base, draft/state,
  * author, URL, and known checks."
  */
+/**
+ * **A review started from this cannot see the change.** Measured 2026-09-13,
+ * recorded here because the gap is invisible from the call site.
+ *
+ * A Review run is `can_write: false`, which makes `denied_tools_for` deny
+ * `shell` and `write`, and `url` is denied for every run. So the agent has
+ * read and search and nothing else: no `git diff`, no `gh pr diff`, no
+ * network. It reviews whatever this builder hands it.
+ *
+ * Worse than "it has to look things up": the run is `WorktreePolicy::Never`,
+ * so it reads the checkout the person happens to have open. A pull request
+ * from a fork, or any head they have never fetched, is not on disk at all --
+ * so reading the named files would describe the wrong revision rather than
+ * the change.
+ *
+ * What is missing is the changed files. `githubPrFiles` already returns them
+ * WITH their patches (`PrFile.diff`), so the data exists one fetch away and
+ * does not depend on what is checked out. Sending paths alone would not help:
+ * a path resolves against the wrong revision, which is a more expensive way
+ * to be wrong.
+ *
+ * Not fixed here. Carrying patches means a new durable field on the source, a
+ * character budget for the prompt (`build_prompt` caps nothing, and the
+ * transcript budget's own doc says source context sits outside it), and a
+ * note saying what was cut -- the same discipline `hosting/github.rs` already
+ * applies to the 300-file cap, where "a truncated list reads as truncated".
+ */
 export function pullRequestSourceInput(
   hostId: ProviderId,
   owner: string,

@@ -314,6 +314,33 @@ mod tests {
     /// goes through the person's approval gate; a read-only intent (and Plan
     /// before Start) cannot run commands at all, because a command can
     /// change files and would otherwise be a way around the write denial.
+    /// A review has no way to see a change it was not handed.
+    ///
+    /// The mechanism is covered above; this pins the CONSEQUENCE, because it
+    /// is what makes the pull-request source's contents load-bearing rather
+    /// than a convenience. A Review run is denied `shell`, so it cannot run
+    /// `git diff` or `gh pr diff`, and `url` is denied for every run, so it
+    /// cannot ask the host either. It reviews what GitWyrm gave it.
+    ///
+    /// Worth its own test because the two facts live in different places: the
+    /// intent's policy here, and the source's contents in
+    /// `agentDeskSources.ts`. Somebody trimming the prompt would see only one
+    /// of them.
+    #[test]
+    fn a_review_cannot_fetch_the_change_for_itself() {
+        for started in [false, true] {
+            let denied = denied_tools_for(&policy_for(SessionIntent::Review), started);
+            assert!(
+                denied.contains(&"shell"),
+                "a review that could run a command could diff for itself (started={started})"
+            );
+            assert!(
+                denied.contains(&"url"),
+                "a review that could reach the network could fetch the diff (started={started})"
+            );
+        }
+    }
+
     #[test]
     fn shell_is_denied_exactly_when_write_is() {
         for intent in ALL_INTENTS {
