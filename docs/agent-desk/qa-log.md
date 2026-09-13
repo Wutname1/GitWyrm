@@ -181,3 +181,13 @@ A: The tally as the headline and the first reason as the detail, since a bare "3
 | 621 | 2026-09-12 | Was the full list available? | Yes, stored in full the whole time and simply not passed on. |
 | 622 | 2026-09-12 | What about the other kinds? | They keep their short wording, because each points at something the agent can go and fetch, while these two are the list. |
 | 623 | 2026-09-12 | And starting from a failed check? | Further off than it looked -- nothing in the app fetches or shows whether a check passed, so it is a feature rather than a menu item. |
+| 624 | 2026-09-12 | What was looked for this pass? | More of the fault found last time -- text written for a label being handed to an agent as its instructions. |
+| 625 | 2026-09-12 | Was there more of it? | Yes, and worse: a chat started from an issue in the sidebar never received the issue's text at all. |
+| 626 | 2026-09-12 | What did the agent get instead? | The labels and who it was assigned to, so "fix this bug" arrived as "[bug], assigned to ada". |
+| 627 | 2026-09-12 | Why did nothing fail? | Because a row in a list and a fully loaded issue differ by a field that is absent rather than empty, so the check for it quietly answered no. |
+| 628 | 2026-09-12 | Did the same gesture work elsewhere? | Yes -- from the issue panel it sent the real text, so the two ways of starting the same chat disagreed. |
+| 629 | 2026-09-12 | Are pull requests affected too? | Yes, the same way: a review started from the sidebar described the branches and the author and never said what the change was for. |
+| 630 | 2026-09-12 | What happens now? | The full issue or pull request is fetched before the chat starts, reusing whatever the panel already loaded. |
+| 631 | 2026-09-12 | And if that fetch fails? | The chat still starts from the row, because starting knowing less is better than not starting. |
+| 632 | 2026-09-12 | Was the builder at fault? | No -- its own tests already covered both shapes, including one named for the case with no text; the fault was which shape a screen handed it. |
+| 633 | 2026-09-12 | So where is it guarded? | At the screen, where the mistake was, with the reason in the failure message. |

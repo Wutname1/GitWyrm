@@ -1,4 +1,7 @@
 import { type ReactNode, useEffect, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { commands } from '@/lib/bindings'
+import { unwrap } from '@/lib/queryKeys'
 import { ArchiveRestore, ArrowLeftRight, CloudOff, ExternalLink, Eye, Sparkles, Tag, Trash2, Upload } from 'lucide-react'
 import { formatCommitTime, formatRelativeTime } from '@/lib/gitDisplay'
 import type { SectionItem, SidebarSectionData } from '@/lib/types'
@@ -6,6 +9,7 @@ import { useBranches, useCommitEntry, useRemotes, useStashes, useTags } from '@/
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useTagSync } from '@/hooks/useTagSync'
 import {
+  githubKeys,
   useCommitPr,
   useGithubIssues,
   useGithubPrs,
@@ -51,6 +55,7 @@ import { WorktreesSection } from './WorktreesSection'
 
 export function LeftPanel() {
   const repo = useActiveRepo()
+  const qc = useQueryClient()
   const selectCommit = useUiStore((s) => s.selectCommit)
   const revealRefInGraph = useUiStore((s) => s.revealRefInGraph)
   const revealShaInGraph = useUiStore((s) => s.revealShaInGraph)
@@ -101,17 +106,37 @@ export function LeftPanel() {
     intent: 'fix' | 'plan' | 'explain',
     providerOverride?: string
   ) => {
-    const source = issues.data?.find((i) => i.number === number)
-    if (!repo || !githubSlug.data || !repoHost.data || !source) return
-    void startSession({
-      repoId: repo.id,
-      repoPath: repo.path,
-      repoName: repo.name,
-      intent,
-      providerOverride,
-      key: `issue:${number}:${intent}`,
-      source: issueSourceInput(repoHost.data, githubSlug.data.owner, githubSlug.data.repo, source),
-    })
+    const row = issues.data?.find((i) => i.number === number)
+    if (!repo || !githubSlug.data || !repoHost.data || !row) return
+    const slug = githubSlug.data
+    const host = repoHost.data
+    const repoRef = repo
+    void (async () => {
+      // The row in this list is a SUMMARY, and a summary has no body. Handing
+      // it straight to the agent sent "[bug], assigned to ada" -- the labels
+      // and nothing else -- while the same gesture from the issue panel sent
+      // the actual problem. The one thing the agent most needs was the one
+      // thing missing, silently, because the two shapes differ by a field
+      // that is simply absent rather than empty.
+      const detail = await qc
+        .fetchQuery({
+          queryKey: githubKeys.issue(slug.owner, slug.repo, number),
+          queryFn: async () =>
+            unwrap(await commands.githubIssueDetail(repoRef.id, slug.owner, slug.repo, number)),
+        })
+        .catch(() => null)
+      void startSession({
+        repoId: repoRef.id,
+        repoPath: repoRef.path,
+        repoName: repoRef.name,
+        intent,
+        providerOverride,
+        key: `issue:${number}:${intent}`,
+        // Falls back to the row when the fetch fails, which is worse but not
+        // wrong: better a chat that starts knowing less than no chat at all.
+        source: issueSourceInput(host, slug.owner, slug.repo, detail ?? row),
+      })
+    })()
   }
 
   // Right-click AI kickoff for a PR row -- task 4.1/4.2.
@@ -120,17 +145,32 @@ export function LeftPanel() {
     intent: 'review' | 'summarize',
     providerOverride?: string
   ) => {
-    const source = prs.data?.find((p) => p.number === number)
-    if (!repo || !githubSlug.data || !repoHost.data || !source) return
-    void startSession({
-      repoId: repo.id,
-      repoPath: repo.path,
-      repoName: repo.name,
-      intent,
-      providerOverride,
-      key: `pr:${number}:${intent}`,
-      source: pullRequestSourceInput(repoHost.data, githubSlug.data.owner, githubSlug.data.repo, source),
-    })
+    const row = prs.data?.find((p) => p.number === number)
+    if (!repo || !githubSlug.data || !repoHost.data || !row) return
+    const slug = githubSlug.data
+    const host = repoHost.data
+    const repoRef = repo
+    void (async () => {
+      // Same as the issue path above: this row is a summary with no body, so
+      // a review started here described the branches and the author and never
+      // said what the pull request was for.
+      const detail = await qc
+        .fetchQuery({
+          queryKey: githubKeys.pr(slug.owner, slug.repo, number),
+          queryFn: async () =>
+            unwrap(await commands.githubPrDetail(repoRef.id, slug.owner, slug.repo, number)),
+        })
+        .catch(() => null)
+      void startSession({
+        repoId: repoRef.id,
+        repoPath: repoRef.path,
+        repoName: repoRef.name,
+        intent,
+        providerOverride,
+        key: `pr:${number}:${intent}`,
+        source: pullRequestSourceInput(host, slug.owner, slug.repo, detail ?? row),
+      })
+    })()
   }
 
   // The pull request the selected commit belongs to, so its row in the list
