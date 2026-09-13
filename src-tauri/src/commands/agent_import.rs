@@ -700,7 +700,15 @@ fn build_imported_session(
             external_session_id: external_session_id.to_string(),
             snapshot: SourceSnapshot {
                 title: detail.summary.title.clone(),
-                summary: format!("Imported from {adapter_id}"),
+                // The tool's own name, not its internal id. This said
+                // "Imported from vscode-copilot" while the badge on every
+                // message in the same conversation said "Imported from VS Code
+                // Copilot Chat" -- the identical sentence, spelled two ways.
+                //
+                // The slug is the half that reaches an agent continuing the
+                // chat, through `source_summary`, so the one place it was
+                // wrong was the one place nobody could see it.
+                summary: format!("Imported from {}", adapter_display_name(adapter_id)),
                 captured_at: imported_at.to_string(),
                 // Not "unavailable": the copy is complete and local. There is
                 // simply no live source to re-read, which `refresh_source`
@@ -1634,6 +1642,37 @@ mod tests {
         let (_dir, root) = temp_root();
         let outcome = scan_at(&root, "openchamber", &[]);
         assert!(matches!(outcome, ImportScanOutcome::AdapterDisabled));
+    }
+
+    /// Where a conversation came from, in the tool's own name for itself.
+    ///
+    /// This read "Imported from vscode-copilot" -- the internal id -- while
+    /// the badge on every message in the same conversation read "Imported from
+    /// VS Code Copilot Chat", building the identical sentence properly. The
+    /// slug is the half that reaches an agent continuing the chat, so the one
+    /// place it was wrong was the one place nobody could see it.
+    #[test]
+    fn an_imported_chat_names_the_tool_the_way_the_tool_names_itself() {
+        let detail = sample_detail("ext-1", vec![user_msg("m1", "2026-01-01T00:00:00Z", "hi")]);
+        let session = build_imported_session(
+            "sess-1",
+            "repo-1",
+            "C:/code/fixture-project",
+            "fixture-project",
+            "claude-code",
+            "ext-1",
+            &detail,
+            "2026-01-01T00:00:05Z",
+        );
+        let SessionSource::Imported { snapshot, .. } = &session.header.source else {
+            panic!("expected an imported source");
+        };
+        assert_eq!(snapshot.summary, "Imported from Claude Code");
+        assert!(
+            !snapshot.summary.contains("claude-code"),
+            "the internal id must not reach text a person or an agent reads: {:?}",
+            snapshot.summary
+        );
     }
 
     #[test]

@@ -211,3 +211,12 @@ A: The tally as the headline and the first reason as the detail, since a bare "3
 | 651 | 2026-09-13 | Why is that enough to matter? | Because it turns an agent that does not know where to look into one that does, without freezing anything that goes stale. |
 | 652 | 2026-09-13 | Did both sides agree on that much? | Yes -- it was the one change neither argued against, and each reached it separately. |
 | 653 | 2026-09-13 | Is the bigger gap now hidden? | No -- it is written where the source is built, including why paths alone would not have helped. |
+| 654 | 2026-09-13 | What was checked this pass? | The last source kind not yet audited: a conversation brought in from another tool. |
+| 655 | 2026-09-13 | Is its provenance handled well? | Mostly yes, and carefully -- it records which tool it came from rather than passing as a chat started here. |
+| 656 | 2026-09-13 | What was wrong? | It recorded the internal short name, so it read "imported from vscode-copilot" instead of the tool's actual name. |
+| 657 | 2026-09-13 | Does that reach anybody? | Yes -- it is handed to an agent that continues the conversation, which is the one place nobody would notice it. |
+| 658 | 2026-09-13 | Did the screen get it right? | Yes, and it builds the very same sentence one file away, correctly, so the two disagreed about one fact. |
+| 659 | 2026-09-13 | Where does the proper name come from? | Each tool answers with its own, which is the only source that cannot drift from what the tool actually calls itself. |
+| 660 | 2026-09-13 | Was a new lookup written for that? | Briefly, and then deleted -- an identical one already existed a few hundred lines below and simply was not being used here. |
+| 661 | 2026-09-13 | What about a tool nobody recognises? | It falls back to the short name, matching what the screen already does rather than inventing a second behaviour. |
+| 662 | 2026-09-13 | Did the test hold up? | Yes -- with the old wording put back it fails, printing both spellings side by side. |
