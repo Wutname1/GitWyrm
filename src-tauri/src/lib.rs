@@ -445,9 +445,33 @@ fn init_sentry() -> Option<sentry::ClientInitGuard> {
             // Fingerprint on the NORMALIZED message so the variable parts -- paths,
             // urls, shas, quoted names, numbers -- do not fragment one bug into
             // hundreds of issues, which is the opposite failure and just as bad.
-            if let Some(message) = event.message.as_deref() {
+            //
+            // A PANIC carries its text in the exception value, not in
+            // `event.message`, so it used to reach here with nothing to
+            // fingerprint on and fell back to Sentry's default - which groups by
+            // a symbolicated frame. On Windows those frames are frequently
+            // wrong: a tao event-loop panic arrived titled `git_odb_object_data`,
+            // with libgit2 symbols interleaved through what is plainly a Win32
+            // message loop (SendMessageW / CallWindowProcW / DefSubclassProc).
+            // The symbolicator had picked the nearest exported symbol from the
+            // wrong module, and the issue title pointed at git for a windowing
+            // bug (GITWYRM-BACKEND-8).
+            //
+            // The exception TYPE and VALUE are the honest identity of a panic, so
+            // use them when there is no message.
+            let identity = event
+                .message
+                .as_deref()
+                .map(str::to_owned)
+                .or_else(|| {
+                    event.exception.iter().next().map(|e| {
+                        let value = e.value.as_deref().unwrap_or("");
+                        format!("{} {}", e.ty, value)
+                    })
+                });
+            if let Some(identity) = identity {
                 event.fingerprint =
-                    std::borrow::Cow::Owned(vec![std::borrow::Cow::Owned(fingerprint_key(message))]);
+                    std::borrow::Cow::Owned(vec![std::borrow::Cow::Owned(fingerprint_key(&identity))]);
             }
             if let Some(message) = event.message.take() {
                 event.message = Some(scrub::scrub_text(&message));
@@ -854,6 +878,26 @@ mod fingerprint_tests {
         assert_eq!(
             fingerprint_key("AI request failed (400 Bad Request)"),
             fingerprint_key("AI request failed (503 Bad Request)")
+        );
+    }
+
+    /// A panic's identity is its type + value, NOT a symbolicated frame.
+    ///
+    /// Windows symbolication is frequently wrong for third-party frames - a tao
+    /// event-loop panic arrived labelled `git_odb_object_data` with libgit2
+    /// symbols interleaved through a Win32 message loop (GITWYRM-BACKEND-8). Two
+    /// panics with the same message must group together however their stacks are
+    /// (mis)labelled.
+    #[test]
+    fn a_panic_groups_by_its_message_not_its_frames() {
+        assert_eq!(
+            fingerprint_key("panic cannot move state from Destroyed"),
+            fingerprint_key("panic cannot move state from Destroyed")
+        );
+        // Different panics stay apart.
+        assert_ne!(
+            fingerprint_key("panic cannot move state from Destroyed"),
+            fingerprint_key("panic called `Option::unwrap()` on a `None` value")
         );
     }
 
