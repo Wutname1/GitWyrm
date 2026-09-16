@@ -142,6 +142,11 @@ const EXPECTED: &[&str] = &[
     // The network being unavailable is not an application error.
     "could not resolve host",
     "failed to connect",
+    // reqwest's phrasing for the same thing, which reaches us through the
+    // Copilot SDK's RPC layer rather than from git. Different transport, same
+    // condition: the network would not carry the request. Nine of these in six
+    // days, all saying only that api.github.com was unreachable.
+    "error sending request for url",
     // The host declining a request on its own rules. The user is told, and the
     // answer is always theirs or their admin's -- there is nothing here we could
     // change. "merge conflicts" alone accounted for 522 reports in 20 days.
@@ -405,6 +410,17 @@ mod tests {
     /// path uses. Both must classify as refusals.
     /// A line-level stage/discard against a file whose diff has gone empty. The
     /// view raced the working tree; the user retries.
+    /// The AI transports fail through reqwest, not git, so they phrase an
+    /// unreachable network differently from "could not resolve host".
+    #[test]
+    fn an_unreachable_network_is_expected_in_reqwests_wording() {
+        assert!(is_expected(
+            "copilot sdk: model list failed: RPC error -32603: Request models.list failed with message: network fetch failed: request failed: error sending request for url (https://api.github.com/copilot_internal/user)"
+        ));
+        // Must not reach a real failure that merely mentions a request.
+        assert!(!is_expected("malformed request body sent to the provider"));
+    }
+
     #[test]
     fn a_stale_line_selection_is_expected() {
         assert!(is_expected("Command failed: no changes found for this file"));
