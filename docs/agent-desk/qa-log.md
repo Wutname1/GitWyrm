@@ -261,3 +261,13 @@ A: The tally as the headline and the first reason as the detail, since a bare "3
 | 701 | 2026-09-15 | Were those silenced quietly? | No -- each is named with what was read and why, because a silent skip is how a check starts passing over what it was written for. |
 | 702 | 2026-09-15 | Did the wider reach get proved? | Yes -- one fixed sentence was put back and the check named a file it had been completely blind to. |
 | 703 | 2026-09-15 | Anything odd in the run? | One backend test failed once and passed on three further runs, which in a folder shared with another session is contention rather than a change here. |
+| 704 | 2026-09-15 | What was finished this pass? | The sweep of my own checks, since three of them had been widened one at a time. |
+| 705 | 2026-09-15 | Which were left? | One that read a single named file, and the promise never to publish anything, which read only the file the promise is written in. |
+| 706 | 2026-09-15 | Was the single-file one wrong today? | No -- it happened to name the only two screens that matter, and would have been blind to a third added tomorrow. |
+| 707 | 2026-09-15 | What does it do now? | Finds every screen that builds a chat from an issue or a pull request, and requires each to have the full text rather than a list row. |
+| 708 | 2026-09-15 | And the publishing promise? | It now reads every file the feature is made of, not just the one where the promise is written down. |
+| 709 | 2026-09-15 | Did widening it work first time? | No -- a push planted in another file sailed straight through it. |
+| 710 | 2026-09-15 | Why? | Because the exclusion I wrote skipped every line that builds a string, which is exactly how a real one would be written. |
+| 711 | 2026-09-15 | Is that the same fault being fixed all week? | Yes, and committed by me this time: a skip wide enough to hide the thing being looked for is a hole, not an exemption. |
+| 712 | 2026-09-15 | How was it caught? | By planting one and checking, rather than trusting that a passing check means there is nothing to find. |
+| 713 | 2026-09-15 | Do both hold now? | Yes -- each was proved on a planted fault in a file it could not previously see. |

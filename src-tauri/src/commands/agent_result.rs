@@ -1813,7 +1813,6 @@ mod tests {
     /// needs it most.
     #[test]
     fn no_command_here_pushes_or_posts_on_the_users_behalf() {
-        const SOURCE: &str = include_str!("agent_result.rs");
         // Assembled from halves so this test's own needles cannot match the
         // lines that define them. Spelling them literally made the check fail
         // on itself, which is the shape where a guard quietly starts testing
@@ -1823,16 +1822,81 @@ mod tests {
             format!("Host{}", "Provider"),
             format!("push{}branch", "_"),
         ];
-        let offenders: Vec<(usize, &str)> = SOURCE
-            .lines()
-            .enumerate()
-            .map(|(i, line)| (i + 1, line.trim()))
-            .filter(|(_, line)| !line.starts_with("//") && !line.starts_with("*"))
-            .filter(|(_, line)| needles.iter().any(|n| line.contains(n.as_str())))
-            .collect();
+
+        // Every file the feature is made of, not just this one.
+        //
+        // This read only `agent_result.rs`, which is where the promise is
+        // written down -- and a push added one file over would have been
+        // invisible to it. The promise is about Agent Desk, so the check is
+        // too: the whole `agentdesk/` module and every `agent_*` command
+        // beside it.
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut sources: Vec<(std::path::PathBuf, String)> = Vec::new();
+        let mut stack = vec![root.join("agentdesk")];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                    if let Ok(text) = std::fs::read_to_string(&path) {
+                        sources.push((path, text));
+                    }
+                }
+            }
+        }
+        let Ok(commands) = std::fs::read_dir(root.join("commands")) else {
+            panic!("the commands directory must be readable for this check to mean anything");
+        };
+        for entry in commands.flatten() {
+            let path = entry.path();
+            let is_agent_command = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("agent_") && n.ends_with(".rs"));
+            if is_agent_command {
+                if let Ok(text) = std::fs::read_to_string(&path) {
+                    sources.push((path, text));
+                }
+            }
+        }
+        assert!(
+            sources.len() > 5,
+            "found only {} files to check, which means the walk is not finding the feature",
+            sources.len()
+        );
+
+        let mut offenders = Vec::new();
+        for (path, text) in &sources {
+            for (i, raw) in text.lines().enumerate() {
+                let line = raw.trim();
+                // The doc comments naming these symbols are the explanation,
+                // not a call.
+                if line.starts_with("//") || line.starts_with("*") {
+                    continue;
+                }
+                // And this test's own needle definitions, which are the
+                // three lines that split a symbol across a `format!` join.
+                //
+                // Narrow on purpose. The first version skipped every line
+                // containing `format!("`, which is precisely how a real push
+                // would be written -- an injected `format!("git_push {n}")`
+                // sailed through. A skip wide enough to hide the thing being
+                // looked for is not an exemption, it is a hole.
+                let is_needle_definition = line.starts_with("format!(\"")
+                    && line.contains("\", \"");
+                if is_needle_definition {
+                    continue;
+                }
+                if needles.iter().any(|n| line.contains(n.as_str())) {
+                    offenders.push(format!("{}:{}: {line}", path.display(), i + 1));
+                }
+            }
+        }
         assert!(
             offenders.is_empty(),
-            "this file must never push or post on the user's behalf; drafting opens the host's              own page and the user submits it. Found: {offenders:?}"
+            "Agent Desk must never push or post on the user's behalf; drafting opens the host's own page and the user submits it. Found: {offenders:#?}"
         );
     }
 
