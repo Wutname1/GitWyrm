@@ -534,12 +534,21 @@ fn route_to_agent_desk(app: &tauri::AppHandle, event: &RunEventKind) {
                             &durable.session_id,
                             &execution_id,
                         );
-                        // A message the user sent while this turn was still
-                        // running was only saved to the transcript; nothing
-                        // else ever starts the turn that reads it. Runs after
-                        // the proposal hook so a graph it auto-started (or a
-                        // proposal now waiting on Start) is visible to the
-                        // idle check and wins.
+                    }
+                    // A message the user sent while this turn was still
+                    // running was only saved to the transcript; nothing else
+                    // ever starts the turn that reads it. Runs after the
+                    // proposal hook so a graph it auto-started (or a proposal
+                    // now waiting on Start) is visible to the idle check and
+                    // wins.
+                    //
+                    // Called on every terminal state, not only `Finished`. A
+                    // turn that stops or fails still must not restart itself,
+                    // and does not -- but the person who sent that message was
+                    // promised it would be picked up, and used to get silence
+                    // instead. `start_queued_follow_up` decides which of the
+                    // two happens.
+                    if !execution_id.is_empty() {
                         start_queued_follow_up(app, &locks, &root, &durable.session_id, &execution_id);
                     }
 
@@ -784,6 +793,73 @@ pub(crate) struct QueuedFollowUp {
     pub queued_message_count: usize,
 }
 
+/// Is a user message still waiting after a turn that did NOT finish cleanly?
+///
+/// [`queued_follow_up_for`] deliberately refuses to restart a stopped or
+/// failed turn, so a message sent during one is never picked up. That rule is
+/// right -- a turn that keeps failing must not loop on the same message -- but
+/// it used to be enforced in silence. The composer had already told the person
+/// their message would be read when the current turn finished, and after Stop
+/// nothing ran and nothing was said, leaving the message sitting in the
+/// transcript with no explanation.
+///
+/// So this answers the narrower question the other function cannot: was
+/// something left waiting, and is the session now idle enough that nothing
+/// else is about to read it? Same queued-message rule (no lead started at or
+/// after the message) and same idleness checks; only the ended state differs.
+pub(crate) fn stranded_message_count(
+    session: &crate::agentdesk::model::AgentSession,
+    ended_execution_id: &str,
+    live_execution_ids: &[String],
+) -> usize {
+    use crate::agentdesk::model::{MessageRole, SessionState};
+
+    let Some(ended) = session
+        .executions
+        .iter()
+        .find(|e| e.execution_id == ended_execution_id)
+    else {
+        return 0;
+    };
+    // A helper ending says nothing about the lead's queue, and a clean finish
+    // is the other function's job.
+    if ended.parent_execution_id.is_some() || ended.state == SessionState::Finished {
+        return 0;
+    }
+
+    let is_running = |state: SessionState| {
+        matches!(state, SessionState::Preparing | SessionState::Working | SessionState::NeedsInput)
+    };
+    // Anything still live may yet read the message, so it is not stranded.
+    if live_execution_ids.iter().any(|id| id != ended_execution_id) {
+        return 0;
+    }
+    if session
+        .executions
+        .iter()
+        .any(|e| e.execution_id != ended_execution_id && is_running(e.state))
+    {
+        return 0;
+    }
+    if is_running(session.header.state) {
+        return 0;
+    }
+
+    let lead_starts: Vec<time::OffsetDateTime> = session
+        .executions
+        .iter()
+        .filter(|e| e.parent_execution_id.is_none())
+        .filter_map(|e| parse_rfc3339(&e.started_at))
+        .collect();
+    session
+        .messages
+        .iter()
+        .filter(|m| m.role == MessageRole::User)
+        .filter_map(|m| parse_rfc3339(&m.timestamp))
+        .filter(|sent_at| !lead_starts.iter().any(|started| started >= sent_at))
+        .count()
+}
+
 fn parse_rfc3339(s: &str) -> Option<time::OffsetDateTime> {
     time::OffsetDateTime::parse(s, &time::format_description::well_known::Rfc3339).ok()
 }
@@ -936,6 +1012,21 @@ fn start_queued_follow_up(
         }
     };
     let Some(follow_up) = queued_follow_up_for(&session, ended_execution_id, &live) else {
+        // No turn is owed. That is the ordinary case, but it is also what
+        // happens after Stop or a failure with a message still waiting, and
+        // those two must not look the same to the person who sent it.
+        let stranded = stranded_message_count(&session, ended_execution_id, &live);
+        if stranded > 0 {
+            log::info!(
+                "agent desk: session {session_id} has {stranded} message(s) left waiting after a turn that did not finish"
+            );
+            crate::commands::agent_graph::append_system_note(
+                locks,
+                root,
+                session_id,
+                "The last turn ended before reading the message you sent. It is saved above. Send again to start a new turn.",
+            );
+        }
         return;
     };
     log::info!(
@@ -1103,6 +1194,80 @@ mod queued_follow_up_tests {
                 "a {state:?} turn must never restart itself on a queued message"
             );
         }
+    }
+
+    /// The other half of `no_restart_after_a_stopped_or_failed_turn`.
+    ///
+    /// Refusing to restart is correct. Refusing in silence was not: the
+    /// composer had already promised the message would be picked up when the
+    /// current turn finished, and after Stop nothing ran and nothing was
+    /// said. These two tests are a pair -- the first pins that no turn
+    /// starts, this one pins that the person is told why.
+    #[test]
+    fn a_message_left_by_a_stopped_or_failed_turn_is_counted_as_stranded() {
+        for state in [SessionState::Stopped, SessionState::Failed] {
+            let mut s = session(state);
+            s.messages.push(user_message(T0));
+            s.executions.push(lead("lead-1", state, T1));
+            s.messages.push(user_message(T2));
+            assert_eq!(
+                stranded_message_count(&s, "lead-1", &[]),
+                1,
+                "a {state:?} turn leaves the message sent after it waiting, and must say so"
+            );
+        }
+    }
+
+    /// A clean finish is the auto-start's job, not this one. Both firing
+    /// would append a "send again" note directly above a turn that is in fact
+    /// starting by itself.
+    #[test]
+    fn a_finished_turn_strands_nothing_because_the_follow_up_starts() {
+        let s = finished_with_queued_message();
+        assert!(
+            queued_follow_up_for(&s, "lead-1", &[]).is_some(),
+            "fixture must be one the auto-start claims"
+        );
+        assert_eq!(stranded_message_count(&s, "lead-1", &[]), 0);
+    }
+
+    /// Nothing is stranded when there was nothing waiting. Stopping a turn
+    /// you sent no follow-up to is the ordinary case and deserves no note.
+    #[test]
+    fn a_stopped_turn_with_no_queued_message_strands_nothing() {
+        let mut s = session(SessionState::Stopped);
+        s.messages.push(user_message(T0));
+        s.executions.push(lead("lead-1", SessionState::Stopped, T1));
+        assert_eq!(stranded_message_count(&s, "lead-1", &[]), 0);
+    }
+
+    /// Same idleness rule as the auto-start. Something still running may yet
+    /// read the message, so it is not stranded and no note is owed.
+    #[test]
+    fn nothing_is_stranded_while_another_execution_is_still_live() {
+        let mut s = session(SessionState::Stopped);
+        s.messages.push(user_message(T0));
+        s.executions.push(lead("lead-1", SessionState::Stopped, T1));
+        s.messages.push(user_message(T2));
+        s.executions.push(ExecutionRecord::minimal(
+            "helper-1".into(),
+            "sess-1".into(),
+            Some("lead-1".into()),
+            SessionState::Working,
+            T1.into(),
+            None,
+            0,
+        ));
+        assert_eq!(
+            stranded_message_count(&s, "lead-1", &[]),
+            0,
+            "a live helper may still read it"
+        );
+        assert_eq!(
+            stranded_message_count(&s, "lead-1", &["helper-1".to_string()]),
+            0,
+            "and so may one the registry still holds"
+        );
     }
 
     #[test]

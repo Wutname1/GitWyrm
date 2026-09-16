@@ -408,8 +408,15 @@ export function SessionComposer({
         // visible, and the next turn starts from the queued follow-up on
         // its own once the current one ends. Say exactly that, rather
         // than implying delivery. Not a failure, so no card.
+        //
+        // "finishes" is load-bearing, not filler: the backend refuses to
+        // restart a turn that stopped or failed, so that a turn which keeps
+        // failing cannot loop on the same message. Promising pickup flatly
+        // was a promise this kept only most of the time. The stopped case
+        // now also writes a note into the transcript itself, which is where
+        // the person is looking by then.
         setStartFailure(null)
-        toast.info('Saved. The agent will pick this up as soon as it finishes its current turn.')
+        toast.info('Saved. The agent will read this when it finishes the turn it is on.')
         return
       }
       const card = startFailureCardForExecution(startOutcome)

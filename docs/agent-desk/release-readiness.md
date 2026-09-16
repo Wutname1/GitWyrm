@@ -26,7 +26,7 @@ real run:
 | Shell | Denied for every run | Follows the write decision: allowed on Auto, Fix and started Plan through the approval gate; denied for read-only chats. Network stays denied |
 | Claude Code | Launched with `--safe-mode` and an empty MCP config; every prompt auto-denied | Loads the user's own MCP servers and skills; prompts reach GitWyrm's gate over stdio; Bash restored on writing runs. Unverified live (login expired) |
 | Codex | Read-only chats launched `codex app-server --sandbox=read-only`, which the binary rejects; stderr unread; the chat "did nothing". Approvals were answered `approved`/`denied`, words Codex reads as a refusal, so every Allow still ended in "write access was denied" | Sandbox travels in `thread/start`; stderr tail is kept and shown; unknown server requests are declined instead of hanging the turn; approvals use the schema's own `accept`/`decline`/`cancel`, `item/permissions/requestApproval` is granted for the turn, and file-change gates name their files. Verified: a real read-only turn answered PONG and a real writing turn's edits landed |
-| Queued messages | A message sent during a turn was saved and never read | A clean Finish with nothing else live starts the next turn with the same mode/team/tool after a note in the chat. Stopped or Failed turns never restart |
+| Queued messages | A message sent during a turn was saved and never read | A clean Finish with nothing else live starts the next turn with the same mode/team/tool after a note in the chat. Stopped or Failed turns never restart, and say so rather than leaving the message unexplained |
 | Usage | Transcript rows counted as "turns"; helper context could replace the lead's | Turns only when reported; context from the lead; per-agent rows for team runs; unreported figures stay blank |
 | Deleting a chat | Failed every time (wrong Tauri state type) | Works |
 | Windows | Restored off-screen after monitor changes | Clamped back onto a visible screen on load |
@@ -67,7 +67,10 @@ No unit fixture substitutes for these. Each is a path a person walks in the buil
    on the runner's GitHub plan. Still a harness rather than the app, so the chat surface
    itself is unproven -- but "the provider answers" no longer is.
 2. Send a second message while a turn is running and watch the follow-up turn start on
-   its own when the first finishes, and NOT start after pressing Stop.
+   its own when the first finishes, and NOT start after pressing Stop. After Stop, the
+   chat should now say the last turn ended before reading the message and that sending
+   again starts a new turn -- added 2026-09-16, because refusing to restart was right but
+   was being done in silence, under a toast that had promised pickup either way.
 3. An Auto chat whose lead proposes helpers: the helpers appear and run without a Start
    button; the same chat in Plan mode waits for Start.
 4. A run whose agent runs a command: the approval gate appears, Allow runs it, Reject

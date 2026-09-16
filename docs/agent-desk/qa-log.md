@@ -271,3 +271,10 @@ A: The tally as the headline and the first reason as the detail, since a bare "3
 | 711 | 2026-09-15 | Is that the same fault being fixed all week? | Yes, and committed by me this time: a skip wide enough to hide the thing being looked for is a hole, not an exemption. |
 | 712 | 2026-09-15 | How was it caught? | By planting one and checking, rather than trusting that a passing check means there is nothing to find. |
 | 713 | 2026-09-15 | Do both hold now? | Yes -- each was proved on a planted fault in a file it could not previously see. |
+| 714 | 2026-09-16 | Does anything start the turn that reads a message sent mid-turn? | Yes, and I said no: six checks all missed it because the code calls it `queued_follow_up` and the queue is worked out from timestamps rather than stored in a field. |
+| 715 | 2026-09-16 | How was the mistake caught? | Two subagents arguing opposite sides both came back with the same line number against their own brief. |
+| 716 | 2026-09-16 | What was reverted? | My wrong finding, the toast rewrite that followed from it, and a guard test that would have frozen the error in place. |
+| 717 | 2026-09-16 | Was anything actually wrong? | Yes, one narrow thing: after Stop or a failure nothing restarts, correctly, but nobody told the person whose message was left waiting. |
+| 718 | 2026-09-16 | Why not just auto-start those too? | Because a turn that keeps failing would loop on the same message forever. |
+| 719 | 2026-09-16 | So what changed? | A note in the chat saying the last turn ended before reading the message, and a toast that now says "when it finishes" rather than promising pickup either way. |
+| 720 | 2026-09-16 | Do the new tests catch the defect? | Yes -- reverting the gate fails one by name, and the revert was checked in the file before trusting the result. |
