@@ -40,9 +40,19 @@ export function BranchSpecLinkItems({ branch, repoId }: BranchSpecLinkItemsProps
           {linked ? `Working on ${linked.change_id}` : 'Say what this branch works on'}
         </ContextMenuSubTrigger>
         <ContextMenuSubContent className="max-h-80 w-72 overflow-y-auto">
-          {options.length === 0 && (
-            <ContextMenuItem disabled>No changes to pick from yet</ContextMenuItem>
-          )}
+          {/* Three different facts, and one sentence used to cover all of
+              them: the scan has not finished, the scan failed, and there
+              genuinely are none. Saying "no changes to pick from yet" while
+              GitWyrm is still looking, or could not look at all, tells
+              somebody their specs are missing when they are not. */}
+          {options.length === 0 &&
+            (changes.isPending ? (
+              <ContextMenuItem disabled>Looking for changes...</ContextMenuItem>
+            ) : changes.isError ? (
+              <ContextMenuItem disabled>GitWyrm could not read this project's changes.</ContextMenuItem>
+            ) : (
+              <ContextMenuItem disabled>No changes to pick from yet</ContextMenuItem>
+            ))}
           {options.map((change) => {
             const active = linked?.change_id === change.id
             return (

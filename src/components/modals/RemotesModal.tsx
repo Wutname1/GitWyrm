@@ -421,9 +421,16 @@ export function RemotesModal() {
           </DialogHeader>
 
           <div className="grid max-h-[60vh] gap-2 overflow-y-auto px-4 py-4">
+            {/* "You have none" is only one of three reasons this list is
+                empty. Said while the read is still running, or after it
+                failed, it tells somebody their remotes are gone. */}
             {(remotes.data?.length ?? 0) === 0 && !adding && (
               <p className="py-2 text-center text-xs text-muted-foreground">
-                No remotes yet. Add one to push and pull your work.
+                {remotes.isPending
+                  ? 'Looking for remotes...'
+                  : remotes.isError
+                    ? 'GitWyrm could not read this project’s remotes.'
+                    : 'No remotes yet. Add one to push and pull your work.'}
               </p>
             )}
 

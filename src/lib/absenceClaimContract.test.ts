@@ -23,18 +23,65 @@ import { fileURLToPath } from 'node:url'
  * read, which is the exact shape all five defects had, rather than trying to
  * judge copy.
  */
-const DIRS = ['../components/domain/agent-desk', '../components/domain/agent-setup']
-
+/**
+ * Every screen, not the two this defect was last found in.
+ *
+ * This watched `agent-desk` and `agent-setup` only, which is where the five
+ * known instances happened to live. Running the same rule over the rest of
+ * the app found three more the guard could never have seen: a branch menu
+ * saying "No changes to pick from yet", a remotes dialog saying "No remotes
+ * yet", and the branch manager saying "No branches yet" -- each while the
+ * read was still running or had failed.
+ *
+ * A guard scoped to where a bug was last seen only ever catches that bug
+ * again. Scanning everything needs no maintenance and has no blind spot; a
+ * component with no query and no absence sentence simply matches nothing.
+ */
 function componentsInScope(): { name: string; source: string }[] {
   const out: { name: string; source: string }[] = []
-  for (const dir of DIRS) {
-    const path = fileURLToPath(new URL(dir, import.meta.url))
-    for (const name of readdirSync(path) as string[]) {
-      if (!name.endsWith('.tsx')) continue
-      out.push({ name, source: readFileSync(`${path}/${name}`, 'utf8') })
+  const walk = (dir: string, label: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true }) as {
+      name: string
+      isDirectory(): boolean
+    }[]) {
+      const full = `${dir}/${entry.name}`
+      if (entry.isDirectory()) walk(full, `${label}${entry.name}/`)
+      else if (entry.name.endsWith('.tsx')) {
+        out.push({ name: `${label}${entry.name}`, source: readFileSync(full, 'utf8') })
+      }
     }
   }
+  walk(fileURLToPath(new URL('../components', import.meta.url)), '')
   return out
+}
+
+/**
+ * Flagged for an absence sentence that belongs to a different query.
+ *
+ * Each was read before being listed. Shrinking this list is an improvement;
+ * adding to it needs the same reading.
+ */
+const KNOWN_CROSS_TALK = new Set([
+  // "No tasks yet" reads `change.tasks`, a prop that is already loaded.
+  'domain/spec-desk/DeskDetail.tsx (history)',
+  // `remotes` fills a column; the empty-state sentence is about branches,
+  // which this component does guard.
+  'modals/BranchManagerModal.tsx (remotes)',
+  // "No groups match that search" is a different list, and `remoteMatches`
+  // already has its own `isPending` handling.
+  'modals/RepoPickerModal.tsx (remoteMatches)',
+])
+
+/**
+ * Whether this file tells somebody there is nothing.
+ *
+ * Deliberately the shapes that assert emptiness about DATA -- "No remotes
+ * yet", "no changes found", "none yet" -- and not every sentence containing
+ * the word "no". A comment explaining that something is absent is not a
+ * claim on a screen.
+ */
+function statesAnAbsence(source: string): boolean {
+  return /(['"`>]\s*)(No|no)\s+[a-z]+(\s+[a-z]+)*\s*(yet|found|to pick from|match)/.test(source)
 }
 
 describe('a failed read is never shown as an absence', () => {
@@ -60,6 +107,30 @@ describe('a failed read is never shown as an absence', () => {
         // "GitWyrm has not looked yet" and "GitWyrm could not look" are
         // different sentences but the same fact: it does not know. A guard
         // written for only the second half let the first half through.
+        // Only a component that STATES an absence can state a false one.
+        //
+        // Widening the scan from two folders to the whole app surfaced two
+        // dozen `?? []` defaults that feed a list and say nothing: an empty
+        // sidebar section renders no rows, which is not a claim about
+        // anything. Requiring a guard there would be defensive code for a
+        // sentence nobody wrote.
+        //
+        // The defect is the SENTENCE -- "No remotes yet", "No changes to pick
+        // from yet" -- shown when the honest answer is "still looking" or
+        // "could not look".
+        if (!statesAnAbsence(source)) continue
+        // A file-wide check cannot bind a sentence to the query it describes.
+        // Three components were flagged for a sentence about something else:
+        // `DeskDetail`'s "No tasks yet" reads a prop, `BranchManagerModal`'s
+        // remotes fill a column with no sentence, and `RepoPickerModal`'s
+        // "No groups match" belongs to a different list and already handles
+        // its own pending state.
+        //
+        // Named rather than excluded by rule: a cleverer regex would be
+        // guessing, and a silent skip is how a guard starts passing over the
+        // thing it was written for. This list is short, and each entry says
+        // what was checked.
+        if (KNOWN_CROSS_TALK.has(`${name} (${query})`)) continue
         const guarded =
           new RegExp(`${query}\.isError`).test(source) &&
           new RegExp(`${query}\.(isPending|isLoading)`).test(source)

@@ -250,3 +250,14 @@ A: The tally as the headline and the first reason as the detail, since a bare "3
 | 690 | 2026-09-13 | Was the wider reach proved? | Yes -- one fixed sentence was put back and the check named the file and the line it had been blind to. |
 | 691 | 2026-09-13 | Is this the same fault as the last two passes? | Yes, three times now: a check that skips something to avoid matching itself goes blind exactly where it is most needed. |
 | 692 | 2026-09-13 | Does anything stop a fourth? | Nothing structural -- but no check written here now carries a list of what to look at. |
+| 693 | 2026-09-15 | What was checked this pass? | The other check I wrote with the same narrow scope as the one widened last time. |
+| 694 | 2026-09-15 | Which rule does it enforce? | That a read which failed is never shown as "you have none", a fault this project had already found five times before making it mechanical. |
+| 695 | 2026-09-15 | Where was it looking? | Only the two folders where those five happened to live, so the rest of the app was invisible to it. |
+| 696 | 2026-09-15 | Was anything hiding there? | Three places: a branch menu, a remotes dialog and the branch manager, each saying nothing exists while still reading or after failing. |
+| 697 | 2026-09-15 | How were they fixed? | By telling the three states apart, in the wording already used elsewhere for a check that could not run. |
+| 698 | 2026-09-15 | Did widening the search flag much else? | About two dozen, and nearly all were fine: a list that renders no rows is not a claim that there is nothing. |
+| 699 | 2026-09-15 | So was the rule changed? | Yes -- it now requires the sentence as well as the empty default, since only a screen that says something can say something false. |
+| 700 | 2026-09-15 | Did that clear every false alarm? | No, three remain where a sentence belongs to a different query in the same file, and a file-wide search cannot tell which. |
+| 701 | 2026-09-15 | Were those silenced quietly? | No -- each is named with what was read and why, because a silent skip is how a check starts passing over what it was written for. |
+| 702 | 2026-09-15 | Did the wider reach get proved? | Yes -- one fixed sentence was put back and the check named a file it had been completely blind to. |
+| 703 | 2026-09-15 | Anything odd in the run? | One backend test failed once and passed on three further runs, which in a folder shared with another session is contention rather than a change here. |

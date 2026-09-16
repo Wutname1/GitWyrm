@@ -441,7 +441,17 @@ export function BranchManagerModal() {
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
             {visible.length === 0 && (
               <div className="grid min-h-48 place-items-center text-xs text-muted-foreground">
-                {query ? 'No branches match that.' : 'No branches yet.'}
+                {/* A search with no hits is a real absence and keeps its
+                    wording. An empty list without a search is not: it is
+                    equally "still reading" and "could not read", and only one
+                    of the three means there are none. */}
+                {query
+                  ? 'No branches match that.'
+                  : branches.isPending
+                    ? 'Looking for branches...'
+                    : branches.isError
+                      ? 'GitWyrm could not read this project’s branches.'
+                      : 'No branches yet.'}
               </div>
             )}
             {visible.length > 0 && (
