@@ -68,6 +68,17 @@ function DialogContent({
           // `will-change: transform, opacity` promotes the panel for the zoom +
           // fade. Both are compositor properties, but the large drop shadow on
           // a scaling box otherwise repaints every frame.
+          // Never taller than the window. The panel is centred with a -50%
+          // translate, so content taller than the viewport hangs off BOTH ends
+          // and the footer buttons leave the panel entirely - they render past
+          // its background, over the page behind, and can end up unreachable
+          // (GITWYRM-FRONTEND-15, the rebase/merge modal).
+          //
+          // Capped here rather than in each modal because the primitive is what
+          // centres the panel, so it is what knows the overflow can happen. Half
+          // the modals had already worked around it with their own max-h; those
+          // still win, since `className` is merged after this.
+          "max-h-[calc(100dvh-2rem)]",
           "fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border bg-modal text-modal-foreground p-6 shadow-lg shadow-black/60 duration-200 will-change-[transform,opacity] outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
           className
         )}

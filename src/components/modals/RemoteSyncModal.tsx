@@ -264,7 +264,12 @@ export function RemoteSyncModal() {
           </DialogTitle>
         </DialogHeader>
 
-        <div className="grid min-w-0 gap-2.5 px-4 py-3.5">
+        {/* Scrolls on its own so the footer buttons below stay put. A rebase or
+            merge preview grows with the branches involved, and on a short window
+            the whole panel used to grow with it and push the buttons out
+            (GITWYRM-FRONTEND-15). min-h-0 is load-bearing: without it a grid
+            child refuses to shrink below its content and never scrolls. */}
+        <div className="grid min-h-0 min-w-0 gap-2.5 overflow-y-auto px-4 py-3.5">
           {/* Direction. The chips say where commits end up, and Swap fixes a
               drag that went the wrong way without re-dragging. */}
           <div className="flex min-w-0 items-center gap-2.5 rounded-md border border-border bg-panel2 px-2.5 py-2">
