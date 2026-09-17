@@ -240,7 +240,8 @@ pub async fn agent_providers_refresh(
 ) -> Result<AgentProviderChoices, crate::error::AppError> {
     let root = crate::agentdesk::store::SessionStoreRoot::resolve(&app)
         .map_err(|e| crate::error::AppError::Other(e.to_string()))?;
-    tauri::async_runtime::spawn_blocking(|| {
+    let for_clear = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
         let added = crate::ai::agent::shell_path::rehydrate();
         crate::ai::agent::copilot_cli::forget_all_cached();
         // Refresh means "ask everything again". Leaving the model lists
@@ -251,12 +252,31 @@ pub async fn agent_providers_refresh(
         // everything again, and somebody who has just updated a tool should
         // not keep reading that a newer one is available.
         crate::ai::agent::tool_updates::forget_all_cached();
-        log::info!("agent refresh: {added} new PATH folders, cached probes dropped");
+        // And what was written down last run. The three calls above only
+        // reach what this process is holding, which the next launch does not
+        // inherit -- so without this the file survived, and the launch after
+        // a Refresh restored the very answer the person had just asked
+        // GitWyrm to forget. A button that appears to work and then undoes
+        // itself overnight is worse than one that does nothing.
+        if let Ok(app_data) = crate::settings::app_data_dir(&for_clear) {
+            crate::ai::agent::tool_memory::forget_all(&crate::ai::agent::tool_memory::memory_path(app_data));
+        }
+        log::info!("agent refresh: {added} new PATH folders, cached probes and saved answers dropped");
     })
     .await
     .map_err(|e| crate::error::AppError::Other(e.to_string()))?;
 
     let learned = resolve_learned().await;
+
+    // Write the fresh answer down, so the next launch opens on it rather than
+    // paying the wait again. Refresh is the one path that always asks, which
+    // makes it the best answer there is to remember.
+    {
+        let to_write = clone_learned(&learned);
+        let app = app.clone();
+        let _ = tauri::async_runtime::spawn_blocking(move || remember_learned(&app, &to_write)).await;
+    }
+
     tauri::async_runtime::spawn_blocking(move || AgentProviderChoices {
         providers: list(&learned),
         read_only: session_id

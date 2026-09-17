@@ -278,3 +278,11 @@ A: The tally as the headline and the first reason as the detail, since a bare "3
 | 718 | 2026-09-16 | Why not just auto-start those too? | Because a turn that keeps failing would loop on the same message forever. |
 | 719 | 2026-09-16 | So what changed? | A note in the chat saying the last turn ended before reading the message, and a toast that now says "when it finishes" rather than promising pickup either way. |
 | 720 | 2026-09-16 | Do the new tests catch the defect? | Yes -- reverting the gate fails one by name, and the revert was checked in the file before trusting the result. |
+| 721 | 2026-09-16 | Was the tool memory already built? | Yes -- persistence, the identity rule, the quiet re-check and the never-remember-a-failure rule all landed earlier, so this pass audited them rather than rebuilding them. |
+| 722 | 2026-09-16 | Did all of it hold up? | Four of the five parts did; the Refresh button did not. |
+| 723 | 2026-09-16 | What was wrong with Refresh? | It dropped what this run was holding but left the file alone, so the next launch restored the very answer the person had just asked GitWyrm to forget. |
+| 724 | 2026-09-16 | Why did that look fine? | Because within one run it works -- the answer really is asked again, and the button only undoes itself after a restart, which nobody connects back to the button. |
+| 725 | 2026-09-16 | Was there a second hole? | Yes -- Refresh never wrote its fresh answer down either, so the one path guaranteed to have asked everything was the one path that learnt nothing. |
+| 726 | 2026-09-16 | Does the new test catch it? | Yes -- stopping the clearing makes it fail by name, checked by actually reverting rather than assuming. |
+| 727 | 2026-09-16 | Anything else found? | Two stored test paths held a real tab character where a backslash was meant, from an escape that got eaten when the file was written. |
+| 728 | 2026-09-16 | Did that break anything? | No -- they are opaque fixture strings, so the test still proved its point while reading as nonsense; fixed so the next reader is not misled. |

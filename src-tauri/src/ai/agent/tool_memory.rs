@@ -164,6 +164,24 @@ pub fn save(path: &std::path::Path, memory: &Memory) {
     }
 }
 
+/// Throws away everything remembered, so the next run starts from nothing.
+///
+/// This is the other half of the Refresh button. Refresh already drops what is
+/// held in memory, but the file outlives the process, so leaving it alone
+/// meant the very next launch restored the answer the person had just asked
+/// GitWyrm to forget -- a button that appeared to work and then undid itself
+/// overnight.
+///
+/// A file that is already gone is a success: "there is nothing remembered" is
+/// what was asked for, and both routes arrive at it.
+pub fn forget_all(path: &std::path::Path) {
+    match std::fs::remove_file(path) {
+        Ok(()) => log::info!("tool memory: cleared {}", path.display()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => log::info!("tool memory: could not clear {}: {e}", path.display()),
+    }
+}
+
 /// Seconds since the epoch, clamped into `u32`.
 ///
 /// Only ever compared against itself to answer "how old is this", so the 2106
@@ -270,7 +288,7 @@ mod tests {
     /// from a `Live` catalog; this pins the shape that enforcement produces.
     #[test]
     fn an_entry_with_no_models_is_still_useful_for_its_release_check() {
-        let mut e = entry(r"C:	ools\codex.cmd", "codex-cli 0.154.0");
+        let mut e = entry(r"C:\tools\codex.cmd", "codex-cli 0.154.0");
         e.models.clear();
         let dir = tempfile::tempdir().expect("temp dir");
         let path = dir.path().join("tool-memory.json");
@@ -283,6 +301,36 @@ mod tests {
         // release looks like.
         assert!(back.tools["codex"].models.is_empty());
         assert_eq!(back.tools["codex"].latest_release.as_deref(), Some("0.154.0"));
+    }
+
+    /// The Refresh button's other half. Dropping only the in-memory caches
+    /// left the file behind, so the next launch restored the very answer the
+    /// person had just asked GitWyrm to forget.
+    #[test]
+    fn clearing_leaves_nothing_to_restore() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("tool-memory.json");
+        let mut m = Memory::current();
+        m.tools.insert("codex".into(), entry(r"C:\tools\codex.cmd", "codex-cli 0.154.0"));
+        save(&path, &m);
+        assert!(!load(&path).tools.is_empty(), "the entry must be there to be cleared");
+
+        forget_all(&path);
+
+        assert!(!path.exists(), "the file itself must be gone, not just emptied");
+        assert!(
+            load(&path).tools.is_empty(),
+            "a cleared memory must read as nothing remembered"
+        );
+    }
+
+    /// Clearing what is already clear is what was asked for, not a failure.
+    #[test]
+    fn clearing_nothing_is_not_a_failure() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("never-written.json");
+        forget_all(&path);
+        assert!(load(&path).tools.is_empty());
     }
 
     #[test]
