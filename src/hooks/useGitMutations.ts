@@ -666,13 +666,15 @@ export function useGitMutations(repoId: string | null) {
       /** Change id for the `Spec:` trailer; omitted when unlinked or removed. */
       specId?: string | null
     }) =>
-      unwrap(
-        await commands.createCommit(
-          id,
-          args.summary,
-          args.description,
-          args.amend ?? false,
-          args.specId ?? null,
+      timed('git.commit', async () =>
+        unwrap(
+          await commands.createCommit(
+            id,
+            args.summary,
+            args.description,
+            args.amend ?? false,
+            args.specId ?? null,
+          ),
         ),
       ),
     onSuccess: (sha, args) => {
@@ -708,7 +710,9 @@ export function useGitMutations(repoId: string | null) {
    */
   const deleteBranch = useMutation({
     mutationFn: async (name: string) => {
-      const outcome = unwrap(await commands.deleteBranch(id, name))
+      const outcome = await timed('git.deleteBranch', async () =>
+        unwrap(await commands.deleteBranch(id, name)),
+      )
       return { name, outcome }
     },
     onSuccess: ({ name, outcome }) => {
