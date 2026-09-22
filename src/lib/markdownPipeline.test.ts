@@ -14,7 +14,7 @@ import remarkParse from 'remark-parse'
 import remarkGfm from 'remark-gfm'
 import remarkRehype from 'remark-rehype'
 import rehypeStringify from 'rehype-stringify'
-import { REHYPE_PLUGINS } from './markdownPipeline'
+import { markdownLinkAction, REHYPE_PLUGINS } from './markdownPipeline'
 
 /** Render markdown the way the Markdown component does. */
 function render(markdown: string): string {
@@ -94,5 +94,59 @@ describe('markup that must not survive', () => {
     const html = render('<p style="position:fixed;inset:0;background:red">hi</p>')
     expect(html).not.toContain('style=')
     expect(html).toContain('hi')
+  })
+})
+
+describe('markdownLinkAction', () => {
+  const PR = 'https://github.com/owner/repo/pull/1'
+
+  it('sends an absolute link to the browser', () => {
+    expect(markdownLinkAction('https://example.com/docs', PR)).toEqual({
+      kind: 'external',
+      url: 'https://example.com/docs',
+    })
+  })
+
+  it('keeps an in-page fragment in the document', () => {
+    // These scroll within the body already on screen; handing them to the
+    // browser would open a second copy of the page for no reason.
+    expect(markdownLinkAction('#issuecomment-123', PR)).toEqual({ kind: 'inPage' })
+  })
+
+  it('resolves a host-relative link against the page it was written on', () => {
+    // GitHub writes these constantly. Dropping them would make cross-links
+    // between pull requests dead text.
+    expect(markdownLinkAction('/owner/repo/issues/7', PR)).toEqual({
+      kind: 'external',
+      url: 'https://github.com/owner/repo/issues/7',
+    })
+  })
+
+  it('ignores a relative link when there is no page to resolve it against', () => {
+    // Guessing a host is worse than doing nothing: it would send the user
+    // somewhere the text never pointed.
+    expect(markdownLinkAction('/owner/repo/issues/7')).toEqual({ kind: 'ignore' })
+  })
+
+  it('ignores an empty or whitespace href', () => {
+    expect(markdownLinkAction(undefined)).toEqual({ kind: 'ignore' })
+    expect(markdownLinkAction('   ', PR)).toEqual({ kind: 'ignore' })
+  })
+
+  it.each(['javascript:alert(1)', 'file:///C:/Windows/System32', 'data:text/html,<script>'])(
+    'refuses to open %s',
+    (href) => {
+      // The sanitizer strips these upstream, but this helper is the step that
+      // hands a string to the OS, so it carries its own lock. `new URL` parses
+      // all three without complaint, so nothing here is hypothetical.
+      expect(markdownLinkAction(href, PR)).toEqual({ kind: 'ignore' })
+    }
+  )
+
+  it('allows mailto, which PR bodies use for contact links', () => {
+    expect(markdownLinkAction('mailto:someone@example.com', PR)).toEqual({
+      kind: 'external',
+      url: 'mailto:someone@example.com',
+    })
   })
 })
