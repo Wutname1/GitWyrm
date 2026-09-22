@@ -56,7 +56,10 @@ const theme = EditorView.theme({
     lineHeight: '1.55',
     overflow: 'auto',
   },
-  '.cm-content': { padding: '8px 0' },
+  // The app body sets `user-select: none` for a native feel, and that
+  // inherits all the way down here. Reading a file usually ends with taking a
+  // piece of it somewhere else, so the text itself opts back in.
+  '.cm-content': { padding: '8px 0', userSelect: 'text' },
   '.cm-gutters': {
     backgroundColor: 'var(--gw-bg)',
     color: 'var(--gw-muted)',
@@ -77,7 +80,13 @@ const theme = EditorView.theme({
     backgroundColor: 'var(--gw-accent)',
     opacity: '0.28',
   },
-  '.cm-content ::selection': { backgroundColor: 'transparent' },
+  // The native highlight is what shows the selection here: this viewer does
+  // not load `drawSelection`, so the layer styled above is never painted and
+  // hiding `::selection` would leave dragging over the text with no feedback.
+  '.cm-content ::selection': {
+    backgroundColor: 'var(--gw-accent)',
+    opacity: '0.28',
+  },
 })
 
 export function CodeViewer({

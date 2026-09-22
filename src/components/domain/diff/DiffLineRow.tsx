@@ -33,7 +33,16 @@ export function DiffLineRow({
   const isHunk = line.sign === '@'
   return (
     <div
-      onClick={selectable ? (e) => onSelect?.(e.shiftKey) : undefined}
+      onClick={
+        selectable
+          ? (e) => {
+              // Finishing a drag over the code fires a click too. Selecting
+              // text to copy it should not also stage or unstage the line.
+              if (window.getSelection()?.isCollapsed === false) return
+              onSelect?.(e.shiftKey)
+            }
+          : undefined
+      }
       onContextMenu={onContextMenu}
       data-selected={selected ? '' : undefined}
       data-context-active={contextActive ? '' : undefined}
@@ -84,7 +93,14 @@ export function DiffLineRow({
       >
         {line.sign === '-' ? '-' : isHunk ? '' : line.sign}
       </span>
-      <span className={cn('pr-5', wrap ? 'min-w-0 whitespace-pre-wrap break-words' : 'whitespace-pre')}>
+      <span
+        className={cn(
+          // The gutters stay unselectable so a dragged copy comes out as code
+          // rather than code interleaved with line numbers and +/- signs.
+          'select-text pr-5',
+          wrap ? 'min-w-0 whitespace-pre-wrap break-words' : 'whitespace-pre'
+        )}
+      >
         {wordSpans
           ? wordSpans.map((span, i) =>
               span.changed ? (
