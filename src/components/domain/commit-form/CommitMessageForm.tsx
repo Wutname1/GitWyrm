@@ -410,17 +410,19 @@ export function CommitMessageForm() {
                 : "cursor-not-allowed",
             )}
           >
-            {amend ? (
-              <Pencil size={14} strokeWidth={2} />
-            ) : commitButtonMode === "commit_push" ? (
+            {commitButtonMode === "commit_push" ? (
               <Upload size={14} strokeWidth={2} />
+            ) : amend ? (
+              <Pencil size={14} strokeWidth={2} />
             ) : (
               <GitCommitHorizontal size={15} strokeWidth={2} />
             )}
             {pushPending
               ? "Pushing…"
               : amend
-                ? `Amend commit on ${currentBranch}`
+                ? commitButtonMode === "commit_push"
+                  ? `Amend & push to ${currentBranch}`
+                  : `Amend commit on ${currentBranch}`
                 : commitButtonMode === "commit_push"
                   ? `Commit & push to ${currentBranch}`
                   : `Commit ${plural(stagedCount, "file")} to ${currentBranch}`}
