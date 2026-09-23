@@ -514,25 +514,27 @@ fn init_sentry() -> Option<sentry::ClientInitGuard> {
     // investigation turned out to be unreachable: `SentryLogger` maps info! to a
     // breadcrumb, breadcrumbs only ride along on an error event from the same
     // process, and the user's bug report is submitted by the FRONTEND SDK -- so
-    // the backend's diagnostics never travelled with it. Two gates were off at
-    // once: the `logs` cargo feature, and this option. With either missing,
-    // `Client::capture_log` returns early and the record is dropped, not queued.
+    // the backend's diagnostics never travelled with it.
     //
     // Gated on `reports_diagnostics` (Full), not on error reporting: logs are a
     // per-record stream far chattier than events, and someone who opted into
-    // "report errors" did not ask to ship their activity. `before_send_log`
-    // scrubs on the way out, exactly as `before_send` does for events -- a log
-    // line embeds repo paths and provider error bodies just as readily.
-    let options = if level.reports_diagnostics() {
-        options
-            .enable_logs(true)
-            .before_send_log(|mut log: sentry::protocol::Log| {
-                log.body = scrub::scrub_text(&log.body);
-                Some(log)
-            })
-    } else {
-        options
-    };
+    // "report errors" did not ask to ship their activity.
+    //
+    // The gate lives in `before_send_log`, never in `enable_logs`. The SDK
+    // defaults `enable_logs` to true, and 0.49.3 deprecated it and stopped
+    // honoring it for manually captured logs, so leaving it unset at the lower
+    // level shipped every log line - unscrubbed, because the scrubber was only
+    // installed at Full. `before_send_log` runs on every log whatever the
+    // version, so it both drops them below Full and scrubs them at Full, exactly
+    // as `before_send` does for events.
+    let ship_logs = level.reports_diagnostics();
+    let options = options.before_send_log(move |mut log: sentry::protocol::Log| {
+        if !ship_logs {
+            return None;
+        }
+        log.body = scrub::scrub_text(&log.body);
+        Some(log)
+    });
 
     Some(sentry::init((SENTRY_DSN, options)))
 }
