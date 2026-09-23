@@ -25,7 +25,8 @@ interface Rule {
   /** Matches against the lowercased raw message. */
   match: (raw: string) => boolean
   severity: Severity
-  message: string
+  /** Fixed text, or built from the original (not lowercased) raw message. */
+  message: string | ((raw: string) => string)
 }
 
 /**
@@ -159,17 +160,40 @@ const RULES: Rule[] = [
       "The remote won't let you replace this branch - it's protected. Open a pull request instead, or ask a maintainer to allow the change.",
   },
   {
+    // GitHub refuses a push that adds or edits `.github/workflows/` when the
+    // token lacks the `workflow` scope. Sign-ins from before that scope was
+    // requested hit this; a fresh sign-in asks for it.
+    match: (r) => r.includes('without `workflow` scope'),
+    severity: 'warning',
+    message:
+      "GitHub won't let this sign-in change workflow files (in .github/workflows). Disconnect and reconnect GitHub in Settings > Integrations to allow it, then send again.",
+  },
+  {
     // Non-fast-forward: the cloud moved on since you last fetched. A plain push
     // is refused; the user needs to get those changes first or force past them.
+    // `[rejected]` is git's own refusal; `[remote rejected]` is the server's and
+    // says nothing about who is ahead, so it is handled below instead.
     match: (r) =>
       r.includes('stale info') ||
       r.includes('non-fast-forward') ||
       r.includes('fetch first') ||
-      r.includes('[rejected]') ||
-      r.includes('remote rejected'),
+      r.includes('[rejected]'),
     severity: 'warning',
     message:
       "The cloud has changes yours doesn't, so it turned down the push. Get those changes first, or force push to replace them.",
+  },
+  {
+    // The server accepted the upload and then refused the update: a hook, a
+    // repository rule, a missing permission. Pulling will not help, so pass on
+    // the server's own reason rather than guessing.
+    match: (r) => r.includes('[remote rejected]'),
+    severity: 'warning',
+    message: (raw) => {
+      const reason = /\[remote rejected\][^\n(]*\(([^\n]+)\)/i.exec(raw)?.[1]?.trim()
+      return reason
+        ? `The cloud refused this push. Its reason: ${reason}`
+        : 'The cloud refused this push. Check the repository settings on the host, then try again.'
+    },
   },
   {
     // Branch switch blocked purely by a moved submodule pointer.
@@ -300,7 +324,8 @@ export function classifyError(e: unknown): ClassifiedError {
 
   for (const rule of RULES) {
     if (rule.match(lower)) {
-      return { severity: rule.severity, message: rule.message, raw }
+      const message = typeof rule.message === 'function' ? rule.message(raw) : rule.message
+      return { severity: rule.severity, message, raw }
     }
   }
 

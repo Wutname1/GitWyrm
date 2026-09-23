@@ -25,8 +25,10 @@ const ERROR_KEYS: &[&str] = &["message", "errors"];
 
 impl GitHub {
     /// Scopes: `repo` covers reading and acting on PRs/issues in private and
-    /// public repos; `read:user` lets us show who is signed in.
-    pub const SCOPE: &'static str = "repo read:user";
+    /// public repos; `read:user` lets us show who is signed in. `workflow`
+    /// because the credential helper hands this token to git: without it GitHub
+    /// refuses any push that touches `.github/workflows/`.
+    pub const SCOPE: &'static str = "repo read:user workflow";
 
     fn request(
         &self,
@@ -109,7 +111,7 @@ impl HostProvider for GitHub {
     }
 
     fn required_scopes(&self) -> &'static [&'static str] {
-        &["repo", "read:user"]
+        &["repo", "read:user", "workflow"]
     }
 
     fn capabilities(&self) -> HostCapabilities {

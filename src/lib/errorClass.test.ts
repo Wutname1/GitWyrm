@@ -353,3 +353,32 @@ describe('a cloud branch name given to a local-only command', () => {
     expect(classifyError(new Error(raw)).severity).toBe('error')
   })
 })
+
+describe('a push the server refused after accepting it', () => {
+  // Verbatim from a HearthShelf-Mobile push, 2026-09-22.
+  const WORKFLOW =
+    'git push failed: ! [remote rejected] main -> main (refusing to allow an OAuth App to create or update workflow `.github/workflows/release.yml` without `workflow` scope)'
+
+  it('does not tell the user the cloud is ahead when it is not', () => {
+    expect(classifyError(new Error(WORKFLOW)).message).not.toMatch(/cloud has changes/i)
+  })
+
+  it('names the missing workflow permission and how to grant it', () => {
+    const { severity, message } = classifyError(new Error(WORKFLOW))
+    expect(severity).toBe('warning')
+    expect(message).toMatch(/workflow files/i)
+    expect(message).toMatch(/reconnect github/i)
+  })
+
+  it('passes on the server reason for other refusals', () => {
+    const raw = 'git push failed: ! [remote rejected] main -> main (pre-receive hook declined)'
+    const { severity, message } = classifyError(new Error(raw))
+    expect(severity).toBe('warning')
+    expect(message).toBe('The cloud refused this push. Its reason: pre-receive hook declined')
+  })
+
+  it('still reads a real non-fast-forward as the cloud being ahead', () => {
+    const raw = 'git push failed: ! [rejected]        main -> main (fetch first)'
+    expect(classifyError(new Error(raw)).message).toMatch(/cloud has changes/i)
+  })
+})
