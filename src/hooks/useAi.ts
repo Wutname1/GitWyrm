@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { commands } from '@/lib/bindings'
 import { isTauri } from '@/lib/env'
-import { keys, unwrap } from '@/lib/queryKeys'
+import { keys, trimLogToFirstPage, unwrap } from '@/lib/queryKeys'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 
 const catalogKey = ['ai-catalog'] as const
@@ -105,6 +105,11 @@ export function useAiMutations() {
       onSuccess: (_commits, v) => {
         qc.invalidateQueries({ queryKey: keys.status(v.repoId) })
         qc.invalidateQueries({ queryKey: keys.repoCounts(v.repoId) })
+        // Same trim the hand-written commit path does: without it a refresh of
+        // a deeply scrolled graph refetches every held page, and each page
+        // re-walks history from the start to reach its offset. New commits are
+        // at the top anyway, which is where this snaps back to.
+        trimLogToFirstPage(qc, v.repoId)
         qc.invalidateQueries({ queryKey: keys.logAll(v.repoId) })
         qc.invalidateQueries({ queryKey: keys.branches(v.repoId) })
         qc.invalidateQueries({ queryKey: keys.fileDiffAll(v.repoId) })
