@@ -319,7 +319,11 @@ describe('a host that was never connected', () => {
   it('points at Settings instead of repeating the backend sentence', () => {
     const { message } = classifyError(new Error(RAW))
     expect(message).toMatch(/not connected yet/i)
-    expect(message).toMatch(/Settings/i)
+    expect(message).toMatch(/Integrations/)
+  })
+
+  it('carries a button to the Integrations page', () => {
+    expect(classifyError(new Error(RAW)).fix?.section).toBe('integrations')
   })
 
   it('covers every host the helper phrases, not just GitHub', () => {
@@ -366,8 +370,22 @@ describe('a push the server refused after accepting it', () => {
   it('names the missing workflow permission and how to grant it', () => {
     const { severity, message } = classifyError(new Error(WORKFLOW))
     expect(severity).toBe('warning')
-    expect(message).toMatch(/workflow files/i)
+    expect(message).toMatch(/\.github\/workflows\/release\.yml/)
+    expect(message).toMatch(/not affected/i)
     expect(message).toMatch(/reconnect github/i)
+  })
+
+  it('takes the user to the GitHub account row to reconnect', () => {
+    expect(classifyError(new Error(WORKFLOW)).fix).toEqual({
+      label: 'Reconnect GitHub',
+      section: 'integrations',
+      settingId: 'github-connection',
+    })
+  })
+
+  it('offers no settings button for a refusal settings cannot fix', () => {
+    const raw = 'git push failed: ! [remote rejected] main -> main (pre-receive hook declined)'
+    expect(classifyError(new Error(raw)).fix).toBeUndefined()
   })
 
   it('passes on the server reason for other refusals', () => {

@@ -11,6 +11,7 @@ import { matchCommitToPr, type CommitPrMatch, type MatchableCommit } from '@/lib
 import { isTauri } from '@/lib/env'
 import { unwrap } from '@/lib/queryKeys'
 import { classifyError } from '@/lib/errorClass'
+import { showErrorToast } from '@/lib/errorToast'
 import { log } from '@/lib/log'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 
@@ -404,13 +405,12 @@ export function useGithubIssueDetail(
 }
 
 const onError = (e: Error) => {
-  const { severity, message, raw } = classifyError(e)
+  const classified = classifyError(e)
+  const { severity, raw } = classified
   log[severity === 'info' ? 'info' : severity === 'warning' ? 'warn' : 'error'](
     `github mutation failed [${severity}]: ${raw}`
   )
-  if (severity === 'info') toast.info(message)
-  else if (severity === 'warning') toast.warning(message)
-  else toast.error(message)
+  showErrorToast(classified)
 }
 
 export function useGithubMutations(

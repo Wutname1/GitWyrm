@@ -23,6 +23,7 @@ import { useHostResolver } from '@/hooks/useGitQueries'
 import { timed } from '@/lib/perfTrail'
 import { noteManualFetch } from '@/hooks/useAutoFetch'
 import { classifyError } from '@/lib/errorClass'
+import { showErrorToast } from '@/lib/errorToast'
 import { copyToClipboard } from '@/lib/clipboard'
 import { plural, shortSha } from '@/lib/gitDisplay'
 import { log } from '@/lib/log'
@@ -172,13 +173,12 @@ function invalidate(qc: QueryClient, repoId: string, which: QueryName[]) {
  * no-ops, warning for recoverable conflicts, error for real failures.
  */
 const onError = (e: Error) => {
-  const { severity, message, raw } = classifyError(e)
+  const classified = classifyError(e)
+  const { severity, raw } = classified
   log[severity === 'info' ? 'info' : severity === 'warning' ? 'warn' : 'error'](
     `mutation failed [${severity}]: ${raw}`
   )
-  if (severity === 'info') toast.info(message)
-  else if (severity === 'warning') toast.warning(message)
-  else toast.error(message)
+  showErrorToast(classified)
 }
 
 /**

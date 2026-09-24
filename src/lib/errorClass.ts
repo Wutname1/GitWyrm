@@ -11,7 +11,21 @@
  * sites pick the toast style from the severity instead of assuming `error`.
  */
 
+import type { SettingsSection } from '@/stores/uiStore'
+
 export type Severity = 'error' | 'warning' | 'info'
+
+/**
+ * Where the user goes to fix it, when that is a settings page. A message that
+ * says "go to Settings" without taking them there leaves them hunting.
+ */
+export interface ErrorFix {
+  /** Button label on the toast. */
+  label: string
+  section: SettingsSection
+  /** Settings search id of the row to scroll to and flash. */
+  settingId?: string
+}
 
 export interface ClassifiedError {
   severity: Severity
@@ -19,6 +33,7 @@ export interface ClassifiedError {
   message: string
   /** The original backend string, always kept for the log. */
   raw: string
+  fix?: ErrorFix
 }
 
 interface Rule {
@@ -27,7 +42,12 @@ interface Rule {
   severity: Severity
   /** Fixed text, or built from the original (not lowercased) raw message. */
   message: string | ((raw: string) => string)
+  fix?: ErrorFix
 }
+
+// No settingId: these rules cover every host, and flashing the GitHub row for
+// a GitLab remote would point at the wrong account.
+const CONNECT_ACCOUNT: ErrorFix = { label: 'Open Integrations', section: 'integrations' }
 
 /**
  * Ordered, most-specific first. The git2 `class=`/`code=` tail is the stable
@@ -163,10 +183,15 @@ const RULES: Rule[] = [
     // GitHub refuses a push that adds or edits `.github/workflows/` when the
     // token lacks the `workflow` scope. Sign-ins from before that scope was
     // requested hit this; a fresh sign-in asks for it.
+    // Name the file: GitHub only checks this when a push touches one, so without
+    // it the refusal reads as "you can't push" to someone who pushes elsewhere daily.
     match: (r) => r.includes('without `workflow` scope'),
     severity: 'warning',
-    message:
-      "GitHub won't let this sign-in change workflow files (in .github/workflows). Disconnect and reconnect GitHub in Settings > Integrations to allow it, then send again.",
+    message: (raw) => {
+      const file = /workflow `([^`]+)`/.exec(raw)?.[1] ?? 'a file in .github/workflows'
+      return `This push changes ${file}, a GitHub Actions file, and GitHub needs one extra permission for that. Pushes that don't touch these files are not affected. To grant it, disconnect and reconnect GitHub, then send again.`
+    },
+    fix: { label: 'Reconnect GitHub', section: 'integrations', settingId: 'github-connection' },
   },
   {
     // Non-fast-forward: the cloud moved on since you last fetched. A plain push
@@ -252,6 +277,7 @@ const RULES: Rule[] = [
     match: (r) => r.includes('sign-in needed for'),
     severity: 'warning',
     message: 'Connect your account for this remote, then try again.',
+    fix: CONNECT_ACCOUNT,
   },
   {
     // A host that has never been connected. Ahead of the generic auth rule
@@ -259,7 +285,8 @@ const RULES: Rule[] = [
     // the host (GitHub, GitLab, Bitbucket, Azure DevOps); say where to fix it.
     match: (r) => r.includes('not signed in to'),
     severity: 'warning',
-    message: 'That account is not connected yet. Add it in Settings, then try again.',
+    message: 'That account is not connected yet. Connect it in Integrations, then try again.',
+    fix: CONNECT_ACCOUNT,
   },
   {
     // A cloud branch name given to something that only works on the copy here.
@@ -325,7 +352,7 @@ export function classifyError(e: unknown): ClassifiedError {
   for (const rule of RULES) {
     if (rule.match(lower)) {
       const message = typeof rule.message === 'function' ? rule.message(raw) : rule.message
-      return { severity: rule.severity, message, raw }
+      return { severity: rule.severity, message, raw, fix: rule.fix }
     }
   }
 

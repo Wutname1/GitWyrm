@@ -52,6 +52,10 @@ const CDN_BASE: &str = "https://cdn.gitwyrm.com";
 // holds this bootstrapper, published under the same GitWyrm-Setup.exe name that
 // the website's download button points at -- pointing here at the root would make
 // the bootstrapper download and run itself.
+//
+// Nothing is stored at this path any more: a Cloudflare redirect rule sends it to
+// the fixed-name asset on the latest GitHub release. It stays pointed at the CDN so
+// bootstrappers already out in the wild keep working if that host ever changes.
 const INSTALLER_PATH: &str = "installers/latest";
 
 fn installer_filename() -> &'static str {
