@@ -9,10 +9,10 @@
 # client's 2-hourly poll into a billable invocation, which is exactly what this
 # layout avoids.
 #
-# The manifest is derived from the one tauri-action already produced for the
-# GitHub release, so the signatures are the real ones minisign generated at
-# build time. Only the download URLs are rewritten, to point at the immutable
-# per-version CDN copies the release job uploaded.
+# The manifest is copied from the GitHub release, after resolve-updater-urls.sh
+# has pointed it at the public releases/download URLs and verified them. The
+# signatures are the real ones minisign generated at build time, and the
+# installers themselves are served by GitHub, not stored on R2.
 #
 # Usage: publish-cdn-manifest.sh <channel> <tag>
 #   channel  stable | beta
@@ -25,7 +25,6 @@ CHANNEL="${1:?usage: publish-cdn-manifest.sh <channel> <tag>}"
 TAG="${2:?usage: publish-cdn-manifest.sh <channel> <tag>}"
 REPO="${GH_REPO:?GH_REPO must be set}"
 R2_ENDPOINT="${R2_ENDPOINT:?R2_ENDPOINT must be set}"
-CDN_BASE="${CDN_BASE:-https://cdn.gitwyrm.com}"
 BUCKET="${R2_BUCKET:-gitwyrm-cdn}"
 
 case "$CHANNEL" in
@@ -43,45 +42,39 @@ trap 'rm -rf "$workdir"' EXIT
 # the private key is only in the build job -- so this is copied, never rebuilt.
 gh release download "$TAG" --repo "$REPO" --pattern latest.json --dir "$workdir"
 
-# Rewrite each platform's URL to the immutable CDN copy of that arch's installer.
-# Python rather than jq because the platform keys carry an arch we have to map,
-# and a silent mismatch here ships a manifest that downloads the wrong binary.
-python3 - "$workdir/latest.json" "$CDN_BASE" "$TAG" <<'PY'
+# Check the manifest before any client can read it. Python rather than jq
+# because the platform keys carry an arch we have to map, and a silent mismatch
+# here ships a manifest that strands an architecture.
+python3 - "$workdir/latest.json" "$REPO" "$TAG" <<'PY'
 import json, sys
 
-path, cdn_base, tag = sys.argv[1], sys.argv[2], sys.argv[3]
+path, repo, tag = sys.argv[1], sys.argv[2], sys.argv[3]
 with open(path, encoding="utf-8") as fh:
     manifest = json.load(fh)
 
 # tauri keys platforms as "<os>-<arch>", optionally with the bundle type
 # appended: it emits BOTH "windows-x86_64" and "windows-x86_64-nsis" for the
 # same installer, same signature. Older updater clients look up the bare key and
-# newer ones prefer the qualified one, so both have to be rewritten -- dropping
-# either would leave half the clients pointed at a GitHub asset URL.
+# newer ones prefer the qualified one.
 #
-# Windows keys are matched with an optional installer suffix; Linux keys map
-# each package type explicitly. An unrecognised platform is still a hard error rather than a
-# pass-through, because a key silently left on its GitHub URL is the 0.0.3 bug
-# all over again.
-ARTIFACTS = {
-    "windows-x86_64": "GitWyrm-Setup.exe",
-    "windows-aarch64": "GitWyrm-Setup-ARM64.exe",
-    "linux-x86_64-appimage": "GitWyrm-x86_64.AppImage",
-    "linux-x86_64-deb": "GitWyrm-amd64.deb",
-    # Older updater clients and unqualified Linux installs use the AppImage.
-    "linux-x86_64": "GitWyrm-x86_64.AppImage",
+# An unrecognised platform is a hard error rather than a pass-through: a new
+# bundle type could well need its own handling on the client.
+KNOWN = {
+    "windows-x86_64",
+    "windows-aarch64",
+    "linux-x86_64-appimage",
+    "linux-x86_64-deb",
+    "linux-x86_64",
 }
-# Bundle types tauri may append. Anything else is unknown and must not be
-# guessed at: a new bundle type could well need a different installer name.
 BUNDLES = ("nsis", "msi")
 
 
 def arch_of(key):
-    """The artifact mapping key for this updater platform, if supported."""
-    if key in ARTIFACTS:
+    """The known platform this updater key maps to, if supported."""
+    if key in KNOWN:
         return key
     base, _, bundle = key.rpartition("-")
-    if bundle in BUNDLES and base in ARTIFACTS:
+    if bundle in BUNDLES and base in KNOWN:
         return base
     return None
 
@@ -90,14 +83,17 @@ platforms = manifest.get("platforms", {})
 if not platforms:
     sys.exit("::error::manifest has no platforms")
 
-for key in platforms:
-    arch = arch_of(key)
-    if arch is None:
-        sys.exit(f"::error::unmapped platform '{key}' - add it to ARTIFACTS")
-    url = f"{cdn_base}/releases/{tag}/{ARTIFACTS[arch]}"
-    platforms[key]["url"] = url
-    if not platforms[key].get("signature"):
+# The api.github.com asset URLs tauri-action writes serve JSON metadata rather
+# than the installer, which is the 0.0.3 bug. resolve-updater-urls.sh rewrites
+# them before this runs; this refuses to publish if that ever did not happen.
+public_base = f"https://github.com/{repo}/releases/download/{tag}/"
+for key, entry in platforms.items():
+    if arch_of(key) is None:
+        sys.exit(f"::error::unknown platform '{key}' - add it to KNOWN")
+    if not entry.get("signature"):
         sys.exit(f"::error::platform '{key}' has no signature")
+    if not entry.get("url", "").startswith(public_base):
+        sys.exit(f"::error::platform '{key}' url {entry.get('url')!r} is not a public download of {tag}")
 
 # Every arch we ship must be reachable under some key. A manifest that lost one
 # entirely would publish and quietly strand that architecture on the old

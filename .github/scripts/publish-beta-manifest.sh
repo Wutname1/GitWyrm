@@ -140,3 +140,18 @@ for file in GitWyrm-x86_64.AppImage GitWyrm-amd64.deb; do
 done
 
 echo "Beta channel now points at ${VERSION}"
+
+# Only the current beta is kept. beta.json no longer names any other build, and
+# betas land on every push to main, so keeping them grew the bucket by several
+# hundred MB per push. A tester whose download raced this delete just fails
+# that download (the updater verifies before installing anything) and picks up
+# the current beta at the next check. auto-beta runs are serialized, so no other
+# run is uploading into a directory this could remove.
+old_betas=$(aws s3 ls "s3://${BUCKET}/betas/" --endpoint-url "$R2_ENDPOINT" \
+  | awk '/PRE/ { sub(/\/$/, "", $2); print $2 }' || true)
+for old in $old_betas; do
+  if [ "$old" != "$VERSION" ]; then
+    echo "Removing superseded beta ${old}"
+    aws s3 rm "s3://${BUCKET}/betas/${old}/" --recursive --endpoint-url "$R2_ENDPOINT"
+  fi
+done

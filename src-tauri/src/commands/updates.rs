@@ -212,8 +212,9 @@ struct ChangelogResponse {
     entries: Vec<ChangelogEntry>,
 }
 
-/// Structured release notes, newest first.
-const CHANGELOG_URL: &str = "https://gitwyrm.com/api/v1/changelogs";
+/// Structured release notes, newest first. The API also holds other products'
+/// releases, so the product is named explicitly.
+const CHANGELOG_URL: &str = "https://gitwyrm.com/api/v1/changelogs?product=GitWyrm";
 
 /// Release notes for everything newer than the running build.
 ///
