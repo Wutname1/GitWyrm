@@ -5,11 +5,14 @@
 //! it never checks packages itself and never opens Mehen's database. The file
 //! is versioned; a format this code does not know is treated as absent.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
 use crate::error::AppError;
 use crate::state::RepoManager;
@@ -20,6 +23,12 @@ const STATUS_FORMAT: u32 = 1;
 const PUSH_WALK_LIMIT: usize = 500;
 /// Changed dependency files named in a push note.
 const PUSH_FILES_SHOWN: usize = 5;
+/// How old Mehen's last full check may get before GitWyrm starts a new one.
+const FULL_CHECK_AFTER: Duration = Duration::from_secs(12 * 60 * 60);
+/// Least time between two checks of one repository started by GitWyrm.
+const REPO_CHECK_GAP: Duration = Duration::from_secs(60);
+/// Sent when a check GitWyrm started has finished and the summary is new.
+pub const STATUS_CHANGED_EVENT: &str = "mehen-status-changed";
 
 // --- Mehen's file, as Mehen writes it -------------------------------------
 
@@ -29,6 +38,15 @@ struct StatusFile {
     format: u32,
     #[serde(default)]
     exe: Option<String>,
+    #[serde(default)]
+    written_at: u64,
+    /// When every watched folder was last checked; single-repo checks leave it.
+    #[serde(default)]
+    full_check_at: Option<u64>,
+    /// `exe` can check with no window. An older Mehen would open its window
+    /// instead, so background checks go only through a copy that says so.
+    #[serde(default)]
+    background_check: bool,
     #[serde(default)]
     repos: Vec<FileRepo>,
 }
@@ -343,14 +361,18 @@ pub async fn mehen_push_note(
 /// window forward and switches to the repository instead of starting again.
 #[tauri::command]
 #[specta::specta]
-pub async fn open_in_mehen(manager: State<'_, RepoManager>, repo_id: String) -> Result<(), AppError> {
+pub async fn open_in_mehen(manager: State<'_, RepoManager>, repo_id: String, fix: bool) -> Result<(), AppError> {
     let path = manager.get(&repo_id)?.path.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let status_exe = mehen_data_dir().and_then(|dir| read_status_file(&dir)).and_then(|f| f.exe);
         let exe = mehen_exe(status_exe.as_deref()).ok_or_else(|| AppError::Other("Mehen is not installed".into()))?;
-        let folder = path.to_string_lossy().trim_end_matches(['/', '\\']).to_string();
-        std::process::Command::new(exe)
-            .arg(folder)
+        let mut command = std::process::Command::new(exe);
+        command.arg(folder_arg(&path));
+        // Lands with this repository's security fixes already selected.
+        if fix {
+            command.arg("--fix");
+        }
+        command
             .spawn()
             .map(|_| ())
             .map_err(|e| AppError::Other(format!("Could not start Mehen: {e}")))
@@ -359,9 +381,194 @@ pub async fn open_in_mehen(manager: State<'_, RepoManager>, repo_id: String) -> 
     .map_err(|e| AppError::Other(e.to_string()))?
 }
 
+fn folder_arg(path: &Path) -> String {
+    path.to_string_lossy().trim_end_matches(['/', '\\']).to_string()
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// Starts one of Mehen's windowless checks at below-normal priority, and tells
+/// the UI when it is done so the new summary is read. Mehen takes its own
+/// lock, so a check already running (in the app or the daily task) simply
+/// makes this one a no-op.
+fn start_background_check(app: AppHandle, exe: PathBuf, only: Option<String>) -> Result<(), AppError> {
+    let mut command = std::process::Command::new(exe);
+    command.arg("--background-check");
+    if let Some(folder) = only {
+        command.arg("--only").arg(folder);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
+        command.creation_flags(BELOW_NORMAL_PRIORITY_CLASS | crate::git::shell::CREATE_NO_WINDOW);
+    }
+    let mut child = command.spawn().map_err(|e| AppError::Other(format!("Could not start Mehen: {e}")))?;
+    std::thread::spawn(move || {
+        let _ = child.wait();
+        let _ = app.emit(STATUS_CHANGED_EVENT, ());
+    });
+    Ok(())
+}
+
+/// When GitWyrm last started a full check, so a Mehen with nothing to check
+/// (no folders set up) is not asked again on every focus.
+static LAST_FULL_START: Mutex<Option<Instant>> = Mutex::new(None);
+
+/// The copy of Mehen that wrote the summary, when it can check with no window.
+/// Deliberately not the installed copy: that may be an older version.
+fn background_exe(file: &StatusFile) -> Option<PathBuf> {
+    let exe = PathBuf::from(file.exe.as_deref()?);
+    (file.background_check && exe.is_file()).then_some(exe)
+}
+
+/// Whether a full check is due: Mehen's last one (or, from an older Mehen, its
+/// last write) is more than [`FULL_CHECK_AFTER`] old, or there is none.
+fn full_check_due(file: Option<&StatusFile>, now: u64) -> bool {
+    let last = file.map(|f| f.full_check_at.unwrap_or(f.written_at)).unwrap_or(0);
+    now.saturating_sub(last) >= FULL_CHECK_AFTER.as_secs()
+}
+
+/// Keeps Mehen's answer fresh without anyone opening Mehen: when its last full
+/// check is more than 12 hours old, run one in the background. Called when
+/// GitWyrm starts and whenever its window comes back into focus. Returns
+/// whether a check was started.
+#[tauri::command]
+#[specta::specta]
+pub async fn mehen_refresh_if_stale(app: AppHandle) -> Result<bool, AppError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        // With no summary yet there is no copy of Mehen known to check
+        // quietly; opening Mehen once writes one.
+        let Some(file) = mehen_data_dir().and_then(|dir| read_status_file(&dir)) else {
+            return Ok(false);
+        };
+        let Some(exe) = background_exe(&file) else {
+            return Ok(false);
+        };
+        if !full_check_due(Some(&file), now_secs()) {
+            return Ok(false);
+        }
+        let mut last = LAST_FULL_START.lock().unwrap();
+        if last.is_some_and(|t| t.elapsed() < FULL_CHECK_AFTER) {
+            return Ok(false);
+        }
+        start_background_check(app, exe, None)?;
+        *last = Some(Instant::now());
+        Ok(true)
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// The commit each repository was on when last asked, by folder.
+static SEEN_HEAD: Mutex<Option<HashMap<PathBuf, git2::Oid>>> = Mutex::new(None);
+/// When GitWyrm last checked each repository, by folder.
+static LAST_REPO_START: Mutex<Option<HashMap<PathBuf, Instant>>> = Mutex::new(None);
+
+/// Whether moving from `from` to `to` changes any dependency file.
+fn dependencies_changed(repo: &git2::Repository, from: git2::Oid, to: git2::Oid) -> bool {
+    let tree = |oid| repo.find_commit(oid).and_then(|c| c.tree());
+    let (Ok(old), Ok(new)) = (tree(from), tree(to)) else { return false };
+    let Ok(diff) = repo.diff_tree_to_tree(Some(&old), Some(&new), None) else { return false };
+    diff.deltas().any(|d| {
+        d.new_file().path().or_else(|| d.old_file().path()).is_some_and(|p| is_dependency_file(&p.to_string_lossy()))
+    })
+}
+
+/// Checks just this repository in Mehen when the commit it is on moved (a
+/// pull, a merge, a branch switch) and the move changed its dependency files.
+/// The first call for a repository only remembers where it is. Repositories
+/// Mehen does not check are left alone. Returns whether a check was started.
+#[tauri::command]
+#[specta::specta]
+pub async fn mehen_repo_changed(
+    app: AppHandle,
+    manager: State<'_, RepoManager>,
+    repo_id: String,
+) -> Result<bool, AppError> {
+    let open = manager.get(&repo_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let changed = {
+            let repo = open.repo.lock().unwrap();
+            let Some(head) = repo.head().ok().and_then(|h| h.target()) else {
+                return Ok(false);
+            };
+            let before = SEEN_HEAD.lock().unwrap().get_or_insert_with(HashMap::new).insert(open.path.clone(), head);
+            before.is_some_and(|before| before != head && dependencies_changed(&repo, before, head))
+        };
+        if !changed {
+            return Ok(false);
+        }
+        let Some(file) = mehen_data_dir().and_then(|dir| read_status_file(&dir)) else {
+            return Ok(false);
+        };
+        let Some(exe) = background_exe(&file) else {
+            return Ok(false);
+        };
+        if find_repo(file, &open.path).is_none() {
+            return Ok(false);
+        }
+        let mut starts = LAST_REPO_START.lock().unwrap();
+        let starts = starts.get_or_insert_with(HashMap::new);
+        if starts.get(&open.path).is_some_and(|t| t.elapsed() < REPO_CHECK_GAP) {
+            return Ok(false);
+        }
+        start_background_check(app, exe, Some(folder_arg(&open.path)))?;
+        starts.insert(open.path.clone(), Instant::now());
+        Ok(true)
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn background_checks_only_go_through_a_mehen_that_supports_them() {
+        let exe = std::env::current_exe().unwrap().display().to_string();
+        let file = |background_check| StatusFile { format: 1, exe: Some(exe.clone()), written_at: 0, full_check_at: None, background_check, repos: Vec::new() };
+        assert!(background_exe(&file(true)).is_some());
+        assert!(background_exe(&file(false)).is_none(), "an older Mehen would open its window");
+    }
+
+    #[test]
+    fn a_full_check_is_due_after_twelve_hours() {
+        let now = 1_000_000;
+        let file = |full: Option<u64>, written: u64| StatusFile { format: 1, exe: None, written_at: written, full_check_at: full, background_check: true, repos: Vec::new() };
+        assert!(full_check_due(None, now), "Mehen has never written its summary");
+        assert!(!full_check_due(Some(&file(Some(now - 3600), now)), now));
+        assert!(full_check_due(Some(&file(Some(now - 13 * 3600), now)), now), "a recent single-repo check does not count");
+        assert!(!full_check_due(Some(&file(None, now - 3600)), now), "an older Mehen without the field falls back to its last write");
+    }
+
+    #[test]
+    fn notices_dependency_changes_between_two_commits() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        let commit = |files: &[(&str, &str)]| {
+            for (name, body) in files {
+                std::fs::write(dir.path().join(name), body).unwrap();
+            }
+            let mut index = repo.index().unwrap();
+            index.add_all(["*"], git2::IndexAddOption::DEFAULT, None).unwrap();
+            index.write().unwrap();
+            let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+            let parents: Vec<git2::Commit> = repo.head().ok().and_then(|h| h.peel_to_commit().ok()).into_iter().collect();
+            let refs: Vec<&git2::Commit> = parents.iter().collect();
+            repo.commit(Some("HEAD"), &sig, &sig, "c", &tree, &refs).unwrap()
+        };
+        let first = commit(&[("package.json", "{}"), ("README.md", "a")]);
+        let docs = commit(&[("README.md", "b")]);
+        let bump = commit(&[("package.json", "{\"a\":1}")]);
+        assert!(!dependencies_changed(&repo, first, docs));
+        assert!(dependencies_changed(&repo, docs, bump));
+        assert!(dependencies_changed(&repo, first, bump));
+    }
 
     #[test]
     fn recognizes_dependency_files_in_every_ecosystem_mehen_checks() {

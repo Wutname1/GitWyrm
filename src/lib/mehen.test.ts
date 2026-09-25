@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MehenPushNote } from './bindings'
-import { isMehenStale, pushNoteHint, pushNoteToast, unsafePackages } from './mehen'
+import { allFixKeys, fixKey, isMehenStale, newFixes, pushNoteHint, pushNoteToast, unsafePackages } from './mehen'
 
 const NOW = 1_800_000_000_000
 const hoursAgo = (h: number) => NOW / 1000 - h * 3600
@@ -39,5 +39,23 @@ describe('Mehen wording', () => {
     expect(pushNoteHint(note({ seen_by_mehen: false }), NOW)).toMatch(/before these changes\.$/)
     expect(pushNoteToast(note({ seen_by_mehen: false })).description).toContain('Check again in Mehen')
     expect(pushNoteToast(note()).description).toBe('Mehen says 2 packages have known security problems in this project.')
+  })
+})
+
+describe('new Mehen fixes', () => {
+  const problem = (name: string, fixed_in = '2.0.0') => ({ name, ecosystem: 'npm', version: '1.0.0', fixed_in, severity: 'HIGH', summary: '', url: '' })
+  const repo = (path: string, names: string[]) => ({ path, checked_at: 0, fixable: names.length, outdated: 0, problems: names.map((n) => problem(n)) })
+
+  it('announces only fixes it has not seen, in open repositories', () => {
+    const before = [repo('C:\\code\\a', ['old'])]
+    const seen = new Set(allFixKeys(before))
+    const after = [repo('C:\\code\\a', ['old', 'fresh']), repo('C:\\code\\closed', ['x'])]
+    const found = newFixes(after, ['c:/code/a'], seen)
+    expect(found.map((f) => [f.repo.path, f.count])).toEqual([['C:\\code\\a', 1]])
+    expect(newFixes(after, ['C:\\code\\a'], new Set(allFixKeys(after)))).toEqual([])
+  })
+
+  it('treats a newer fix version for the same package as new', () => {
+    expect(fixKey('C:\\code\\a', problem('p', '2.0.1'))).not.toBe(fixKey('C:\\code\\a', problem('p', '2.0.0')))
   })
 })

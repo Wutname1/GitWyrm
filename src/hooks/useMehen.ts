@@ -69,14 +69,15 @@ export function showPushNoteToast(repoId: string, note: MehenPushNote) {
   toast.info(title, {
     description,
     duration: 10000,
-    action: note.can_open ? { label: 'Open Mehen', onClick: () => void openInMehen(repoId) } : undefined,
+    action: note.can_open ? { label: 'Fix in Mehen', onClick: () => void openInMehen(repoId, true) } : undefined,
   })
 }
 
-export async function openInMehen(repoId: string) {
+/** With `fix`, Mehen opens with this repository's security fixes already selected. */
+export async function openInMehen(repoId: string, fix: boolean) {
   try {
-    unwrap(await commands.openInMehen(repoId))
-    toast('Opening this project in Mehen')
+    unwrap(await commands.openInMehen(repoId, fix))
+    toast(fix ? 'Opening Mehen with the fixes selected' : 'Opening this project in Mehen')
   } catch (error) {
     showErrorToast(classifyError(error))
   }

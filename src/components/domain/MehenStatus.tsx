@@ -116,7 +116,7 @@ export function MehenSegment() {
             </p>
           )}
           {canOpen ? (
-            <Button size="sm" className="self-start" onClick={() => void openInMehen(repo.id)}>
+            <Button size="sm" className="self-start" onClick={() => void openInMehen(repo.id, true)}>
               <img src={mehenMark} alt="" className="size-4" draggable={false} />
               Fix these in Mehen
             </Button>

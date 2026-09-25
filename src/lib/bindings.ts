@@ -211,9 +211,37 @@ async mehenPushNote(repoId: string) : Promise<Result<MehenPushNote | null, strin
  * Show this repository in Mehen. A Mehen that is already running brings its
  * window forward and switches to the repository instead of starting again.
  */
-async openInMehen(repoId: string) : Promise<Result<null, string>> {
+async openInMehen(repoId: string, fix: boolean) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("open_in_mehen", { repoId }) };
+    return { status: "ok", data: await TAURI_INVOKE("open_in_mehen", { repoId, fix }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Keeps Mehen's answer fresh without anyone opening Mehen: when its last full
+ * check is more than 12 hours old, run one in the background. Called when
+ * GitWyrm starts and whenever its window comes back into focus. Returns
+ * whether a check was started.
+ */
+async mehenRefreshIfStale() : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("mehen_refresh_if_stale") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Checks just this repository in Mehen when the commit it is on moved (a
+ * pull, a merge, a branch switch) and the move changed its dependency files.
+ * The first call for a repository only remembers where it is. Repositories
+ * Mehen does not check are left alone. Returns whether a check was started.
+ */
+async mehenRepoChanged(repoId: string) : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("mehen_repo_changed", { repoId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };

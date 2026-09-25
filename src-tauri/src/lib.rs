@@ -76,6 +76,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::mehen::mehen_overview,
             commands::mehen::mehen_push_note,
             commands::mehen::open_in_mehen,
+            commands::mehen::mehen_refresh_if_stale,
+            commands::mehen::mehen_repo_changed,
             commands::opencode::opencode_available,
             commands::openspec::openspec_recheck_cli,
             commands::openspec::openspec_draft_change,

@@ -5,6 +5,7 @@ import { MergeBanner } from '@/components/domain/MergeBanner'
 import { LeftPanel } from '@/components/domain/left-panel/LeftPanel'
 import { RightPanel } from '@/components/domain/RightPanel'
 import { StatusBar } from '@/components/domain/StatusBar'
+import { MehenSync } from '@/components/domain/MehenSync'
 import { GraphView, WIP_SHA } from '@/views/GraphView'
 import { DiffView } from '@/views/DiffView'
 import { SettingsView } from '@/views/SettingsView'
@@ -152,6 +153,7 @@ export function WorkspaceLayout() {
       {!inRepoPicker && <MergeBanner />}
       {centerBody}
       <StatusBar />
+      <MehenSync />
     </div>
   )
 

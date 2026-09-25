@@ -40,6 +40,8 @@ export const keys = {
   mehenPushNote: (repoId: string, branch: string | null, tip: string | null, ahead: number) =>
     ['mehenPushNote', repoId, branch, tip, ahead] as const,
   mehenPushNoteAll: (repoId: string) => ['mehenPushNote', repoId] as const,
+  /** Prefix: every repository's push note, refreshed when Mehen writes a new summary. */
+  mehenPushNoteEvery: () => ['mehenPushNote'] as const,
   specLink: (repoId: string, branch: string) => ['specLink', repoId, branch] as const,
   /** Prefix: every branch's spec link for one repo. */
   specLinkAll: (repoId: string) => ['specLink', repoId] as const,
