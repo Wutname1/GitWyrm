@@ -35,6 +35,11 @@ export const keys = {
     ['openspecHistory', repoId, changeId] as const,
   /** Prefix: every change's history for one repo. */
   openspecHistoryAll: (repoId: string) => ['openspecHistory', repoId] as const,
+  mehenOverview: () => ['mehenOverview'] as const,
+  /** Keyed on the checked-out branch's position, so it refreshes whenever what a push would send changes. */
+  mehenPushNote: (repoId: string, branch: string | null, tip: string | null, ahead: number) =>
+    ['mehenPushNote', repoId, branch, tip, ahead] as const,
+  mehenPushNoteAll: (repoId: string) => ['mehenPushNote', repoId] as const,
   specLink: (repoId: string, branch: string) => ['specLink', repoId, branch] as const,
   /** Prefix: every branch's spec link for one repo. */
   specLinkAll: (repoId: string) => ['specLink', repoId] as const,

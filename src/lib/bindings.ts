@@ -182,6 +182,44 @@ async openInOpencode(repoId: string, handoff: string) : Promise<Result<null, str
 }
 },
 /**
+ * What Mehen last found in every repository it checks, read in one go so
+ * every tab can show its own count. Nothing when Mehen has never written its
+ * summary (or is not installed).
+ */
+async mehenOverview() : Promise<Result<MehenOverview | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("mehen_overview") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * A note to show before and after pushing, when the push changes dependency
+ * files and Mehen found packages with fixable security problems in this repository.
+ * Nothing otherwise: the note never blocks a push and stays quiet by default.
+ */
+async mehenPushNote(repoId: string) : Promise<Result<MehenPushNote | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("mehen_push_note", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Show this repository in Mehen. A Mehen that is already running brings its
+ * window forward and switches to the repository instead of starting again.
+ */
+async openInMehen(repoId: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("open_in_mehen", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Whether opencode can be launched. Drives the Desk button's enabled state, so
  * the button is never offered when clicking it could only fail.
  * 
@@ -4025,6 +4063,68 @@ modified_ms: number;
  */
 active: boolean }
 export type LogPage = { commits: CommitEntry[]; has_more: boolean }
+/**
+ * What Mehen's last check found, for every repository it checks.
+ */
+export type MehenOverview = { 
+/**
+ * Whether Mehen can be opened from GitWyrm on this computer.
+ */
+can_open: boolean; repos: MehenRepoStatus[] }
+export type MehenProblem = { name: string; ecosystem: string; version: string | null; 
+/**
+ * The smallest version that fixes it.
+ */
+fixed_in: string; 
+/**
+ * `CRITICAL`, `HIGH`, `MODERATE` or `LOW`.
+ */
+severity: string | null; summary: string; url: string }
+/**
+ * A heads-up for a push that changes dependency files in a repository where
+ * Mehen found packages with security problems.
+ */
+export type MehenPushNote = { 
+/**
+ * Packages with a known security problem and a fix available.
+ */
+fixable: number; checked_at: number | null; 
+/**
+ * Mehen checked the repository after every one of these dependency
+ * changes was made, so its numbers include them.
+ */
+seen_by_mehen: boolean; 
+/**
+ * Dependency files the outgoing commits change; a few at most.
+ */
+files: string[]; can_open: boolean }
+/**
+ * What Mehen's last check found in one repository.
+ * 
+ * Only security problems that have a fix are passed on. A problem nobody can
+ * fix yet is not something to act on, so GitWyrm does not raise it.
+ */
+export type MehenRepoStatus = { 
+/**
+ * The repository's folder as Mehen spells it.
+ */
+path: string; 
+/**
+ * When Mehen last checked this repository, seconds since epoch.
+ */
+checked_at: number | null; 
+/**
+ * Packages with a known security problem and a fixed version to move to.
+ */
+fixable: number; 
+/**
+ * Packages with a newer version available.
+ */
+outdated: number; 
+/**
+ * Fixable problems, the most serious first; a few at most.
+ */
+problems: MehenProblem[] }
 /**
  * What a merge of a given ref into HEAD would do, without performing it.
  */

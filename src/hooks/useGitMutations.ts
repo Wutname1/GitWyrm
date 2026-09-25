@@ -22,6 +22,7 @@ import { beginGitOperation, keys, trimLogToFirstPage, unwrap } from '@/lib/query
 import { useHostResolver } from '@/hooks/useGitQueries'
 import { timed } from '@/lib/perfTrail'
 import { noteManualFetch } from '@/hooks/useAutoFetch'
+import { cachedPushNote, showPushNoteToast } from '@/hooks/useMehen'
 import { classifyError } from '@/lib/errorClass'
 import { showErrorToast } from '@/lib/errorToast'
 import { copyToClipboard } from '@/lib/clipboard'
@@ -1322,14 +1323,18 @@ export function useGitMutations(repoId: string | null) {
 
   const push = useMutation({
     mutationKey: syncKey(id, 'push'),
+    // Taken before the push: once it lands, the commits it describes are no
+    // longer outgoing and the note would be worked out as empty.
+    onMutate: () => ({ mehenNote: cachedPushNote(qc, id) }),
     mutationFn: async () =>
       asGitOperation(id, async () => timed('git.push', async () => unwrap(await commands.gitPush(id)))),
-    onSuccess: (result) => {
+    onSuccess: (result, _vars, context) => {
       // REMOTE_REFS, not REFS: a first push publishes the branch, so the
       // sidebar's Remotes section has a new remote branch to show. That list
       // comes from the remotes query, which plain REFS does not refresh.
       invalidate(qc, id, REMOTE_REFS)
       toast(describePush(result, hostOf(result.upstream)))
+      if (result.pushed > 0 && context?.mehenNote) showPushNoteToast(id, context.mehenNote)
       void handleTagsAfterPush()
     },
     onError,

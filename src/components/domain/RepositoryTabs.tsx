@@ -28,6 +28,7 @@ import {
   Plus,
   Save,
   Settings2,
+  ShieldAlert,
   Trash2,
   Ungroup,
   X,
@@ -50,6 +51,7 @@ import { arrangeTabs, bucketByRecency } from "@/lib/tabSorting";
 import { useTabStatusStore } from "@/stores/tabStatusStore";
 import { useUiStore } from "@/stores/uiStore";
 import { useBranches, useRepoTabStatus } from "@/hooks/useGitQueries";
+import { findMehenStatus, useMehenOverview } from "@/hooks/useMehen";
 import { useRepoGithubCounts } from "@/hooks/useGithub";
 import { useGitMutations } from "@/hooks/useGitMutations";
 import { branchSync } from "@/lib/branchActions";
@@ -659,10 +661,13 @@ function GroupStatusIcons({
  */
 function TabStatusIcons({
   repoId,
+  unsafe,
   collapsed,
   pulse,
 }: {
   repoId: string;
+  /** Packages Mehen found with a known security problem and a fix. */
+  unsafe: number;
   collapsed: boolean;
   pulse: boolean;
 }) {
@@ -673,6 +678,7 @@ function TabStatusIcons({
     ahead === 0 &&
     behind === 0 &&
     uncommitted === 0 &&
+    unsafe === 0 &&
     prs === 0 &&
     issues === 0
   )
@@ -714,6 +720,19 @@ function TabStatusIcons({
           count={uncommitted}
           color="var(--gw-amber)"
           label="uncommitted"
+          collapsed={collapsed}
+        />
+      )}
+      {unsafe > 0 && (
+        <StatusBadge
+          icon={<ShieldAlert size={11} strokeWidth={2.4} />}
+          count={unsafe}
+          color="var(--gw-red)"
+          label={
+            unsafe === 1
+              ? "package with a security problem Mehen can fix"
+              : "packages with security problems Mehen can fix"
+          }
           collapsed={collapsed}
         />
       )}
@@ -864,6 +883,7 @@ export function RepositoryTabs({
   const tabIconOnly = useWorkspaceStore((state) => state.tabIconOnly);
   const showTabPrCount = useWorkspaceStore((state) => state.showTabPrCount);
   const showTabIssueCount = useWorkspaceStore((state) => state.showTabIssueCount);
+  const mehenRepos = useMehenOverview().data?.repos;
   const verticalTabWidth = useWorkspaceStore((state) => state.verticalTabWidth);
   const tabGroups = useWorkspaceStore((state) => state.tabGroups);
   const tabOrder = useWorkspaceStore((state) => state.tabOrder);
@@ -1310,10 +1330,12 @@ export function RepositoryTabs({
     // Below the size that fits a numbered badge the status icons drop their
     // counts and pulse instead. Named vertical tabs always have room; horizontal
     // tabs collapse once the shared width budget squeezes them narrow.
+    const unsafe = findMehenStatus(mehenRepos, repo.path)?.fixable ?? 0;
     const statusNumbersMinWidth =
       STATUS_NUMBERS_MIN_WIDTH +
       (showTabPrCount ? EXTRA_BADGE_WIDTH : 0) +
-      (showTabIssueCount ? EXTRA_BADGE_WIDTH : 0);
+      (showTabIssueCount ? EXTRA_BADGE_WIDTH : 0) +
+      (unsafe > 0 ? EXTRA_BADGE_WIDTH : 0);
     const statusCollapsed = showName
       ? orientation === "horizontal" && horizontalWidth < statusNumbersMinWidth
       : true;
@@ -1501,6 +1523,7 @@ export function RepositoryTabs({
               <span className="ml-auto flex flex-none items-center gap-1.5">
                 <TabStatusIcons
                   repoId={repo.id}
+                  unsafe={unsafe}
                   collapsed={statusCollapsed}
                   pulse={statusCollapsed && !active}
                 />

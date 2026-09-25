@@ -11,6 +11,7 @@ pub mod file;
 pub mod github;
 pub mod gitignore;
 pub mod log;
+pub mod mehen;
 pub mod merge;
 pub mod opencode;
 pub mod openspec;
