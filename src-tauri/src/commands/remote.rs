@@ -512,6 +512,79 @@ fn run_with_stale_ref_retry(
     }
 }
 
+/// Why [`fetch_all_at`] could not bring a repository's remotes up to date.
+#[derive(Debug)]
+pub(crate) struct FetchFailure {
+    /// Plain-language reason, safe to show as is.
+    pub message: String,
+    /// The server wanted a sign-in that did not happen. Kept apart from other
+    /// failures so the caller can offer a retry that is allowed to prompt.
+    pub needs_sign_in: bool,
+}
+
+/// Fetch every remote of the repository at `path`, without streaming progress.
+///
+/// For work that runs over many repositories at once, most of them not open,
+/// where per-line progress would flood the webview and has no tab to land in.
+/// `Attended::Background` never opens a login window. Shares the stale
+/// tracking-ref recovery and the failure wording with the streaming path.
+pub(crate) fn fetch_all_at(path: &str, attended: Attended) -> Result<(), FetchFailure> {
+    let run = || {
+        let cred = crate::git::shell::credential_args(attended);
+        let mut args: Vec<&str> = cred.iter().map(String::as_str).collect();
+        args.extend_from_slice(&["fetch", "--all", "--prune"]);
+        match attended {
+            Attended::Background => crate::git::shell::run_git_unattended(Some(path), &args),
+            Attended::User => crate::git::shell::run_git(Some(path), &args),
+        }
+    };
+
+    let result = match run() {
+        Err(e) => match stale_remote_ref(&e.to_string()) {
+            Some(stale) => {
+                log::warn!("update-all fetch blocked by stale tracking ref {stale}; clearing it");
+                crate::git::shell::run_git(Some(path), &["update-ref", "-d", &stale])
+                    .and_then(|_| run())
+            }
+            None => Err(e),
+        },
+        ok => ok,
+    };
+
+    result.map(|_| ()).map_err(|e| {
+        let raw = e.to_string();
+        // run_git reports `git <first arg> failed: <stderr>`, and the first
+        // argument here is a `-c` override, so keep only what git printed.
+        let stderr = raw.split_once("failed: ").map(|(_, r)| r).unwrap_or(&raw);
+        let lines: Vec<String> = stderr
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(str::to_string)
+            .collect();
+        let detail = failure_detail(&lines, "");
+        let low = stderr.to_lowercase();
+        let needs_sign_in = low.contains("could not read username")
+            || low.contains("could not read password")
+            || low.contains("terminal prompts disabled")
+            || low.contains("authentication failed")
+            || low.contains("permission denied (publickey)");
+        let message = humanize_credential_failure(&detail, &lines).unwrap_or_else(|| {
+            if needs_sign_in {
+                "The server wants you to sign in before it will send anything.".to_string()
+            } else if low.contains("could not resolve host") || low.contains("unable to access") {
+                "Could not reach the server. Check your internet or VPN connection.".to_string()
+            } else {
+                detail
+            }
+        });
+        FetchFailure {
+            message,
+            needs_sign_in,
+        }
+    })
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn git_pull(

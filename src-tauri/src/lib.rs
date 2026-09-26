@@ -223,6 +223,10 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::remote::git_push,
             commands::remote::git_push_branch,
             commands::remote::git_pull_branch,
+            commands::update_all::pull_branches,
+            commands::update_all::update_all_start,
+            commands::update_all::update_all_cancel,
+            commands::update_all::update_all_state,
             commands::remote::set_branch_upstream,
             commands::remote::git_push_force,
             commands::remote::git_rebase,
@@ -829,6 +833,7 @@ pub fn run() {
         .manage(crate::airun::SessionRegistry::new())
         .manage(commands::airun::DriverRegistry::default())
         .manage(RepoManager::default())
+        .manage(commands::update_all::UpdateAllJobs::default())
         .manage(WatcherRegistry::default())
         .manage(commands::updates::PendingUpdate::default())
         .invoke_handler(builder.invoke_handler())

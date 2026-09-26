@@ -865,7 +865,7 @@ pub async fn fast_forward_branch(
 
 /// Shared core for [`fast_forward_branch`], split out so it can be tested
 /// without a running app.
-fn fast_forward_branch_to(
+pub(crate) fn fast_forward_branch_to(
     repo: &mut git2::Repository,
     repo_path: &str,
     branch: &str,

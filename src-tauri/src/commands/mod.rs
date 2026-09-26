@@ -30,6 +30,7 @@ pub mod stash;
 pub mod status;
 pub mod submodule;
 pub mod tutorial;
+pub mod update_all;
 pub mod updates;
 pub mod worktree;
 

@@ -94,6 +94,7 @@ import {
   type SavedTabGroup,
 } from "@/stores/workspaceStore";
 import { CodeFoldersSetting } from "@/components/domain/settings/CodeFoldersSetting";
+import { UpdateAllFoldersButton } from "@/components/domain/UpdateAllButton";
 
 interface GitProgressPayload {
   operation: string;
@@ -2656,6 +2657,7 @@ function RepoPickerPanel({
                         Show all folders
                       </Button>
                     )}
+                    <UpdateAllFoldersButton />
                     <TooltipButton
                       tooltip="Look for new repositories"
                       onClick={() => {

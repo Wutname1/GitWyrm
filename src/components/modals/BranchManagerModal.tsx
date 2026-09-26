@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactElement, type ReactNode } from 'react'
-import { ArrowDown, ArrowUp, ChevronDown, Cloud, CloudOff, Eye, EyeOff, GitBranch, Lock, Monitor, Search, Sparkles } from 'lucide-react'
+import { ArrowDown, ArrowDownToLine, ArrowUp, ChevronDown, Cloud, CloudOff, Eye, EyeOff, GitBranch, Lock, Monitor, Search, Sparkles } from 'lucide-react'
 import { toast } from 'sonner'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -350,6 +350,8 @@ export function BranchManagerModal() {
     m.pullBranchesMany.mutate(pullable)
   }
 
+  const doPullAll = () => m.pullBranchesMany.mutate(null)
+
   const doSend = () => {
     if (sendable.length === 0) return
     m.pushBranchesMany.mutate(sendable)
@@ -422,6 +424,18 @@ export function BranchManagerModal() {
             >
               {allSelected ? 'Clear selection' : 'Select shown'}
             </Button>
+            <TooltipHint label="Check every server once, then bring each branch that is behind up to date. Branches with their own new work are left alone.">
+              <Button
+                variant="secondary"
+                size="sm"
+                className="h-8 text-2xs"
+                onClick={doPullAll}
+                disabled={busy || !repo}
+              >
+                <ArrowDownToLine aria-hidden size={13} />
+                {m.pullBranchesMany.isPending ? 'Getting the latest…' : 'Get latest for all branches'}
+              </Button>
+            </TooltipHint>
             {hasGraphFilter && repo && (
               <Button
                 variant="ghost"

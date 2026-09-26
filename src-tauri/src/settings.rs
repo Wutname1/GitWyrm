@@ -388,6 +388,10 @@ pub struct Settings {
     /// remote branches are current without the user asking. On by default.
     #[serde(default = "default_auto_fetch")]
     pub auto_fetch: bool,
+    /// Get the latest for every project in the code folders each time the app
+    /// opens. Off by default: it reaches every server the user has a project on.
+    #[serde(default)]
+    pub update_all_on_start: bool,
     /// Fall back to the GitHub CLI when an organization blocks GitWyrm's own
     /// sign-in. On by default: the alternative is an empty pull request panel
     /// the user has no way to fix from inside the app.
@@ -793,6 +797,7 @@ impl Default for Settings {
             openspec_delete_without_asking: false,
             restore_tabs: true,
             auto_fetch: true,
+            update_all_on_start: false,
             gh_cli_fallback: true,
             show_tips: true,
             // No stored choice; resolved per build by `telemetry_level_for`.

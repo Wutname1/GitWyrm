@@ -795,6 +795,8 @@ interface WorkspaceState {
   restoreTabs: boolean;
   /** Fetch open repositories in the background to keep remote state current (persisted). */
   autoFetch: boolean;
+  /** Get the latest for every project in the code folders when the app opens (persisted). */
+  updateAllOnStart: boolean;
   /**
    * Use the GitHub CLI when an organization blocks GitWyrm's own sign-in
    * (persisted). On by default; off means those repositories show nothing.
@@ -1002,6 +1004,7 @@ interface WorkspaceState {
   setWorktreeBranchDeleteOnRemote: (on: boolean) => void;
   setRestoreTabs: (enabled: boolean) => void;
   setAutoFetch: (enabled: boolean) => void;
+  setUpdateAllOnStart: (enabled: boolean) => void;
   setGhCliFallback: (enabled: boolean) => void;
   setShowTips: (enabled: boolean) => void;
   setTelemetryLevel: (level: TelemetryLevel) => void;
@@ -1215,6 +1218,7 @@ function toSettings(s: WorkspaceState): Settings {
     restore_tabs: s.restoreTabs,
     show_tips: s.showTips,
     auto_fetch: s.autoFetch,
+    update_all_on_start: s.updateAllOnStart,
     gh_cli_fallback: s.ghCliFallback,
     telemetry_level: s.telemetryLevel,
     onboarding_seen: s.onboardingSeen,
@@ -1555,6 +1559,7 @@ export const SETTINGS_DEFAULTS = {
   worktreeBranchDeleteOnRemote: false,
   restoreTabs: true,
   autoFetch: true,
+  updateAllOnStart: false,
   ghCliFallback: true,
   showTips: true,
   // Deliberately outside the per-screen "behavior" group below: a privacy
@@ -1627,6 +1632,7 @@ export const SETTINGS_GROUPS = {
   behavior: [
     "restoreTabs",
     "autoFetch",
+    "updateAllOnStart",
     "ghCliFallback",
     "showTips",
     "discardResetsSubmodules",
@@ -1719,6 +1725,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   worktreeBranchDeleteOnRemote: false,
   restoreTabs: true,
   autoFetch: true,
+  updateAllOnStart: false,
   ghCliFallback: true,
   showTips: true,
   telemetryLevel: null,
@@ -2268,6 +2275,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   setAutoFetch: (enabled) => {
     set({ autoFetch: enabled });
+    schedulePersist();
+  },
+  setUpdateAllOnStart: (enabled) => {
+    set({ updateAllOnStart: enabled });
     schedulePersist();
   },
   setGhCliFallback: (enabled) => {
@@ -3166,6 +3177,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
           settings.worktree_branch_delete_on_remote === true,
         restoreTabs: settings.restore_tabs ?? true,
         autoFetch: settings.auto_fetch ?? true,
+        updateAllOnStart: settings.update_all_on_start === true,
         ghCliFallback: settings.gh_cli_fallback ?? true,
         // Absent means on: a settings file written before this flag existed
         // belongs to someone who has been seeing the tips all along, so hiding

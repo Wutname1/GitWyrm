@@ -2066,6 +2066,61 @@ async gitPullBranch(repoId: string, branch: string) : Promise<Result<PullResult,
 }
 },
 /**
+ * Update several branches of one open repository with a single fetch.
+ * 
+ * `branches` of `None` means every branch that tracks a remote. The user is
+ * looking at this repository, so the checked-out branch may have its changes
+ * set aside and put back, the same as a plain pull.
+ */
+async pullBranches(repoId: string, branches: string[] | null) : Promise<Result<RepoUpdate, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("pull_branches", { repoId, branches }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Start updating every repository the request names, in the background.
+ * 
+ * Returns at once with the job number. Progress arrives as
+ * `update-all-progress` events and the final report as `update-all-finished`;
+ * [`update_all_state`] answers the same questions for a window that was not
+ * listening. Only one job runs at a time.
+ */
+async updateAllStart(request: UpdateAllRequest) : Promise<Result<number, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_all_start", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Ask the running job to stop. Repositories already being fetched finish;
+ * the rest are reported as skipped.
+ */
+async updateAllCancel() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_all_cancel") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * The running job's progress and the last finished report, for a view that
+ * mounts after the events it would have heard.
+ */
+async updateAllState() : Promise<Result<UpdateAllState, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_all_state") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Link a local branch to a remote branch of the same name, so push and pull
  * know where it belongs. Used to repair a branch whose remote branch was
  * deleted; publishing a brand-new branch happens through `git_push_branch`.
@@ -3429,6 +3484,46 @@ export type BranchSwitchMode =
  * Refuse to switch while the working tree is dirty.
  */
 "refuse"
+export type BranchUpdate = { name: string; kind: BranchUpdateKind; 
+/**
+ * Commits it received, or for a branch left alone, how many were waiting.
+ */
+commits: number; message: string | null }
+/**
+ * What happened to one branch.
+ */
+export type BranchUpdateKind = 
+/**
+ * Moved forward to match the server.
+ */
+"updated" | 
+/**
+ * Checked out with uncommitted changes, and setting them aside was not
+ * allowed for this repository. Left where it was.
+ */
+"changes_in_the_way" | 
+/**
+ * Moved forward, but the changes set aside for it did not go back cleanly.
+ * They are kept in a stash and the working tree needs attention.
+ */
+"changes_clashed" | 
+/**
+ * Has its own commits as well as new ones on the server. Combining them is
+ * a merge or rebase, which is never done in bulk.
+ */
+"both_changed" | 
+/**
+ * Checked out in another worktree, which would have to move with it.
+ */
+"open_elsewhere" | 
+/**
+ * Its copy on the server was deleted.
+ */
+"server_copy_gone" | 
+/**
+ * Something else went wrong; see the message.
+ */
+"failed"
 export type BuildInfo = { version: string; build_date: string; git_hash: string; debug: boolean; arch: string }
 /**
  * The maximize button's bounds, in CSS pixels relative to the client area.
@@ -4665,6 +4760,40 @@ issues: number | null;
  * counts are from whatever was already on disk.
  */
 fetched: boolean }
+export type RepoUpdate = { name: string; path: string; level: RepoUpdateLevel; 
+/**
+ * A problem with the repository as a whole (could not fetch, mid-merge).
+ */
+message: string | null; 
+/**
+ * The fetch failed for want of a sign-in. A retry that may prompt can fix it.
+ */
+needs_sign_in: boolean; 
+/**
+ * The checked-out branch was skipped because of uncommitted changes. A
+ * retry that is allowed to set them aside can fix it.
+ */
+changes_in_the_way: boolean; 
+/**
+ * Total commits received across every branch that moved.
+ */
+commits_received: number; 
+/**
+ * Branches worth mentioning: moved, or left alone for a reason.
+ */
+branches: BranchUpdate[]; 
+/**
+ * Branches that already matched the server.
+ */
+up_to_date: number; 
+/**
+ * Never started because the job was stopped first.
+ */
+skipped: boolean }
+/**
+ * The worst thing that happened in one repository, used to order results.
+ */
+export type RepoUpdateLevel = "error" | "warning" | "updated" | "unchanged"
 export type RepositoryStarter = "blank" | "node" | "rust" | "csharp" | "all_in_one"
 /**
  * How far a reset rewinds: ref only, ref+index, or ref+index+working tree.
@@ -5087,6 +5216,11 @@ restore_tabs?: boolean;
  * remote branches are current without the user asking. On by default.
  */
 auto_fetch?: boolean; 
+/**
+ * Get the latest for every project in the code folders each time the app
+ * opens. Off by default: it reaches every server the user has a project on.
+ */
+update_all_on_start?: boolean; 
 /**
  * Fall back to the GitHub CLI when an organization blocks GitWyrm's own
  * sign-in. On by default: the alternative is an empty pull request panel
@@ -5915,6 +6049,36 @@ export type UnpushedTag = { name: string; target_sha: string;
  * ref, so pushing the tag alone will succeed.
  */
 commit_on_remote: boolean }
+export type UpdateAllProgress = { job: number; total: number; done: number; 
+/**
+ * Paths of the repositories being worked on right now.
+ */
+running: string[]; branches_updated: number; commits_received: number; errors: number; warnings: number; stopping: boolean }
+export type UpdateAllReport = { job: number; 
+/**
+ * Seconds since the epoch.
+ */
+started_at: number; finished_at: number; cancelled: boolean; repos: RepoUpdate[] }
+export type UpdateAllRequest = { 
+/**
+ * Code folders; every repository directly inside each one is included.
+ */
+folders: string[]; 
+/**
+ * Individual repositories to include as well (open tabs, or a retry list).
+ */
+paths: string[]; 
+/**
+ * Repositories whose checked-out branch may have its uncommitted changes
+ * set aside and put back while it moves.
+ */
+allow_set_aside: string[]; 
+/**
+ * Let git show a sign-in window. Runs one repository at a time so windows
+ * never stack up.
+ */
+sign_in: boolean }
+export type UpdateAllState = { running: UpdateAllProgress | null; last: UpdateAllReport | null }
 export type UpdateChannel = "stable" | "beta"
 /**
  * Whether this installation can replace itself with the updater artifact.

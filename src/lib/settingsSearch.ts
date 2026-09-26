@@ -154,6 +154,13 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     keywords: ['fetch', 'remote', 'background', 'automatic', 'refresh', 'ahead', 'behind'],
   },
   {
+    id: 'update-all-on-start',
+    section: 'behavior',
+    label: 'Get the latest for all projects',
+    hint: 'When GitWyrm opens, bring every project in your code folders up to date with its server.',
+    keywords: ['pull', 'all', 'everything', 'update', 'startup', 'latest', 'branches', 'repositories', 'projects'],
+  },
+  {
     id: 'show-tips',
     section: 'behavior',
     label: 'Tips',

@@ -23,6 +23,7 @@ import {
 import { toast } from "sonner";
 import { WindowControls } from "@/components/domain/WindowControls";
 import { RepositoryTabs } from "@/components/domain/RepositoryTabs";
+import { UpdateAllButton } from "@/components/domain/UpdateAllButton";
 import {
   onTitleBarDoubleClick,
   onTitleBarMouseDown,
@@ -594,6 +595,7 @@ export function TabBar() {
           </div>
           <div data-tauri-drag-region className="min-w-0 flex-1" />
           {tabLayout === "horizontal" && <VerticalTabsButton />}
+          <UpdateAllButton />
           <SettingsButton />
           <WindowControls />
         </div>
@@ -627,6 +629,7 @@ export function TabBar() {
       <OpenRepositoryButton />
       <div data-tauri-drag-region className="min-w-3 flex-none" />
       <VerticalTabsButton />
+      <UpdateAllButton />
       <SettingsButton />
       <WindowControls />
     </div>

@@ -31,6 +31,7 @@ import { log } from '@/lib/log'
 import { removeOutcomeMessage } from '@/lib/worktreeCopy'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useUiStore } from '@/stores/uiStore'
+import { showRepoUpdateResult } from '@/stores/updateAllStore'
 
 type QueryName =
   | 'status'
@@ -165,6 +166,15 @@ function invalidate(qc: QueryClient, repoId: string, which: QueryName[]) {
   if (which.includes('status') || which.includes('branches') || which.includes('log')) {
     qc.invalidateQueries({ queryKey: keys.repoCounts(repoId) })
   }
+}
+
+/**
+ * Refresh everything a "get latest" can move in an open repository: branches
+ * and remote refs, the working tree (when the checked-out branch moved), and
+ * stashes (when changes were set aside and kept).
+ */
+export function refreshAfterBranchUpdate(qc: QueryClient, repoId: string) {
+  invalidate(qc, repoId, [...REMOTE_REFS, 'status', 'stashes', 'submodules'])
 }
 
 /**
@@ -815,39 +825,20 @@ export function useGitMutations(repoId: string | null) {
   })
 
   /**
-   * Bring several branches up to date without checking them out.
+   * Bring branches up to date with one trip to the server: fetch every
+   * remote, then move each branch that is only behind. `null` means every
+   * branch that tracks a remote.
    *
-   * Only fast-forwards, the same as the single-branch action -- a branch with
-   * its own commits needs a real merge and is reported rather than forced.
+   * Only fast-forwards -- a branch with its own commits needs a real merge and
+   * is reported rather than forced. The checked-out branch moves too, with any
+   * unsaved changes set aside and put back, the same as a plain pull.
    */
   const pullBranchesMany = useMutation({
-    mutationFn: (branches: string[]) =>
-      asGitOperation(id, async () => {
-        const updated: string[] = []
-        const failed: { name: string; reason: string }[] = []
-        for (const branch of branches) {
-          try {
-            await unwrap(await commands.gitPullBranch(id, branch))
-            updated.push(branch)
-          } catch (e) {
-            failed.push({ name: branch, reason: (e as Error).message })
-            logQuietFailure(e as Error)
-          }
-        }
-        return { updated, failed, total: branches.length }
-      }),
-    onSuccess: (r) => {
-      if (r.failed.length === 0) {
-        toast(`Updated ${plural(r.updated.length, 'branch')}`)
-        return
-      }
-      toast.warning(
-        `Updated ${plural(r.updated.length, 'branch')}; ${r.failed.length} could not be updated`,
-        { description: r.failed.slice(0, 3).map((f) => `${f.name}: ${f.reason}`).join(' · ') }
-      )
-    },
+    mutationFn: (branches: string[] | null) =>
+      asGitOperation(id, async () => unwrap(await commands.pullBranches(id, branches))),
+    onSuccess: (report) => showRepoUpdateResult(report),
     onError,
-    onSettled: () => invalidate(qc, id, [...REFS, 'status']),
+    onSettled: () => refreshAfterBranchUpdate(qc, id),
   })
 
   /**
