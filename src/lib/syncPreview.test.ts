@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { armTop, dotCount, modeCopy, modesFor, pullNeedsChoice, stackedLane } from './syncPreview'
+import {
+  armTop,
+  dotCount,
+  initialMode,
+  modeCopy,
+  modesFor,
+  pullNeedsChoice,
+  shownModes,
+  stackedLane,
+} from './syncPreview'
 
 describe('modesFor', () => {
   it('offers the real three-way choice when both sides moved', () => {
@@ -146,5 +155,57 @@ describe('a drop between two local branches', () => {
   it('leaves the cloud wording alone when no names are given', () => {
     expect(modeCopy('send', { ours: 22, theirs: 0 }).action).toBe('Send 22 changes up')
     expect(modeCopy('get', { ours: 0, theirs: 1 }).action).toBe('Get 1 change')
+  })
+})
+
+describe('shownModes', () => {
+  // origin/master into a checked-out master that tracks something else.
+  const remoteIntoHead = { kind: 'branches' as const, canReset: true, sourceIsRemote: true }
+
+  /**
+   * Replace force-pushes the checked-out branch to ITS upstream. When the pair
+   * on screen is not that upstream, it would overwrite a server branch the
+   * user never saw.
+   */
+  it('never offers replace for a pair that is not a branch and its upstream', () => {
+    expect(shownModes({ ours: 1, theirs: 23 }, remoteIntoHead)).toEqual(['blend', 'stack', 'reset'])
+  })
+
+  it('still offers replace between a branch and its own upstream', () => {
+    const tracking = { kind: 'tracking' as const, canReset: false, sourceIsRemote: true }
+    expect(shownModes({ ours: 1, theirs: 23 }, tracking)).toEqual(['replace', 'blend', 'stack'])
+  })
+
+  /** "Discard my commit and match the server" when the server has nothing new. */
+  it('offers reset when only our side moved', () => {
+    expect(shownModes({ ours: 1, theirs: 0 }, remoteIntoHead)).toEqual(['reset'])
+  })
+
+  it('does not offer reset when the receiving branch is not checked out', () => {
+    expect(shownModes({ ours: 1, theirs: 2 }, { ...remoteIntoHead, canReset: false })).toEqual(['blend', 'stack'])
+  })
+})
+
+describe('initialMode', () => {
+  /** "Make master match this" in the menu must open on Reset, not fall back to another option. */
+  it('honours the option a menu asked for', () => {
+    expect(initialMode(['blend', 'stack', 'reset'], 'reset')).toBe('reset')
+  })
+
+  it('starts on a safe option when nothing was asked for', () => {
+    expect(initialMode(['blend', 'stack', 'reset'], null)).toBe('stack')
+    expect(initialMode(['replace', 'blend', 'stack'], null)).toBe('stack')
+  })
+
+  it('ignores a request for an option that is not on offer', () => {
+    expect(initialMode(['blend', 'stack'], 'reset')).toBe('stack')
+  })
+})
+
+describe('modeCopy reset', () => {
+  it('names both branches for a local pair', () => {
+    expect(modeCopy('reset', { ours: 1, theirs: 0 }, { source: 'origin/master', target: 'master' }).action).toBe(
+      'Make master match origin/master',
+    )
   })
 })

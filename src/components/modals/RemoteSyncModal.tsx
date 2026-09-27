@@ -26,7 +26,7 @@ import { branchSync } from '@/lib/branchActions'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
-import { modeCopy, modesFor, type Divergence, type PreviewMode, type Tone } from '@/lib/syncPreview'
+import { initialMode, modeCopy, shownModes, type Divergence, type PreviewMode, type Tone } from '@/lib/syncPreview'
 import { SyncTreePreview } from './SyncTreePreview'
 
 /** Icon per mode, used on both the mode button and the confirm button. */
@@ -126,7 +126,6 @@ export function RemoteSyncModal() {
   }, [pair, branchPair, relation.data])
 
   const upstreamGone = pair?.kind === 'tracking' && pair.branch.sync.kind === 'upstream_gone'
-  const modes = divergence ? modesFor(divergence) : []
 
   // Which option is selected. Resets whenever the pair changes, so a fresh drag
   // never inherits a destructive selection from the previous one -- but a mode
@@ -136,9 +135,6 @@ export function RemoteSyncModal() {
   useEffect(() => {
     setMode(preselectedMode)
   }, [syncSource, syncTarget, preselectedMode])
-  // A preselect that doesn't apply to how these two actually diverged falls
-  // back to the default, so a stale hint can never run something unintended.
-  const active: PreviewMode | null = mode && modes.includes(mode) ? mode : (modes.at(-1) ?? null)
 
   // Names. For a tracking pair "ours" is the local branch; for a branch pair it
   // is the branch that receives (the target), which is the one the copy is
@@ -155,6 +151,19 @@ export function RemoteSyncModal() {
   // that would move IS the checked-out one.
   const headName = branches.data?.local.find((b) => b.is_head)?.name
   const canReset = !!branchPair && branchPair.target.name === headName
+
+  // The options on offer, and which is selected. A preselect that is not on
+  // offer (a stale hint, or a pair where it would do something else) falls
+  // back to a safe default, so it can never run something unintended.
+  const shown: PreviewMode[] =
+    divergence && pair
+      ? shownModes(divergence, {
+          kind: pair.kind,
+          canReset,
+          sourceIsRemote: branchPair?.source.type === 'remote',
+        })
+      : []
+  const active: PreviewMode | null = initialMode(shown, mode)
   const switchesBranch = !!branchPair && branchPair.target.name !== headName
 
   // Swapping is only meaningful when flipping still resolves to a valid pair:
@@ -204,6 +213,9 @@ export function RemoteSyncModal() {
           )
         return
       case 'replace':
+        // A force-push goes to the checked-out branch's own upstream, so it
+        // only means "replace theirs" when that upstream is the pair on screen.
+        if (!tracking) return
         return void m.pushForce.mutate(undefined, done)
       case 'blend':
         if (tracking) return void m.pull.mutate(undefined, done)
@@ -250,9 +262,6 @@ export function RemoteSyncModal() {
     : undefined
 
   const copy = active && divergence ? modeCopy(active, divergence, pairNames) : null
-  // Reset is an extra option on branch pairs, not one of the three the
-  // divergence implies, so it is appended rather than returned by modesFor.
-  const shown: PreviewMode[] = canReset && modes.length === 3 ? [...modes, 'reset'] : modes
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && closeModal()}>
@@ -322,10 +331,12 @@ export function RemoteSyncModal() {
             </div>
           )}
 
-          {divergence && modes.length === 0 && (
+          {divergence && shown.length === 0 && (
             <div className="flex items-center gap-1.5 rounded-md border border-border bg-panel2 px-3 py-2 text-2xs text-muted-foreground">
               <Check size={12} className="flex-none" />
-              These already match. Nothing to do.
+              {divergence.ours + divergence.theirs === 0
+                ? 'These already match. Nothing to do.'
+                : `${intoName} already has everything from ${fromName}.`}
             </div>
           )}
 

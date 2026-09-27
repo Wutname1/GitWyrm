@@ -53,6 +53,51 @@ export function modesFor(d: Divergence): PreviewMode[] {
   return []
 }
 
+/** What the sync window knows about the two refs, for choosing its options. */
+export interface PairShape {
+  /** A branch and its own upstream, or any other two refs. */
+  kind: 'tracking' | 'branches'
+  /** The receiving branch is the checked-out one, so it can be reset. */
+  canReset: boolean
+  /** The side commits come FROM is a remote copy, which cannot be moved here. */
+  sourceIsRemote: boolean
+}
+
+/**
+ * The options the sync window offers.
+ *
+ * A tracking pair gets exactly what the divergence implies. Two other refs
+ * need care, because the tracking vocabulary does the wrong thing there:
+ *
+ * - `replace` is a force-push to the checked-out branch's OWN upstream. For a
+ *   pair like `origin/master` into a `master` that tracks something else, that
+ *   overwrites a server branch that is not even on screen. Never offered.
+ * - `send` catches the source up, which cannot happen when the source is a
+ *   remote copy. Dropped for those.
+ * - `reset` (make the receiving branch match) is offered whenever the
+ *   receiving branch is checked out and has commits to throw away -- including
+ *   when only our side moved, which is the plain "discard my commit and match
+ *   the server" case and previously had no option at all.
+ */
+export function shownModes(d: Divergence, pair: PairShape): PreviewMode[] {
+  const modes = modesFor(d)
+  if (pair.kind === 'tracking') return modes
+  const shown = modes.filter((m) => m !== 'replace' && !(m === 'send' && pair.sourceIsRemote))
+  if (pair.canReset && d.ours > 0) shown.push('reset')
+  return shown
+}
+
+/**
+ * Which option starts selected: the one a menu asked for when it is on offer,
+ * otherwise the safe default. Never a destructive option unless asked for, or
+ * unless it is the only one there is.
+ */
+export function initialMode(shown: PreviewMode[], requested: PreviewMode | null): PreviewMode | null {
+  if (requested && shown.includes(requested)) return requested
+  const safe = shown.filter((m) => m !== 'replace' && m !== 'reset')
+  return safe.at(-1) ?? shown[0] ?? null
+}
+
 /**
  * Every string the modal shows for a mode, resolved against real counts.
  *
@@ -103,7 +148,7 @@ export function modeCopy(mode: PreviewMode, d: Divergence, names?: PairNames): M
         mode,
         label: 'Reset',
         sub: `${d.ours} lost`,
-        action: 'Reset to match',
+        action: names ? `Make ${names.target} match ${names.source}` : 'Reset to match',
         caption: `Your ${ours} are thrown away.`,
         pill: { tone: 'bad', text: `${d.ours} lost` },
         note: {
