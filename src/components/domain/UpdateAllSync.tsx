@@ -29,7 +29,7 @@ let startedThisSession = false
 function ProgressTitle() {
   const progress = useUpdateAllStore((s) => s.progress)
   if (!progress) return null
-  if (progress.stopping) return <>Stopping after the projects already started…</>
+  if (progress.stopping) return <>Stopping…</>
   if (progress.total === 0) return <>Finding your projects…</>
   return (
     <>
@@ -48,7 +48,7 @@ function ProgressDetail() {
       `${plural(progress.errors + progress.warnings, 'project')} need${progress.errors + progress.warnings === 1 ? 's' : ''} a look`,
   ].filter(Boolean)
   return (
-    <span className="mt-1 flex w-64 max-w-full flex-col gap-1.5">
+    <span className="mt-1 flex w-full min-w-0 flex-col gap-1.5">
       <span
         role="progressbar"
         aria-valuemin={0}
@@ -62,7 +62,9 @@ function ProgressDetail() {
         />
       </span>
       {progress.running.length > 0 && (
-        <span className="truncate text-2xs">Now: {progress.running.map(pathName).join(', ')}</span>
+        <span className="block min-w-0 truncate text-2xs" title={progress.running.map(pathName).join(', ')}>
+          Now: {progress.running.map(pathName).join(', ')}
+        </span>
       )}
       {counts.length > 0 && <span className="text-2xs">{counts.join(' · ')}</span>}
     </span>

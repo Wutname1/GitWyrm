@@ -462,6 +462,7 @@ fn update_one(
     only: Option<&[String]>,
     allow_set_aside: bool,
     attended: Attended,
+    cancel: Option<&AtomicBool>,
 ) -> RepoUpdate {
     let mut report = blank_report(folder_name(path), path.to_string());
 
@@ -490,7 +491,11 @@ fn update_one(
         return report;
     }
 
-    if let Err(failure) = fetch_all_at(path, attended) {
+    if let Err(failure) = fetch_all_at(path, attended, cancel) {
+        if failure.stopped {
+            report.skipped = true;
+            return report;
+        }
         report.needs_sign_in = failure.needs_sign_in;
         report.message = Some(failure.message);
         report.level = RepoUpdateLevel::Error;
@@ -528,7 +533,7 @@ pub async fn pull_branches(
     tauri::async_runtime::spawn_blocking(move || {
         let _timing = crate::perf::CommandTiming::start("pull_branches", "git.pull_branches");
         let mut report = blank_report(folder_name(&path), path.clone());
-        if let Err(failure) = fetch_all_at(&path, Attended::User) {
+        if let Err(failure) = fetch_all_at(&path, Attended::User, None) {
             report.needs_sign_in = failure.needs_sign_in;
             report.message = Some(failure.message);
             report.level = RepoUpdateLevel::Error;
@@ -685,6 +690,7 @@ fn run_job(app: AppHandle, job: u32, request: UpdateAllRequest, cancel: Arc<Atom
                     None,
                     allow.contains(&path_key(path)),
                     attended,
+                    Some(&cancel),
                 );
 
                 let updated = report
@@ -746,8 +752,8 @@ fn run_job(app: AppHandle, job: u32, request: UpdateAllRequest, cancel: Arc<Atom
     let _ = app.emit("update-all-finished", report);
 }
 
-/// Ask the running job to stop. Repositories already being fetched finish;
-/// the rest are reported as skipped.
+/// Ask the running job to stop. Fetches in progress are ended at once, and
+/// every repository not finished is reported as not checked.
 #[tauri::command]
 #[specta::specta]
 pub async fn update_all_cancel(
@@ -1123,7 +1129,7 @@ mod tests {
         git(&seed, &["push", "-q", "origin", "main:develop"]);
 
         let manager = RepoManager::default();
-        let report = update_one(&manager, &mine, None, false, Attended::Background);
+        let report = update_one(&manager, &mine, None, false, Attended::Background, None);
 
         assert_eq!(report.level, RepoUpdateLevel::Updated, "{report:?}");
         assert_eq!(report.commits_received, 2);

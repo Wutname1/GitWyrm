@@ -520,7 +520,15 @@ pub(crate) struct FetchFailure {
     /// The server wanted a sign-in that did not happen. Kept apart from other
     /// failures so the caller can offer a retry that is allowed to prompt.
     pub needs_sign_in: bool,
+    /// The caller asked to stop, and the fetch was ended part way. Not a
+    /// failure: nothing was changed and the repository was simply not checked.
+    pub stopped: bool,
 }
+
+/// Longest a single fetch in a multi-repository run may take. Generous for a
+/// big download, but a server that never answers (or a sign-in prompt with
+/// nobody to answer it) must not hold the whole run open.
+const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
 
 /// Fetch every remote of the repository at `path`, without streaming progress.
 ///
@@ -528,30 +536,64 @@ pub(crate) struct FetchFailure {
 /// where per-line progress would flood the webview and has no tab to land in.
 /// `Attended::Background` never opens a login window. Shares the stale
 /// tracking-ref recovery and the failure wording with the streaming path.
-pub(crate) fn fetch_all_at(path: &str, attended: Attended) -> Result<(), FetchFailure> {
+///
+/// Setting `cancel` ends a fetch in progress, and every fetch is ended after
+/// [`FETCH_TIMEOUT`].
+pub(crate) fn fetch_all_at(
+    path: &str,
+    attended: Attended,
+    cancel: Option<&std::sync::atomic::AtomicBool>,
+) -> Result<(), FetchFailure> {
+    use crate::git::shell::StoppableError;
+
     let run = || {
         let cred = crate::git::shell::credential_args(attended);
         let mut args: Vec<&str> = cred.iter().map(String::as_str).collect();
         args.extend_from_slice(&["fetch", "--all", "--prune"]);
-        match attended {
-            Attended::Background => crate::git::shell::run_git_unattended(Some(path), &args),
-            Attended::User => crate::git::shell::run_git(Some(path), &args),
-        }
+        crate::git::shell::run_git_stoppable(
+            Some(path),
+            &args,
+            attended == Attended::Background,
+            cancel,
+            FETCH_TIMEOUT,
+        )
     };
 
     let result = match run() {
-        Err(e) => match stale_remote_ref(&e.to_string()) {
+        Err(StoppableError::Failed(e)) => match stale_remote_ref(&e.to_string()) {
             Some(stale) => {
                 log::warn!("update-all fetch blocked by stale tracking ref {stale}; clearing it");
-                crate::git::shell::run_git(Some(path), &["update-ref", "-d", &stale])
-                    .and_then(|_| run())
+                match crate::git::shell::run_git(Some(path), &["update-ref", "-d", &stale]) {
+                    Ok(_) => run(),
+                    Err(e) => Err(StoppableError::Failed(e)),
+                }
             }
-            None => Err(e),
+            None => Err(StoppableError::Failed(e)),
         },
-        ok => ok,
+        other => other,
     };
 
-    result.map(|_| ()).map_err(|e| {
+    let e = match result {
+        Ok(_) => return Ok(()),
+        Err(StoppableError::Cancelled) => {
+            return Err(FetchFailure {
+                message: "Stopped before it finished.".into(),
+                needs_sign_in: false,
+                stopped: true,
+            })
+        }
+        Err(StoppableError::TimedOut) => {
+            log::warn!("update-all fetch of {path} timed out");
+            return Err(FetchFailure {
+                message: "The server took too long to answer, so this project was skipped.".into(),
+                needs_sign_in: false,
+                stopped: false,
+            });
+        }
+        Err(StoppableError::Failed(e)) => e,
+    };
+
+    Err({
         let raw = e.to_string();
         // run_git reports `git <first arg> failed: <stderr>`, and the first
         // argument here is a `-c` override, so keep only what git printed.
@@ -581,6 +623,7 @@ pub(crate) fn fetch_all_at(path: &str, attended: Attended) -> Result<(), FetchFa
         FetchFailure {
             message,
             needs_sign_in,
+            stopped: false,
         }
     })
 }

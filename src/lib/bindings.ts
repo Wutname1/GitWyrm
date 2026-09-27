@@ -2097,8 +2097,8 @@ async updateAllStart(request: UpdateAllRequest) : Promise<Result<number, string>
 }
 },
 /**
- * Ask the running job to stop. Repositories already being fetched finish;
- * the rest are reported as skipped.
+ * Ask the running job to stop. Fetches in progress are ended at once, and
+ * every repository not finished is reported as not checked.
  */
 async updateAllCancel() : Promise<Result<null, string>> {
     try {
