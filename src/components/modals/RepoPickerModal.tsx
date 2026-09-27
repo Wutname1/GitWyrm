@@ -94,7 +94,7 @@ import {
   type SavedTabGroup,
 } from "@/stores/workspaceStore";
 import { CodeFoldersSetting } from "@/components/domain/settings/CodeFoldersSetting";
-import { UpdateAllFoldersButton } from "@/components/domain/UpdateAllButton";
+import { UpdateAllFoldersButton } from "@/components/domain/UpdateAllActions";
 
 interface GitProgressPayload {
   operation: string;

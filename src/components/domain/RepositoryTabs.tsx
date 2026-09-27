@@ -8,10 +8,12 @@ import {
   useState,
   type CSSProperties,
   type DragEvent,
+  type ReactElement,
   type ReactNode,
 } from "react";
 import {
   ArrowDown,
+  ArrowDownToLine,
   ArrowUp,
   Check,
   ChevronLeft,
@@ -60,6 +62,7 @@ import { branchSync } from "@/lib/branchActions";
 import { pullNeedsChoice } from "@/lib/syncPreview";
 import { Button } from "@/components/ui/button";
 import { PendingMenuItem } from "@/components/ui/pending-menu-item";
+import { UpdateAllContextItems } from "@/components/domain/UpdateAllActions";
 import { Input } from "@/components/ui/input";
 import { FormDialog } from "@/components/ui/form-dialog";
 import {
@@ -205,6 +208,39 @@ function DropGap({
       {active ? label : ""}
     </div>
   );
+}
+
+/**
+ * Right-click on empty space in the left tab list. Tabs, groups and day
+ * headings open their own menus first, which marks the event handled, and
+ * Radix then skips this one -- so it only answers clicks that hit nothing.
+ */
+function EmptySpaceMenu({
+  enabled,
+  paths,
+  children,
+}: {
+  enabled: boolean;
+  paths: string[];
+  children: ReactElement;
+}) {
+  if (!enabled) return children;
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+      <ContextMenuContent className="w-64">
+        <UpdateAllContextItems group={{ name: "open projects", paths }} />
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
+/** How a day heading reads inside "Get the latest for ...". */
+function recencyProjectsName(bucket: { id: string; label: string }): string {
+  if (bucket.id === "older") return "older projects";
+  if (bucket.id === "today" || bucket.id === "yesterday")
+    return `projects used ${bucket.label.toLowerCase()}`;
+  return `projects used ${bucket.label}`;
 }
 
 /**
@@ -813,6 +849,23 @@ function TabPullItem({ repo, name }: { repo: RepoInfo; name: string }) {
         }
         m.pull.mutate();
       }}
+    />
+  );
+}
+
+/**
+ * Bring every branch of this tab's project up to date with one trip to the
+ * server. Branches with their own new work are left alone and reported.
+ */
+function TabPullAllBranchesItem({ repo }: { repo: RepoInfo }) {
+  const m = useGitMutations(repo.id);
+  return (
+    <PendingMenuItem
+      icon={<ArrowDownToLine size={13} strokeWidth={2} />}
+      label="Get latest for all branches"
+      pendingLabel="Getting the latest…"
+      pending={m.pullBranchesMany.isPending}
+      onRun={() => m.pullBranchesMany.mutate(null)}
     />
   );
 }
@@ -1565,9 +1618,12 @@ export function RepositoryTabs({
                 </div>
               </TooltipTrigger>
             </ContextMenuTrigger>
-            <ContextMenuContent className="w-52">
+            <ContextMenuContent className="w-64">
             <TabPullItem repo={repo} name={repoName(repo)} />
+            <TabPullAllBranchesItem repo={repo} />
             <TabPushItem repo={repo} name={repoName(repo)} />
+            <ContextMenuSeparator />
+            <UpdateAllContextItems />
             <ContextMenuSeparator />
             <ContextMenuItem
               onSelect={() => {
@@ -1919,7 +1975,7 @@ export function RepositoryTabs({
               )}
             </section>
           </ContextMenuTrigger>
-          <ContextMenuContent className="w-52">
+          <ContextMenuContent className="w-64">
             <ContextMenuLabel className="text-2xs tracking-wide text-muted-foreground">
               {attached
                 ? `PARTS OF ${parentLabel.toUpperCase()}`
@@ -1936,6 +1992,13 @@ export function RepositoryTabs({
               />
               {group.collapsed ? "Expand" : "Collapse"}
             </ContextMenuItem>
+            <ContextMenuSeparator />
+            <UpdateAllContextItems
+              group={{
+                name: attached ? parentLabel : group.name,
+                paths: group.repoPaths,
+              }}
+            />
             {/* Renaming, recolouring, saving and ungrouping all describe a
                 group the user assembled. This one describes the folders. */}
             {attached ? (
@@ -2190,81 +2253,103 @@ export function RepositoryTabs({
           onClick={() => scrollBy(-1)}
         />
       )}
-      <div
-        ref={scrollRef}
-        data-dim-on-drag
-        data-dragging-group={dragItem?.type === "group" ? "true" : undefined}
-        className={cn(
-          "gw-repository-tabs flex min-h-0 min-w-0",
-          orientation === "horizontal"
-            ? "gw-tab-scroll h-full flex-1 flex-row items-stretch overflow-x-auto overflow-y-hidden"
-            : "w-full flex-1 flex-col overflow-y-auto overflow-x-hidden px-1.5 py-1",
-        )}
-        onDragEnd={finishDrag}
+      <EmptySpaceMenu
+        enabled={orientation === "vertical"}
+        paths={openRepos.map((repo) => repo.path)}
       >
-        {pinnedOrder.length > 0 && (
-          <div
-            data-pinned-tabs
-            className={cn(
-              "flex flex-none",
-              orientation === "horizontal"
-                ? // Pinned tabs stay put while the rest of the strip scrolls under them.
-                  "sticky left-0 z-20 h-full flex-row items-stretch border-r border-border bg-background"
-                : "w-full flex-col gap-0.5 border-b border-border pb-1",
-            )}
-          >
-            {pinnedOrder.map((item) =>
-              item.type === "repo"
-                ? (() => {
-                    const repo = findRepo(openRepos, item.path);
-                    return repo ? (
-                      <Fragment key={`pinned-${pathKey(item.path)}`}>
-                        {renderRepoTab(repo, null, true)}
-                      </Fragment>
-                    ) : null;
-                  })()
-                : null,
-            )}
-          </div>
-        )}
-        {recencySections
-          ? recencySections.map((section) => (
-              <Fragment key={`bucket-${section.bucket.id}`}>
-                <div
-                  data-recency-heading={section.bucket.id}
-                  // Sticky so you can always see which day you are looking at
-                  // while scrolling a long strip.
-                  className="sticky top-0 z-10 flex flex-none items-baseline gap-1.5 bg-background px-1 pb-1 pt-2"
-                >
-                  <span className="text-2xs font-bold uppercase tracking-[.09em] text-sub">
-                    {section.bucket.label}
-                  </span>
-                  <span className="font-mono text-2xs text-muted-foreground">
-                    {section.items.length}
-                  </span>
-                </div>
-                {section.items.map(renderOrderedItem)}
-              </Fragment>
-            ))
-          : displayOrder.map(renderOrderedItem)}
-        {renderOrderGap(tabOrder.length, null)}
-        <AddRepoTab
-          orientation={orientation}
-          iconOnly={effectiveIconOnly}
-          width={adaptiveHorizontalTabWidth}
-        />
-        {/* The horizontal strip stretches across the app bar so tab widths can
-            be budgeted against the full width. Without this filler the leftover
-            space belongs to the scroll container, which is not a drag region,
-            and the window stops responding to drags and double-clicks there. */}
-        {orientation === "horizontal" && (
-          <div
-            data-tauri-drag-region
-            onDoubleClick={onTitleBarDoubleClick}
-            className="w-0 flex-1 basis-0"
+        <div
+          ref={scrollRef}
+          data-dim-on-drag
+          data-dragging-group={dragItem?.type === "group" ? "true" : undefined}
+          className={cn(
+            "gw-repository-tabs flex min-h-0 min-w-0",
+            orientation === "horizontal"
+              ? "gw-tab-scroll h-full flex-1 flex-row items-stretch overflow-x-auto overflow-y-hidden"
+              : "w-full flex-1 flex-col overflow-y-auto overflow-x-hidden px-1.5 py-1",
+          )}
+          onDragEnd={finishDrag}
+        >
+          {pinnedOrder.length > 0 && (
+            <div
+              data-pinned-tabs
+              className={cn(
+                "flex flex-none",
+                orientation === "horizontal"
+                  ? // Pinned tabs stay put while the rest of the strip scrolls under them.
+                    "sticky left-0 z-20 h-full flex-row items-stretch border-r border-border bg-background"
+                  : "w-full flex-col gap-0.5 border-b border-border pb-1",
+              )}
+            >
+              {pinnedOrder.map((item) =>
+                item.type === "repo"
+                  ? (() => {
+                      const repo = findRepo(openRepos, item.path);
+                      return repo ? (
+                        <Fragment key={`pinned-${pathKey(item.path)}`}>
+                          {renderRepoTab(repo, null, true)}
+                        </Fragment>
+                      ) : null;
+                    })()
+                  : null,
+              )}
+            </div>
+          )}
+          {recencySections
+            ? recencySections.map((section) => (
+                <Fragment key={`bucket-${section.bucket.id}`}>
+                  <ContextMenu>
+                    <ContextMenuTrigger asChild>
+                      <div
+                        data-recency-heading={section.bucket.id}
+                        // Sticky so you can always see which day you are looking at
+                        // while scrolling a long strip.
+                        className="sticky top-0 z-10 flex flex-none items-baseline gap-1.5 bg-background px-1 pb-1 pt-2"
+                      >
+                        <span className="text-2xs font-bold uppercase tracking-[.09em] text-sub">
+                          {section.bucket.label}
+                        </span>
+                        <span className="font-mono text-2xs text-muted-foreground">
+                          {section.items.length}
+                        </span>
+                      </div>
+                    </ContextMenuTrigger>
+                    <ContextMenuContent className="w-64">
+                      <UpdateAllContextItems
+                        group={{
+                          name: recencyProjectsName(section.bucket),
+                          paths: section.items.flatMap((item) =>
+                            item.type === "repo"
+                              ? [item.path]
+                              : (tabGroups.find((g) => g.id === item.id)
+                                  ?.repoPaths ?? []),
+                          ),
+                        }}
+                      />
+                    </ContextMenuContent>
+                  </ContextMenu>
+                  {section.items.map(renderOrderedItem)}
+                </Fragment>
+              ))
+            : displayOrder.map(renderOrderedItem)}
+          {renderOrderGap(tabOrder.length, null)}
+          <AddRepoTab
+            orientation={orientation}
+            iconOnly={effectiveIconOnly}
+            width={adaptiveHorizontalTabWidth}
           />
-        )}
-      </div>
+          {/* The horizontal strip stretches across the app bar so tab widths can
+              be budgeted against the full width. Without this filler the leftover
+              space belongs to the scroll container, which is not a drag region,
+              and the window stops responding to drags and double-clicks there. */}
+          {orientation === "horizontal" && (
+            <div
+              data-tauri-drag-region
+              onDoubleClick={onTitleBarDoubleClick}
+              className="w-0 flex-1 basis-0"
+            />
+          )}
+        </div>
+      </EmptySpaceMenu>
       {orientation === "horizontal" && (
         <ScrollArrow
           side="right"
