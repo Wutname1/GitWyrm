@@ -62,6 +62,8 @@ struct FileRepo {
     fixable: u32,
     outdated: u32,
     #[serde(default)]
+    attention: MehenAttention,
+    #[serde(default)]
     problems: Vec<FileProblem>,
 }
 
@@ -84,6 +86,8 @@ struct FileProblem {
 pub struct MehenOverview {
     /// Whether Mehen can be opened from GitWyrm on this computer.
     pub can_open: bool,
+    /// When Mehen last checked every project, seconds since epoch.
+    pub full_check_at: Option<f64>,
     pub repos: Vec<MehenRepoStatus>,
 }
 
@@ -101,8 +105,26 @@ pub struct MehenRepoStatus {
     pub fixable: u32,
     /// Packages with a newer version available.
     pub outdated: u32,
+    /// Every package that needs something, counted once at its most urgent level.
+    pub attention: MehenAttention,
     /// Fixable problems, the most serious first; a few at most.
     pub problems: Vec<MehenProblem>,
+}
+
+/// Packages by the most urgent thing about them, as Mehen counts them: a
+/// security problem only when it has a fix (at its worst severity; `low`
+/// includes unrated ones), otherwise the newest update available. Add up the
+/// levels at or above the one wanted.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+#[serde(default)]
+pub struct MehenAttention {
+    pub critical: u32,
+    pub high: u32,
+    pub moderate: u32,
+    pub low: u32,
+    pub major: u32,
+    pub minor: u32,
+    pub patch: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -209,6 +231,7 @@ fn to_status(repo: FileRepo) -> MehenRepoStatus {
         checked_at: repo.checked_at.map(|t| t as f64),
         fixable: repo.fixable,
         outdated: repo.outdated,
+        attention: repo.attention,
         problems: repo
             .problems
             .into_iter()
@@ -236,7 +259,8 @@ pub async fn mehen_overview() -> Result<Option<MehenOverview>, AppError> {
     tauri::async_runtime::spawn_blocking(|| {
         let file = mehen_data_dir().and_then(|dir| read_status_file(&dir))?;
         let can_open = mehen_exe(file.exe.as_deref()).is_some();
-        Some(MehenOverview { can_open, repos: file.repos.into_iter().map(to_status).collect() })
+        let full_check_at = file.full_check_at.map(|t| t as f64);
+        Some(MehenOverview { can_open, full_check_at, repos: file.repos.into_iter().map(to_status).collect() })
     })
     .await
     .map_err(|e| AppError::Other(e.to_string()))

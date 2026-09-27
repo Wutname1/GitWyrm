@@ -6,6 +6,7 @@ import { classifyError } from '@/lib/errorClass'
 import { showErrorToast } from '@/lib/errorToast'
 import { pushNoteToast } from '@/lib/mehen'
 import { samePath } from '@/lib/paths'
+import { useWorkspaceStore } from '@/stores/workspaceStore'
 
 /**
  * What Mehen last found in every repository it checks, or null when Mehen has
@@ -38,11 +39,12 @@ export function useMehenStatus(repoPath: string | null) {
  * nothing to say. Only asked for when there is something to send.
  */
 export function useMehenPushNote(repoId: string | null, head: BranchInfo | undefined) {
+  const enabled = useWorkspaceStore((s) => s.mehenShowStatus)
   const ahead = head?.ahead ?? 0
   const unpublished = head?.sync.kind === 'never_pushed'
   return useQuery({
     queryKey: keys.mehenPushNote(repoId ?? 'none', head?.name ?? null, head?.tip ?? null, ahead),
-    enabled: repoId != null && head != null && (ahead > 0 || unpublished),
+    enabled: enabled && repoId != null && head != null && (ahead > 0 || unpublished),
     queryFn: async () => unwrap(await commands.mehenPushNote(repoId!)),
     refetchOnWindowFocus: true,
     staleTime: 30_000,
@@ -55,6 +57,8 @@ export function useMehenPushNote(repoId: string | null, head: BranchInfo | undef
  * the branch as it is now.
  */
 export function cachedPushNote(qc: QueryClient, repoId: string): MehenPushNote | null {
+  // A note cached before the setting was turned off must not still appear.
+  if (!useWorkspaceStore.getState().mehenShowStatus) return null
   const [latest] = qc
     .getQueryCache()
     .findAll({ queryKey: keys.mehenPushNoteAll(repoId) })

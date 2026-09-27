@@ -4,7 +4,7 @@
  * GitWyrm never checks packages itself. It shows Mehen's last answer, so every
  * sentence here says when that answer is from and never claims more than it.
  */
-import type { MehenProblem, MehenPushNote, MehenRepoStatus } from './bindings'
+import type { MehenAttention, MehenProblem, MehenPushNote, MehenRepoStatus } from './bindings'
 import { formatRelativeTime } from './gitDisplay'
 import { pathKey } from './paths'
 
@@ -66,4 +66,54 @@ export function newFixes(repos: MehenRepoStatus[], openPaths: string[], seen: Re
     .filter((r) => openPaths.some((p) => pathKey(p) === pathKey(r.path)))
     .map((repo) => ({ repo, count: repo.problems.filter((p) => !seen.has(fixKey(repo.path, p))).length }))
     .filter(({ count }) => count > 0)
+}
+
+/**
+ * What the Mehen badge on a repository tab counts, from most to least urgent.
+ * Each level includes every level above it. Security problems only count when
+ * they have a fix.
+ */
+export const MEHEN_TAB_LEVELS = [
+  { id: 'off', label: 'Nothing (hide the badge)' },
+  { id: 'critical', label: 'Critical security fixes' },
+  { id: 'high', label: 'High and critical security fixes' },
+  { id: 'moderate', label: 'Medium and higher security fixes' },
+  { id: 'security', label: 'All security fixes' },
+  { id: 'major', label: 'Security fixes and major updates' },
+  { id: 'minor', label: 'Security fixes, major and minor updates' },
+  { id: 'all', label: 'Every package with an update' },
+] as const
+
+export type MehenTabLevel = (typeof MEHEN_TAB_LEVELS)[number]['id']
+
+export const DEFAULT_MEHEN_TAB_LEVEL: MehenTabLevel = 'security'
+
+export function parseMehenTabLevel(value: string | null | undefined): MehenTabLevel {
+  return MEHEN_TAB_LEVELS.find((l) => l.id === value)?.id ?? DEFAULT_MEHEN_TAB_LEVEL
+}
+
+/** Attention levels in order, most urgent first, as Mehen counts them. */
+const ATTENTION_ORDER = ['critical', 'high', 'moderate', 'low', 'major', 'minor', 'patch'] as const
+/** The last attention level each tab level includes. */
+const LEVEL_REACH: Record<Exclude<MehenTabLevel, 'off'>, (typeof ATTENTION_ORDER)[number]> = {
+  critical: 'critical',
+  high: 'high',
+  moderate: 'moderate',
+  security: 'low',
+  major: 'major',
+  minor: 'minor',
+  all: 'patch',
+}
+
+/**
+ * The tab badge for one repository: how many packages it counts, and whether
+ * any of them is a security fix (which decides its colour). Zero hides it.
+ */
+export function mehenTabBadge(attention: MehenAttention, level: MehenTabLevel): { count: number; security: number } {
+  if (level === 'off') return { count: 0, security: 0 }
+  const reach = ATTENTION_ORDER.indexOf(LEVEL_REACH[level])
+  const included = ATTENTION_ORDER.slice(0, reach + 1)
+  const count = included.reduce((sum, key) => sum + attention[key], 0)
+  const security = included.filter((key) => ATTENTION_ORDER.indexOf(key) <= ATTENTION_ORDER.indexOf('low')).reduce((sum, key) => sum + attention[key], 0)
+  return { count, security }
 }

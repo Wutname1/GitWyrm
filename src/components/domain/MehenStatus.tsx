@@ -4,7 +4,7 @@ import { useMehenStatus, openInMehen } from '@/hooks/useMehen'
 import type { MehenProblem } from '@/lib/bindings'
 import { checkedWhen, isMehenStale, unsafePackages } from '@/lib/mehen'
 import { cn } from '@/lib/utils'
-import { useActiveRepo } from '@/stores/workspaceStore'
+import { useActiveRepo, useWorkspaceStore } from '@/stores/workspaceStore'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -60,8 +60,9 @@ function ProblemRow({ problem }: { problem: MehenProblem }) {
 export function MehenSegment() {
   const repo = useActiveRepo()
   const { status, canOpen } = useMehenStatus(repo?.path ?? null)
+  const enabled = useWorkspaceStore((s) => s.mehenShowStatus)
 
-  if (!repo || !status || status.fixable === 0) return null
+  if (!enabled || !repo || !status || status.fixable === 0) return null
 
   const stale = isMehenStale(status.checked_at)
   const serious = status.problems.some((p) => isSerious(p.severity))

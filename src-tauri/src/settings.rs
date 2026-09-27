@@ -493,6 +493,22 @@ pub struct Settings {
     /// the same reason as `show_tab_pr_count`.
     #[serde(default)]
     pub show_tab_issue_count: bool,
+    /// Show packages with a known security problem that Mehen can fix: in the
+    /// status bar, on repository tabs, and when pushing package changes.
+    #[serde(default = "default_mehen_on")]
+    pub mehen_show_status: bool,
+    /// What the badge on each repository tab counts: `off`, a security
+    /// severity (`critical`, `high`, `moderate`, `security` for any), or that
+    /// plus updates (`major`, `minor`, `all`). None means `security`.
+    #[serde(default)]
+    pub mehen_tab_level: Option<String>,
+    /// Let GitWyrm start Mehen's windowless checks: a full one when the last is
+    /// over 12 hours old, and one repository after a pull changes its packages.
+    #[serde(default = "default_mehen_on")]
+    pub mehen_keep_fresh: bool,
+    /// A one-time note when Mehen finds a new fix for an open repository.
+    #[serde(default = "default_mehen_on")]
+    pub mehen_new_fix_notes: bool,
     /// Open tab groups. These disappear when their last repository is closed.
     #[serde(default)]
     pub tab_groups: Vec<TabGroupSetting>,
@@ -600,6 +616,12 @@ fn default_auto_update() -> bool {
 }
 
 fn default_ai_enabled() -> bool {
+    true
+}
+
+/// Mehen's features are on until turned off: they only ever show what Mehen
+/// found, and only once Mehen is installed.
+fn default_mehen_on() -> bool {
     true
 }
 
@@ -821,6 +843,10 @@ impl Default for Settings {
             horizontal_tab_row: false,
             show_tab_pr_count: false,
             show_tab_issue_count: false,
+            mehen_show_status: true,
+            mehen_tab_level: None,
+            mehen_keep_fresh: true,
+            mehen_new_fix_notes: true,
             tab_groups: Vec::new(),
             tab_order: Vec::new(),
             tab_sort: None,

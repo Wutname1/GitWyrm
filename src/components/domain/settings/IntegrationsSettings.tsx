@@ -13,7 +13,12 @@ import {
   useHostingProviders,
 } from '@/hooks/useGithub'
 import type { HostProviderInfo, ProviderId } from '@/lib/bindings'
-import { useWorkspaceStore } from '@/stores/workspaceStore'
+import mehenMark from '@/assets/mehen-mark.png'
+import { openInMehen, useMehenOverview } from '@/hooks/useMehen'
+import { formatRelativeTime } from '@/lib/gitDisplay'
+import { MEHEN_TAB_LEVELS, parseMehenTabLevel } from '@/lib/mehen'
+import { cn } from '@/lib/utils'
+import { useActiveRepo, useWorkspaceStore } from '@/stores/workspaceStore'
 import { SettingRow, SettingsGroup } from './SettingRow'
 import { ResetToDefaults } from './ResetToDefaults'
 
@@ -61,6 +66,9 @@ export function IntegrationsSettings() {
       )}
       <SettingsGroup title="Show on repository tabs">
         <TabCountSettings />
+      </SettingsGroup>
+      <SettingsGroup title="Mehen" blurb="Mehen checks your projects' packages for known security problems. GitWyrm shows what it found.">
+        <MehenSettings />
       </SettingsGroup>
       <ResetToDefaults group="integrations" />
     </div>
@@ -474,6 +482,121 @@ function TabCountSettings() {
           Show open issue count
         </label>
       </SettingRow>
+    </>
+  )
+}
+
+/** One checkbox row, in the style of the tab count settings above. */
+function MehenToggle({
+  label,
+  searchId,
+  hint,
+  text,
+  checked,
+  disabled,
+  onChange,
+}: {
+  label: string
+  searchId: string
+  hint: string
+  text: string
+  checked: boolean
+  disabled?: boolean
+  onChange: (enabled: boolean) => void
+}) {
+  return (
+    <SettingRow label={label} searchId={searchId} hint={hint}>
+      <label className={cn('flex items-center gap-2 text-xs text-foreground', disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer')}>
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.checked)}
+          className="size-3.5 accent-[var(--gw-accent)]"
+        />
+        {text}
+      </label>
+    </SettingRow>
+  )
+}
+
+/**
+ * What GitWyrm does with Mehen, the dependency checker. Everything here only
+ * shows Mehen's own answers; GitWyrm never checks packages itself. Mehen's
+ * daily check with the app closed is Mehen's own setting, so it lives there.
+ */
+function MehenSettings() {
+  const { data: overview, isLoading } = useMehenOverview()
+  const activeRepo = useActiveRepo()
+  const showStatus = useWorkspaceStore((s) => s.mehenShowStatus)
+  const setShowStatus = useWorkspaceStore((s) => s.setMehenShowStatus)
+  const tabLevel = useWorkspaceStore((s) => s.mehenTabLevel)
+  const setTabLevel = useWorkspaceStore((s) => s.setMehenTabLevel)
+  const keepFresh = useWorkspaceStore((s) => s.mehenKeepFresh)
+  const setKeepFresh = useWorkspaceStore((s) => s.setMehenKeepFresh)
+  const newFixNotes = useWorkspaceStore((s) => s.mehenNewFixNotes)
+  const setNewFixNotes = useWorkspaceStore((s) => s.setMehenNewFixNotes)
+
+  const status = isLoading
+    ? 'Looking for Mehen…'
+    : !overview
+      ? "Mehen hasn't checked your projects on this computer yet. Install Mehen and add your code folder, and its results show up here."
+      : overview.full_check_at
+        ? `Mehen last checked all your projects ${formatRelativeTime(overview.full_check_at)}. It watches ${overview.repos.length} ${overview.repos.length === 1 ? 'repository' : 'repositories'}.`
+        : `Mehen watches ${overview.repos.length} ${overview.repos.length === 1 ? 'repository' : 'repositories'}.`
+
+  return (
+    <>
+      <SettingRow label="Mehen" searchId="mehen-status" hint={status}>
+        {overview?.can_open && activeRepo && (
+          <Button variant="outline" size="sm" onClick={() => void openInMehen(activeRepo.id, false)}>
+            <img src={mehenMark} alt="" className="size-4" draggable={false} />
+            Open in Mehen
+          </Button>
+        )}
+      </SettingRow>
+      <MehenToggle
+        label="Packages with a security fix waiting"
+        searchId="mehen-show-status"
+        hint="Shown in the status bar, and mentioned when you push changes to your packages. Problems with no fix yet are never shown."
+        text="Show packages with a fix waiting"
+        checked={showStatus}
+        onChange={setShowStatus}
+      />
+      <SettingRow
+        label="Packages on tabs"
+        searchId="mehen-tab-level"
+        hint="What the Mehen badge on each repository tab counts. Each choice includes everything above it. Security problems count only when they have a fix."
+      >
+        <select
+          className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:border-ring"
+          value={tabLevel}
+          onChange={(e) => setTabLevel(parseMehenTabLevel(e.target.value))}
+          aria-label="What the Mehen badge on tabs counts"
+        >
+          {MEHEN_TAB_LEVELS.map((level) => (
+            <option key={level.id} value={level.id}>
+              {level.label}
+            </option>
+          ))}
+        </select>
+      </SettingRow>
+      <MehenToggle
+        label="Keep Mehen's results up to date"
+        searchId="mehen-keep-fresh"
+        hint="When Mehen's results are more than 12 hours old, or a pull changes a project's packages, Mehen checks again in the background. Its window does not open."
+        text="Check in the background"
+        checked={keepFresh}
+        onChange={setKeepFresh}
+      />
+      <MehenToggle
+        label="New security fixes"
+        searchId="mehen-new-fix-notes"
+        hint="A note, once, when Mehen finds a new fix for a project you have open."
+        text="Tell me about new fixes"
+        checked={newFixNotes}
+        onChange={setNewFixNotes}
+      />
     </>
   )
 }

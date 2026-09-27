@@ -52,15 +52,20 @@ export function MehenSync() {
   const head = useBranches(repo?.id ?? null).data?.local.find((b) => b.is_head)
   const openRepos = useWorkspaceStore((s) => s.openRepos)
   const overview = useMehenOverview().data
+  const keepFresh = useWorkspaceStore((s) => s.mehenKeepFresh)
+  const newFixNotes = useWorkspaceStore((s) => s.mehenNewFixNotes)
+  const newFixNotesRef = useRef(newFixNotes)
+  newFixNotesRef.current = newFixNotes
   const openReposRef = useRef(openRepos)
   openReposRef.current = openRepos
 
   useEffect(() => {
+    if (!keepFresh) return
     const refresh = () => void commands.mehenRefreshIfStale()
     refresh()
     window.addEventListener('focus', refresh)
     return () => window.removeEventListener('focus', refresh)
-  }, [])
+  }, [keepFresh])
 
   useEffect(() => {
     const unlisten = listen('mehen-status-changed', () => {
@@ -75,8 +80,8 @@ export function MehenSync() {
   const repoId = repo?.id
   const tip = head?.tip
   useEffect(() => {
-    if (repoId && tip) void commands.mehenRepoChanged(repoId)
-  }, [repoId, tip])
+    if (keepFresh && repoId && tip) void commands.mehenRepoChanged(repoId)
+  }, [keepFresh, repoId, tip])
 
   useEffect(() => {
     if (!overview) return
@@ -84,8 +89,9 @@ export function MehenSync() {
     const seen = readSeen()
     writeSeen(current)
     // The first time, everything is already on screen; announcing it all at
-    // once would be noise.
-    if (!seen) return
+    // once would be noise. Fixes are still marked as seen while notes are
+    // off, so turning them back on does not replay old news.
+    if (!seen || !newFixNotesRef.current) return
     const open = openReposRef.current
     for (const { repo: found, count } of newFixes(overview.repos, open.map((r) => r.path), seen)) {
       const tab = open.find((r) => samePath(r.path, found.path))

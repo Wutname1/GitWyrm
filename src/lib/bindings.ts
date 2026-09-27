@@ -4187,13 +4187,24 @@ modified_ms: number;
 active: boolean }
 export type LogPage = { commits: CommitEntry[]; has_more: boolean }
 /**
+ * Packages by the most urgent thing about them, as Mehen counts them: a
+ * security problem only when it has a fix (at its worst severity; `low`
+ * includes unrated ones), otherwise the newest update available. Add up the
+ * levels at or above the one wanted.
+ */
+export type MehenAttention = { critical: number; high: number; moderate: number; low: number; major: number; minor: number; patch: number }
+/**
  * What Mehen's last check found, for every repository it checks.
  */
 export type MehenOverview = { 
 /**
  * Whether Mehen can be opened from GitWyrm on this computer.
  */
-can_open: boolean; repos: MehenRepoStatus[] }
+can_open: boolean; 
+/**
+ * When Mehen last checked every project, seconds since epoch.
+ */
+full_check_at: number | null; repos: MehenRepoStatus[] }
 export type MehenProblem = { name: string; ecosystem: string; version: string | null; 
 /**
  * The smallest version that fixes it.
@@ -4244,6 +4255,10 @@ fixable: number;
  * Packages with a newer version available.
  */
 outdated: number; 
+/**
+ * Every package that needs something, counted once at its most urgent level.
+ */
+attention: MehenAttention; 
 /**
  * Fixable problems, the most serious first; a few at most.
  */
@@ -5330,6 +5345,26 @@ show_tab_pr_count?: boolean;
  * the same reason as `show_tab_pr_count`.
  */
 show_tab_issue_count?: boolean; 
+/**
+ * Show packages with a known security problem that Mehen can fix: in the
+ * status bar, on repository tabs, and when pushing package changes.
+ */
+mehen_show_status?: boolean; 
+/**
+ * What the badge on each repository tab counts: `off`, a security
+ * severity (`critical`, `high`, `moderate`, `security` for any), or that
+ * plus updates (`major`, `minor`, `all`). None means `security`.
+ */
+mehen_tab_level?: string | null; 
+/**
+ * Let GitWyrm start Mehen's windowless checks: a full one when the last is
+ * over 12 hours old, and one repository after a pull changes its packages.
+ */
+mehen_keep_fresh?: boolean; 
+/**
+ * A one-time note when Mehen finds a new fix for an open repository.
+ */
+mehen_new_fix_notes?: boolean; 
 /**
  * Open tab groups. These disappear when their last repository is closed.
  */

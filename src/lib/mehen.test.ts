@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MehenPushNote } from './bindings'
-import { allFixKeys, fixKey, isMehenStale, newFixes, pushNoteHint, pushNoteToast, unsafePackages } from './mehen'
+import { allFixKeys, fixKey, isMehenStale, mehenTabBadge, newFixes, parseMehenTabLevel, pushNoteHint, pushNoteToast, unsafePackages } from './mehen'
 
 const NOW = 1_800_000_000_000
 const hoursAgo = (h: number) => NOW / 1000 - h * 3600
@@ -44,7 +44,7 @@ describe('Mehen wording', () => {
 
 describe('new Mehen fixes', () => {
   const problem = (name: string, fixed_in = '2.0.0') => ({ name, ecosystem: 'npm', version: '1.0.0', fixed_in, severity: 'HIGH', summary: '', url: '' })
-  const repo = (path: string, names: string[]) => ({ path, checked_at: 0, fixable: names.length, outdated: 0, problems: names.map((n) => problem(n)) })
+  const repo = (path: string, names: string[]) => ({ path, checked_at: 0, fixable: names.length, outdated: 0, attention: { critical: 0, high: 0, moderate: 0, low: names.length, major: 0, minor: 0, patch: 0 }, problems: names.map((n) => problem(n)) })
 
   it('announces only fixes it has not seen, in open repositories', () => {
     const before = [repo('C:\\code\\a', ['old'])]
@@ -57,5 +57,26 @@ describe('new Mehen fixes', () => {
 
   it('treats a newer fix version for the same package as new', () => {
     expect(fixKey('C:\\code\\a', problem('p', '2.0.1'))).not.toBe(fixKey('C:\\code\\a', problem('p', '2.0.0')))
+  })
+})
+
+describe('Mehen tab badge levels', () => {
+  const attention = { critical: 1, high: 2, moderate: 3, low: 4, major: 5, minor: 6, patch: 7 }
+
+  it('adds up every level at or above the one chosen', () => {
+    expect(mehenTabBadge(attention, 'off')).toEqual({ count: 0, security: 0 })
+    expect(mehenTabBadge(attention, 'critical')).toEqual({ count: 1, security: 1 })
+    expect(mehenTabBadge(attention, 'high')).toEqual({ count: 3, security: 3 })
+    expect(mehenTabBadge(attention, 'moderate')).toEqual({ count: 6, security: 6 })
+    expect(mehenTabBadge(attention, 'security')).toEqual({ count: 10, security: 10 })
+    expect(mehenTabBadge(attention, 'major')).toEqual({ count: 15, security: 10 })
+    expect(mehenTabBadge(attention, 'minor')).toEqual({ count: 21, security: 10 })
+    expect(mehenTabBadge(attention, 'all')).toEqual({ count: 28, security: 10 })
+  })
+
+  it('falls back to all security fixes for a saved value it does not know', () => {
+    expect(parseMehenTabLevel('high')).toBe('high')
+    expect(parseMehenTabLevel(undefined)).toBe('security')
+    expect(parseMehenTabLevel('everything')).toBe('security')
   })
 })
