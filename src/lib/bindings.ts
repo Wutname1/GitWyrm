@@ -4979,6 +4979,11 @@ export type RunStep =
  * The run ended.
  */
 { kind: "ended"; state: RunState; detail: string }
+export type RunningRepo = { path: string; step: UpdateStep; 
+/**
+ * Seconds since the epoch, so the view can show how long it has taken.
+ */
+started_at: number }
 /**
  * What a scaffold call produced.
  */
@@ -6086,9 +6091,17 @@ export type UnpushedTag = { name: string; target_sha: string;
 commit_on_remote: boolean }
 export type UpdateAllProgress = { job: number; total: number; done: number; 
 /**
- * Paths of the repositories being worked on right now.
+ * Every repository in this run, in the order they are worked on.
  */
-running: string[]; branches_updated: number; commits_received: number; errors: number; warnings: number; stopping: boolean }
+queued: string[]; 
+/**
+ * The repositories being worked on right now.
+ */
+running: RunningRepo[]; 
+/**
+ * Results so far, in the order they finished.
+ */
+finished: RepoUpdate[]; branches_updated: number; commits_received: number; errors: number; warnings: number; stopping: boolean }
 export type UpdateAllReport = { job: number; 
 /**
  * Seconds since the epoch.
@@ -6124,6 +6137,18 @@ export type UpdateChannel = "stable" | "beta"
  * without downloading an AppImage or asking for root access.
  */
 export type UpdateInstallMode = "self_update" | "system_package"
+/**
+ * Which part of the work a repository is on.
+ */
+export type UpdateStep = 
+/**
+ * Asking its servers what is new.
+ */
+"fetching" | 
+/**
+ * Moving its branches forward.
+ */
+"updating"
 export type WorkingStatus = { staged: FileChange[]; unstaged: FileChange[] }
 /**
  * One checkout of the repository: the main one, or a linked worktree.

@@ -25,6 +25,7 @@ import {
   branchUpdateText,
   branchUpdateTone,
   groupRepoUpdates,
+  SET_ASIDE_WARNING,
   updateDetail,
   updateHeadline,
   updateTotals,
@@ -33,9 +34,6 @@ import {
 import { cn } from '@/lib/utils'
 import { startUpdateAll, useUpdateAllStore } from '@/stores/updateAllStore'
 
-const SET_ASIDE_WARNING =
-  'Your unsaved changes are put to one side, the branch is updated, and then your changes are put back. ' +
-  'If your changes clash with the new commits, that is only noted here - you will need to open the project to sort it out yourself.'
 
 const SECTION: Record<ResultSection, { title: string; icon: React.ReactNode; defaultOpen: boolean }> = {
   error: {
@@ -214,7 +212,7 @@ export function UpdateAllResultsDialog() {
   return (
     <Dialog open={open} onOpenChange={(next) => !next && closeResults()}>
       <DialogContent className="flex max-h-[min(760px,calc(100vh-64px))] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
-        <DialogHeader className="border-b border-border px-5 py-4 pr-12">
+        <DialogHeader className="select-text border-b border-border px-5 py-4 pr-12">
           <DialogTitle className="text-sm">{updateHeadline(totals)}</DialogTitle>
           <DialogDescription className="text-2xs">
             {showPaths ? `Checked ${plural(totals.projects, 'project')}` : 'Checked every branch in this project'}
@@ -224,7 +222,7 @@ export function UpdateAllResultsDialog() {
           </DialogDescription>
         </DialogHeader>
 
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
+        <div className="min-h-0 flex-1 space-y-4 select-text overflow-y-auto px-5 py-4">
           {groups.length === 0 && (
             <p className="py-10 text-center text-xs text-muted-foreground">No projects were found to update.</p>
           )}

@@ -1,6 +1,11 @@
 import type { BranchUpdate, RepoUpdate, RepoUpdateLevel } from '@/lib/bindings'
 import { plural } from '@/lib/gitDisplay'
-import { pathKey } from '@/lib/paths'
+import { pathKey, pathName } from '@/lib/paths'
+
+/** Shown wherever the user can choose to have unsaved changes set aside. */
+export const SET_ASIDE_WARNING =
+  'Your unsaved changes are put to one side, the branch is updated, and then your changes are put back. ' +
+  'If your changes clash with the new commits, that is only noted in the results - you will need to open the project to sort it out yourself.'
 
 /** What one branch's result says, in plain words. */
 export function branchUpdateText(branch: BranchUpdate): string {
@@ -143,4 +148,81 @@ export function mergeRepoUpdates(previous: RepoUpdate[], retry: RepoUpdate[]): R
   const byPath = new Map(previous.map((r) => [pathKey(r.path), r]))
   for (const repo of retry) byPath.set(pathKey(repo.path), repo)
   return sortRepoUpdates([...byPath.values()])
+}
+
+/** One collapsible group of projects in the "Get the latest for..." picker. */
+export interface PickerSection {
+  key: string
+  title: string
+  /** Shown under the title: the folder's path, or null. */
+  subtitle: string | null
+  repos: { name: string; path: string; branch: string | null }[]
+  /** The folder could not be read (drive unplugged). */
+  unavailable: boolean
+}
+
+/**
+ * Open tabs first, then each code folder. A project can appear in both; its
+ * tick is shared, because it is one project.
+ */
+export function buildPickerSections(
+  openRepos: { name: string; path: string; head_branch: string | null }[],
+  folders: {
+    path: string
+    label: string | null
+    isUnavailable: boolean
+    repos: { name: string; path: string; head_branch: string | null }[]
+  }[],
+): PickerSection[] {
+  const sections: PickerSection[] = []
+  if (openRepos.length > 0) {
+    sections.push({
+      key: 'open',
+      title: 'Open tabs',
+      subtitle: null,
+      repos: openRepos.map((r) => ({ name: r.name, path: r.path, branch: r.head_branch })),
+      unavailable: false,
+    })
+  }
+  for (const folder of folders) {
+    sections.push({
+      key: `folder:${pathKey(folder.path)}`,
+      title: folder.label ?? pathName(folder.path),
+      subtitle: folder.path,
+      repos: folder.repos.map((r) => ({ name: r.name, path: r.path, branch: r.head_branch })),
+      unavailable: folder.isUnavailable,
+    })
+  }
+  return sections
+}
+
+/** Every distinct project across the sections. */
+export function pickerPaths(sections: PickerSection[]): string[] {
+  const byKey = new Map<string, string>()
+  for (const section of sections) for (const repo of section.repos) byKey.set(pathKey(repo.path), repo.path)
+  return [...byKey.values()]
+}
+
+/** Whether a section's box reads as ticked, empty, or partly ticked. */
+export function sectionTick(section: PickerSection, excluded: Set<string>): 'all' | 'some' | 'none' {
+  if (section.repos.length === 0) return 'none'
+  const off = section.repos.filter((r) => excluded.has(pathKey(r.path))).length
+  return off === 0 ? 'all' : off === section.repos.length ? 'none' : 'some'
+}
+
+/** One line describing a finished project, for the live progress list. */
+export function repoUpdateSummary(repo: RepoUpdate): string {
+  if (repo.skipped) return 'Not checked - stopped first'
+  if (repo.message) return repo.message
+  const updated = repo.branches.filter((b) => b.kind === 'updated').length
+  const needsLook = repo.branches.filter((b) => {
+    const tone = branchUpdateTone(b)
+    return tone === 'warning' || tone === 'error'
+  }).length
+  const parts: string[] = []
+  if (updated > 0) {
+    parts.push(`Got ${plural(repo.commits_received, 'new commit')} on ${plural(updated, 'branch', 'branches')}`)
+  }
+  if (needsLook > 0) parts.push(`${plural(needsLook, 'branch', 'branches')} left alone`)
+  return parts.length > 0 ? parts.join(' · ') : 'Already up to date'
 }

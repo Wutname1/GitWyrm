@@ -26,15 +26,20 @@ const START_DELAY_MS = 5000
 
 let startedThisSession = false
 
+const openDetails = () => useUpdateAllStore.getState().openDialog()
+
+/** The toast's text is the way into the details window: sonner has no click handler of its own. */
 function ProgressTitle() {
   const progress = useUpdateAllStore((s) => s.progress)
   if (!progress) return null
-  if (progress.stopping) return <>Stopping…</>
-  if (progress.total === 0) return <>Finding your projects…</>
   return (
-    <>
-      Getting the latest · {progress.done} of {plural(progress.total, 'project')}
-    </>
+    <button type="button" onClick={openDetails} className="cursor-pointer text-left">
+      {progress.stopping
+        ? 'Stopping…'
+        : progress.total === 0
+          ? 'Finding your projects…'
+          : `Getting the latest · ${progress.done} of ${plural(progress.total, 'project')}`}
+    </button>
   )
 }
 
@@ -47,8 +52,15 @@ function ProgressDetail() {
     progress.errors + progress.warnings > 0 &&
       `${plural(progress.errors + progress.warnings, 'project')} need${progress.errors + progress.warnings === 1 ? 's' : ''} a look`,
   ].filter(Boolean)
+  const now = progress.running.map((r) => pathName(r.path)).join(', ')
   return (
-    <span className="mt-1 flex w-full min-w-0 flex-col gap-1.5">
+    <span
+      role="button"
+      tabIndex={0}
+      onClick={openDetails}
+      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && openDetails()}
+      className="mt-1 flex w-full min-w-0 cursor-pointer flex-col gap-1.5"
+    >
       <span
         role="progressbar"
         aria-valuemin={0}
@@ -62,11 +74,12 @@ function ProgressDetail() {
         />
       </span>
       {progress.running.length > 0 && (
-        <span className="block min-w-0 truncate text-2xs" title={progress.running.map(pathName).join(', ')}>
-          Now: {progress.running.map(pathName).join(', ')}
+        <span className="block min-w-0 truncate text-2xs" title={now}>
+          Now: {now}
         </span>
       )}
       {counts.length > 0 && <span className="text-2xs">{counts.join(' · ')}</span>}
+      <span className="text-2xs text-accent-text underline underline-offset-2">Show details</span>
     </span>
   )
 }
@@ -112,7 +125,11 @@ export function UpdateAllSync() {
         const key = pathKey(path)
         if (busy.current.has(key)) continue
         const open = openRepos.find((repo) => samePath(repo.path, path))
-        if (open) busy.current.set(key, { repoId: open.id, end: beginGitOperation(open.id) })
+        if (open)
+          busy.current.set(key, {
+            repoId: open.id,
+            end: beginGitOperation(open.id),
+          })
       }
       for (const [key, entry] of busy.current) {
         if (runningKeys.has(key)) continue
@@ -124,14 +141,12 @@ export function UpdateAllSync() {
 
     const onProgress = (progress: UpdateAllProgress) => {
       useUpdateAllStore.getState().setProgress(progress)
-      track(progress.running)
+      track(progress.running.map((r) => r.path))
     }
 
     const onFinished = (report: UpdateAllReport) => {
       track([])
-      const results = useUpdateAllStore
-        .getState()
-        .finishJob(report.repos, report.cancelled, report.finished_at * 1000)
+      const results = useUpdateAllStore.getState().finishJob(report.repos, report.cancelled, report.finished_at * 1000)
       showUpdateResultsToast(results, TOAST_ID)
     }
 

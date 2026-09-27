@@ -614,6 +614,8 @@ pub(crate) fn fetch_all_at(
         let message = humanize_credential_failure(&detail, &lines).unwrap_or_else(|| {
             if needs_sign_in {
                 "The server wants you to sign in before it will send anything.".to_string()
+            } else if low.contains("dubious ownership") {
+                "Git will not work in this folder because a different Windows account owns it. This often happens with projects on a second drive.".to_string()
             } else if low.contains("could not resolve host") || low.contains("unable to access") {
                 "Could not reach the server. Check your internet or VPN connection.".to_string()
             } else {

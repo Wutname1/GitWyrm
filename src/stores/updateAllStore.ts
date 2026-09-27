@@ -21,6 +21,11 @@ interface UpdateAllState {
   results: UpdateResults | null
   resultsOpen: boolean
   /**
+   * The "Get the latest for..." window: a picker when nothing is running, the
+   * live progress of the run when something is.
+   */
+  dialogOpen: boolean
+  /**
    * Set when the running job is a retry started from the results window, so
    * its report is folded into what is already there rather than replacing it.
    */
@@ -31,12 +36,15 @@ interface UpdateAllState {
   finishJob: (repos: RepoUpdate[], cancelled: boolean, finishedAt: number) => UpdateResults
   openResults: () => void
   closeResults: () => void
+  openDialog: () => void
+  closeDialog: () => void
 }
 
 export const useUpdateAllStore = create<UpdateAllState>((set, get) => ({
   progress: null,
   results: null,
   resultsOpen: false,
+  dialogOpen: false,
   mergeNext: false,
   setProgress: (progress) => set({ progress }),
   showResults: (results, open = false) =>
@@ -50,8 +58,10 @@ export const useUpdateAllStore = create<UpdateAllState>((set, get) => ({
     set({ results: next, progress: null, mergeNext: false })
     return next
   },
-  openResults: () => set({ resultsOpen: true }),
+  openResults: () => set({ resultsOpen: true, dialogOpen: false }),
   closeResults: () => set({ resultsOpen: false }),
+  openDialog: () => set({ dialogOpen: true }),
+  closeDialog: () => set({ dialogOpen: false }),
 }))
 
 /**
@@ -70,7 +80,9 @@ export async function startUpdateAll(request: UpdateAllRequest, retry = false): 
     job: 0,
     total: 0,
     done: 0,
+    queued: [],
     running: [],
+    finished: [],
     branches_updated: 0,
     commits_received: 0,
     errors: 0,

@@ -116,13 +116,35 @@ pub struct UpdateAllProgress {
     pub job: u32,
     pub total: u32,
     pub done: u32,
-    /// Paths of the repositories being worked on right now.
-    pub running: Vec<String>,
+    /// Every repository in this run, in the order they are worked on.
+    pub queued: Vec<String>,
+    /// The repositories being worked on right now.
+    pub running: Vec<RunningRepo>,
+    /// Results so far, in the order they finished.
+    pub finished: Vec<RepoUpdate>,
     pub branches_updated: u32,
     pub commits_received: u32,
     pub errors: u32,
     pub warnings: u32,
     pub stopping: bool,
+}
+
+/// Which part of the work a repository is on.
+#[derive(Debug, Clone, Copy, Serialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateStep {
+    /// Asking its servers what is new.
+    Fetching,
+    /// Moving its branches forward.
+    Updating,
+}
+
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct RunningRepo {
+    pub path: String,
+    pub step: UpdateStep,
+    /// Seconds since the epoch, so the view can show how long it has taken.
+    pub started_at: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -463,6 +485,7 @@ fn update_one(
     allow_set_aside: bool,
     attended: Attended,
     cancel: Option<&AtomicBool>,
+    on_step: &dyn Fn(UpdateStep),
 ) -> RepoUpdate {
     let mut report = blank_report(folder_name(path), path.to_string());
 
@@ -491,6 +514,7 @@ fn update_one(
         return report;
     }
 
+    on_step(UpdateStep::Fetching);
     if let Err(failure) = fetch_all_at(path, attended, cancel) {
         if failure.stopped {
             report.skipped = true;
@@ -502,6 +526,7 @@ fn update_one(
         return report;
     }
 
+    on_step(UpdateStep::Updating);
     let outcome = match manager.get(&repo_id_for(&workdir)) {
         Ok(open) => {
             drop(fresh);
@@ -610,7 +635,9 @@ pub async fn update_all_start(
             job,
             total: 0,
             done: 0,
+            queued: Vec::new(),
             running: Vec::new(),
+            finished: Vec::new(),
             branches_updated: 0,
             commits_received: 0,
             errors: 0,
@@ -667,7 +694,10 @@ fn run_job(app: AppHandle, job: u32, request: UpdateAllRequest, cancel: Arc<Atom
         };
         emit_progress(&app, &snapshot);
     };
-    update_progress(&|p| p.total = targets.len() as u32);
+    update_progress(&|p| {
+        p.total = targets.len() as u32;
+        p.queued = targets.clone();
+    });
 
     let results: Mutex<Vec<Option<RepoUpdate>>> = Mutex::new(vec![None; targets.len()]);
     let next = AtomicUsize::new(0);
@@ -682,7 +712,13 @@ fn run_job(app: AppHandle, job: u32, request: UpdateAllRequest, cancel: Arc<Atom
                 let Some(path) = targets.get(index) else {
                     break;
                 };
-                update_progress(&|p| p.running.push(path.clone()));
+                update_progress(&|p| {
+                    p.running.push(RunningRepo {
+                        path: path.clone(),
+                        step: UpdateStep::Fetching,
+                        started_at: now_secs(),
+                    })
+                });
 
                 let report = update_one(
                     &manager,
@@ -691,6 +727,13 @@ fn run_job(app: AppHandle, job: u32, request: UpdateAllRequest, cancel: Arc<Atom
                     allow.contains(&path_key(path)),
                     attended,
                     Some(&cancel),
+                    &|step| {
+                        update_progress(&|p| {
+                            if let Some(r) = p.running.iter_mut().find(|r| &r.path == path) {
+                                r.step = step;
+                            }
+                        })
+                    },
                 );
 
                 let updated = report
@@ -700,9 +743,10 @@ fn run_job(app: AppHandle, job: u32, request: UpdateAllRequest, cancel: Arc<Atom
                     .count() as u32;
                 let commits = report.commits_received;
                 let level = report.level;
-                results.lock().unwrap()[index] = Some(report);
+                results.lock().unwrap()[index] = Some(report.clone());
                 update_progress(&|p| {
-                    p.running.retain(|r| r != path);
+                    p.running.retain(|r| &r.path != path);
+                    p.finished.push(report.clone());
                     p.done += 1;
                     p.branches_updated += updated;
                     p.commits_received += commits;
@@ -1129,7 +1173,15 @@ mod tests {
         git(&seed, &["push", "-q", "origin", "main:develop"]);
 
         let manager = RepoManager::default();
-        let report = update_one(&manager, &mine, None, false, Attended::Background, None);
+        let report = update_one(
+            &manager,
+            &mine,
+            None,
+            false,
+            Attended::Background,
+            None,
+            &|_| {},
+        );
 
         assert_eq!(report.level, RepoUpdateLevel::Updated, "{report:?}");
         assert_eq!(report.commits_received, 2);

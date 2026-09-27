@@ -1,10 +1,9 @@
-import { FolderSync, ListChecks, Loader2, Square } from 'lucide-react'
+import { FolderSync, ListChecks, ListFilter, Loader2, Square } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { ContextMenuItem } from '@/components/ui/context-menu'
 import { DropdownMenuItem } from '@/components/ui/dropdown-menu'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { showUpdateAllProgressToast } from '@/components/domain/UpdateAllSync'
 import { plural } from '@/lib/gitDisplay'
 import { cn } from '@/lib/utils'
 import { everyProjectRequest, startUpdateAll, stopUpdateAll, useUpdateAllStore } from '@/stores/updateAllStore'
@@ -16,34 +15,48 @@ import { useWorkspaceStore } from '@/stores/workspaceStore'
  */
 export function UpdateAllFoldersButton() {
   const progress = useUpdateAllStore((s) => s.progress)
+  const openDialog = useUpdateAllStore((s) => s.openDialog)
   const running = progress != null
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="sm"
-          className={cn('h-7 gap-1.5 text-2xs', running && 'text-accent-text')}
-          onClick={() => (running ? showUpdateAllProgressToast() : void startUpdateAll(everyProjectRequest()))}
-        >
-          {running ? (
-            <Loader2 aria-hidden size={12} className="animate-spin" />
-          ) : (
-            <FolderSync aria-hidden size={12} />
-          )}
+    <>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            className={cn('h-7 gap-1.5 text-2xs', running && 'text-accent-text')}
+            onClick={() => (running ? openDialog() : void startUpdateAll(everyProjectRequest()))}
+          >
+            {running ? (
+              <Loader2 aria-hidden size={12} className="animate-spin" />
+            ) : (
+              <FolderSync aria-hidden size={12} />
+            )}
+            {running
+              ? progress.total > 0
+                ? `Getting the latest ${progress.done}/${progress.total}`
+                : 'Getting the latest…'
+              : 'Get the latest for all'}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>
           {running
-            ? progress.total > 0
-              ? `Getting the latest ${progress.done}/${progress.total}`
-              : 'Getting the latest…'
-            : 'Get the latest for all'}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>
-        {running
-          ? 'Show progress'
-          : 'Bring every branch in these projects up to date. Branches with their own new work, or with unsaved changes, are left alone.'}
-      </TooltipContent>
-    </Tooltip>
+            ? 'Show progress'
+            : 'Bring every branch in these projects up to date. Branches with their own new work, or with unsaved changes, are left alone.'}
+        </TooltipContent>
+      </Tooltip>
+      {!running && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-2xs" onClick={openDialog}>
+              <ListFilter aria-hidden size={12} />
+              Choose…
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Pick which projects to bring up to date</TooltipContent>
+        </Tooltip>
+      )}
+    </>
   )
 }
 
@@ -64,6 +77,7 @@ function useUpdateAllEntries(group?: { name: string; paths: string[] }): UpdateA
   const progress = useUpdateAllStore((s) => s.progress)
   const hasResults = useUpdateAllStore((s) => s.results != null)
   const openResults = useUpdateAllStore((s) => s.openResults)
+  const openDialog = useUpdateAllStore((s) => s.openDialog)
   const folderCount = useWorkspaceStore((s) => s.codeFolders.length)
   const openCount = useWorkspaceStore((s) => s.openRepos.length)
   const nothingToUpdate = folderCount === 0 && openCount === 0
@@ -78,7 +92,7 @@ function useUpdateAllEntries(group?: { name: string; paths: string[] }): UpdateA
           progress.total > 0
             ? `Getting the latest: ${progress.done} of ${plural(progress.total, 'project')}`
             : 'Getting the latest…',
-        run: () => showUpdateAllProgressToast(),
+        run: () => openDialog(),
       },
       {
         key: 'stop',
@@ -94,15 +108,30 @@ function useUpdateAllEntries(group?: { name: string; paths: string[] }): UpdateA
         key: 'group',
         icon: <FolderSync aria-hidden size={13} />,
         label: `Get the latest for ${group.name}`,
-        run: () => void startUpdateAll({ folders: [], paths: group.paths, allow_set_aside: [], sign_in: false }),
+        run: () =>
+          void startUpdateAll({
+            folders: [],
+            paths: group.paths,
+            allow_set_aside: [],
+            sign_in: false,
+          }),
       })
     }
     entries.push({
       key: 'all',
       icon: <FolderSync aria-hidden size={13} />,
-      label: nothingToUpdate ? 'Get the latest for all projects (add a code folder first)' : 'Get the latest for all projects',
+      label: nothingToUpdate
+        ? 'Get the latest for all projects (add a code folder first)'
+        : 'Get the latest for all projects',
       disabled: nothingToUpdate,
       run: () => void startUpdateAll(everyProjectRequest()),
+    })
+    entries.push({
+      key: 'choose',
+      icon: <ListFilter aria-hidden size={13} />,
+      label: 'Get the latest for…',
+      disabled: nothingToUpdate,
+      run: () => openDialog(),
     })
   }
   if (hasResults) {
@@ -119,12 +148,7 @@ function useUpdateAllEntries(group?: { name: string; paths: string[] }): UpdateA
 /** The actions as dropdown items, for the open-and-recent menu beside the tabs. */
 export function UpdateAllDropdownItems() {
   return useUpdateAllEntries().map((entry) => (
-    <DropdownMenuItem
-      key={entry.key}
-      className="text-xs"
-      disabled={entry.disabled}
-      onSelect={entry.run}
-    >
+    <DropdownMenuItem key={entry.key} className="text-xs" disabled={entry.disabled} onSelect={entry.run}>
       {entry.icon}
       {entry.label}
     </DropdownMenuItem>

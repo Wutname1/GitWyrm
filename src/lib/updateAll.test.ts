@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { BranchUpdate, RepoUpdate } from './bindings'
+import { pathKey } from './paths'
 import {
   branchUpdateText,
+  buildPickerSections,
   groupRepoUpdates,
   mergeRepoUpdates,
+  pickerPaths,
+  repoUpdateSummary,
+  sectionTick,
   updateDetail,
   updateHeadline,
   updateTotals,
@@ -99,5 +104,60 @@ describe('mergeRepoUpdates', () => {
     const merged = mergeRepoUpdates(before, retry)
     expect(merged).toHaveLength(2)
     expect(merged.every((r) => r.level === 'updated')).toBe(true)
+  })
+})
+
+describe('picker sections', () => {
+  const open = [{ name: 'api', path: 'C:/code/api', head_branch: 'main' }]
+  const folders = [
+    {
+      path: 'C:/code',
+      label: null,
+      isUnavailable: false,
+      repos: [
+        { name: 'api', path: 'C:/code/api', head_branch: 'main' },
+        { name: 'web', path: 'C:/code/web', head_branch: 'develop' },
+      ],
+    },
+  ]
+
+  it('lists open tabs first, then each folder by name', () => {
+    const sections = buildPickerSections(open, folders)
+    expect(sections.map((s) => s.title)).toEqual(['Open tabs', 'code'])
+  })
+
+  /** A project that is open AND in a folder is one project, updated once. */
+  it('counts a project shown in two sections once', () => {
+    expect(pickerPaths(buildPickerSections(open, folders))).toHaveLength(2)
+  })
+
+  it('reads a section as partly ticked when some of its projects are off', () => {
+    const [, folder] = buildPickerSections(open, folders)
+    expect(sectionTick(folder, new Set())).toBe('all')
+    expect(sectionTick(folder, new Set([pathKey('C:/code/web')]))).toBe('some')
+    expect(sectionTick(folder, new Set(['c:/code/api', 'c:/code/web'].map(pathKey)))).toBe('none')
+  })
+})
+
+describe('repoUpdateSummary', () => {
+  it('says what came in and what was left alone', () => {
+    expect(
+      repoUpdateSummary(
+        repo('api', {
+          commits_received: 3,
+          branches: [branch('main', 'updated', 3), branch('feature', 'both_changed', 2)],
+        }),
+      ),
+    ).toBe('Got 3 new commits on 1 branch · 1 branch left alone')
+  })
+
+  it('leads with a problem the project had as a whole', () => {
+    expect(repoUpdateSummary(repo('docs', { message: 'Sign-in needed for github.com.' }))).toBe(
+      'Sign-in needed for github.com.',
+    )
+  })
+
+  it('reads plainly when nothing changed', () => {
+    expect(repoUpdateSummary(repo('same'))).toBe('Already up to date')
   })
 })
