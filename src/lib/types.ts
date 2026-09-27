@@ -10,6 +10,7 @@ export type SectionKey =
   | 'issues'
   | 'tags'
   | 'submodules'
+  | 'mehen'
 
 export type SectionType = 'branch' | 'remote' | 'tree' | 'stash' | 'pr' | 'issue' | 'tag'
 

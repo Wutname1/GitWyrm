@@ -280,15 +280,15 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
   {
     id: 'mehen-show-status',
     section: 'integrations',
-    label: 'Packages with a security fix waiting',
-    hint: 'Show them in the status bar, and say so when you push changes to your packages.',
+    label: 'Status bar',
+    hint: 'Show what Mehen flags in the status bar, and mention security fixes when you push package changes.',
     keywords: ['mehen', 'unsafe', 'vulnerable', 'security', 'dependencies', 'packages', 'status bar', 'push'],
   },
   {
     id: 'mehen-tab-level',
     section: 'integrations',
-    label: 'Packages on tabs',
-    hint: 'Choose what the Mehen badge on each repository tab counts: security fixes by severity, or updates too.',
+    label: 'What Mehen flags',
+    hint: 'Choose what the tab badge, status bar and sidebar count: security fixes by severity, or updates too.',
     keywords: ['mehen', 'unsafe', 'vulnerable', 'badge', 'tab', 'count', 'shield', 'critical', 'high', 'medium', 'severity', 'outdated', 'updates', 'major', 'minor'],
   },
   {

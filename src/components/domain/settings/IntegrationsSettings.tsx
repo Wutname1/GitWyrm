@@ -556,23 +556,23 @@ function MehenSettings() {
         )}
       </SettingRow>
       <MehenToggle
-        label="Packages with a security fix waiting"
+        label="Status bar"
         searchId="mehen-show-status"
-        hint="Shown in the status bar, and mentioned when you push changes to your packages. Problems with no fix yet are never shown."
-        text="Show packages with a fix waiting"
+        hint="Show what Mehen flags for the open repository in the status bar, and mention security fixes when you push changes to your packages."
+        text="Show in the status bar"
         checked={showStatus}
         onChange={setShowStatus}
       />
       <SettingRow
-        label="Packages on tabs"
+        label="What Mehen flags"
         searchId="mehen-tab-level"
-        hint="What the Mehen badge on each repository tab counts. Each choice includes everything above it. Security problems count only when they have a fix."
+        hint="What the tab badge, the status bar and the Mehen list in the sidebar count. Each choice includes everything above it. Security problems count only when they have a fix."
       >
         <select
           className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:border-ring"
           value={tabLevel}
           onChange={(e) => setTabLevel(parseMehenTabLevel(e.target.value))}
-          aria-label="What the Mehen badge on tabs counts"
+          aria-label="What Mehen flags"
         >
           {MEHEN_TAB_LEVELS.map((level) => (
             <option key={level.id} value={level.id}>

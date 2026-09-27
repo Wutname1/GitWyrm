@@ -4194,6 +4194,23 @@ export type LogPage = { commits: CommitEntry[]; has_more: boolean }
  */
 export type MehenAttention = { critical: number; high: number; moderate: number; low: number; major: number; minor: number; patch: number }
 /**
+ * One package Mehen flags, at the level it counts at.
+ */
+export type MehenFlagged = { name: string; ecosystem: string; 
+/**
+ * `critical`, `high`, `moderate`, `low`, `major`, `minor` or `patch`.
+ */
+level: string; version: string | null; 
+/**
+ * The smallest fix for a security problem, otherwise the newest version
+ * the repository can use.
+ */
+target: string | null; 
+/**
+ * The worst advisory's summary, for a security problem.
+ */
+summary?: string | null }
+/**
  * What Mehen's last check found, for every repository it checks.
  */
 export type MehenOverview = { 
@@ -4259,6 +4276,10 @@ outdated: number;
  * Every package that needs something, counted once at its most urgent level.
  */
 attention: MehenAttention; 
+/**
+ * The packages behind `attention`, most urgent first.
+ */
+flagged: MehenFlagged[]; 
 /**
  * Fixable problems, the most serious first; a few at most.
  */

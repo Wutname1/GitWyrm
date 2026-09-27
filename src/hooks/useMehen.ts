@@ -4,7 +4,7 @@ import { commands, type BranchInfo, type MehenPushNote, type MehenRepoStatus } f
 import { keys, unwrap } from '@/lib/queryKeys'
 import { classifyError } from '@/lib/errorClass'
 import { showErrorToast } from '@/lib/errorToast'
-import { pushNoteToast } from '@/lib/mehen'
+import { flaggedAt, mehenTabBadge, pushNoteToast } from '@/lib/mehen'
 import { samePath } from '@/lib/paths'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 
@@ -85,4 +85,16 @@ export async function openInMehen(repoId: string, fix: boolean) {
   } catch (error) {
     showErrorToast(classifyError(error))
   }
+}
+
+/**
+ * What Mehen flags in one repository at the level chosen in settings: the
+ * same count and list the tab badge, the status bar and the sidebar show.
+ */
+export function useMehenFlags(repoPath: string | null) {
+  const { status, canOpen } = useMehenStatus(repoPath)
+  const level = useWorkspaceStore((s) => s.mehenTabLevel)
+  const badge = status ? mehenTabBadge(status.attention, level) : { count: 0, security: 0 }
+  const flagged = status ? flaggedAt(status.flagged, level) : []
+  return { status, canOpen, level, badge, flagged }
 }

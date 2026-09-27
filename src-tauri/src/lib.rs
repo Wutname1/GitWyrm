@@ -828,6 +828,7 @@ pub fn run() {
             commands::app::set_pending_launch_path(commands::app::repo_path_from_args(
                 std::env::args(),
             ));
+            commands::mehen::watch_status_file(app.handle().clone());
             Ok(())
         })
         .manage(crate::airun::SessionRegistry::new())

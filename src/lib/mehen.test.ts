@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MehenPushNote } from './bindings'
-import { allFixKeys, fixKey, isMehenStale, mehenTabBadge, newFixes, parseMehenTabLevel, pushNoteHint, pushNoteToast, unsafePackages } from './mehen'
+import { allFixKeys, fixKey, flaggedAt, isMehenStale, mehenBadgeLabel, mehenTabBadge, newFixes, parseMehenTabLevel, pushNoteHint, pushNoteToast, unsafePackages } from './mehen'
 
 const NOW = 1_800_000_000_000
 const hoursAgo = (h: number) => NOW / 1000 - h * 3600
@@ -44,7 +44,7 @@ describe('Mehen wording', () => {
 
 describe('new Mehen fixes', () => {
   const problem = (name: string, fixed_in = '2.0.0') => ({ name, ecosystem: 'npm', version: '1.0.0', fixed_in, severity: 'HIGH', summary: '', url: '' })
-  const repo = (path: string, names: string[]) => ({ path, checked_at: 0, fixable: names.length, outdated: 0, attention: { critical: 0, high: 0, moderate: 0, low: names.length, major: 0, minor: 0, patch: 0 }, problems: names.map((n) => problem(n)) })
+  const repo = (path: string, names: string[]) => ({ path, checked_at: 0, fixable: names.length, outdated: 0, attention: { critical: 0, high: 0, moderate: 0, low: names.length, major: 0, minor: 0, patch: 0 }, flagged: [], problems: names.map((n) => problem(n)) })
 
   it('announces only fixes it has not seen, in open repositories', () => {
     const before = [repo('C:\\code\\a', ['old'])]
@@ -78,5 +78,24 @@ describe('Mehen tab badge levels', () => {
     expect(parseMehenTabLevel('high')).toBe('high')
     expect(parseMehenTabLevel(undefined)).toBe('security')
     expect(parseMehenTabLevel('everything')).toBe('security')
+  })
+})
+
+describe('Mehen flagged packages', () => {
+  const flag = (name: string, level: string) => ({ name, ecosystem: 'npm', level, version: '1.0.0', target: '2.0.0', summary: null })
+  const flagged = [flag('a', 'critical'), flag('b', 'low'), flag('c', 'major'), flag('d', 'patch')]
+
+  it('lists what the chosen level includes', () => {
+    expect(flaggedAt(flagged, 'off')).toEqual([])
+    expect(flaggedAt(flagged, 'high').map((f) => f.name)).toEqual(['a'])
+    expect(flaggedAt(flagged, 'security').map((f) => f.name)).toEqual(['a', 'b'])
+    expect(flaggedAt(flagged, 'major').map((f) => f.name)).toEqual(['a', 'b', 'c'])
+    expect(flaggedAt(flagged, 'all').map((f) => f.name)).toEqual(['a', 'b', 'c', 'd'])
+  })
+
+  it('says what the count is made of', () => {
+    expect(mehenBadgeLabel({ count: 2, security: 2 })).toBe('2 packages with a security fix waiting')
+    expect(mehenBadgeLabel({ count: 16, security: 0 })).toBe('16 packages to update')
+    expect(mehenBadgeLabel({ count: 11, security: 1 })).toBe('11 packages to update, 1 of them a security fix')
   })
 })

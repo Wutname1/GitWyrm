@@ -12,7 +12,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::error::AppError;
 use crate::state::RepoManager;
@@ -64,6 +64,8 @@ struct FileRepo {
     #[serde(default)]
     attention: MehenAttention,
     #[serde(default)]
+    flagged: Vec<MehenFlagged>,
+    #[serde(default)]
     problems: Vec<FileProblem>,
 }
 
@@ -107,6 +109,8 @@ pub struct MehenRepoStatus {
     pub outdated: u32,
     /// Every package that needs something, counted once at its most urgent level.
     pub attention: MehenAttention,
+    /// The packages behind `attention`, most urgent first.
+    pub flagged: Vec<MehenFlagged>,
     /// Fixable problems, the most serious first; a few at most.
     pub problems: Vec<MehenProblem>,
 }
@@ -125,6 +129,22 @@ pub struct MehenAttention {
     pub major: u32,
     pub minor: u32,
     pub patch: u32,
+}
+
+/// One package Mehen flags, at the level it counts at.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct MehenFlagged {
+    pub name: String,
+    pub ecosystem: String,
+    /// `critical`, `high`, `moderate`, `low`, `major`, `minor` or `patch`.
+    pub level: String,
+    pub version: Option<String>,
+    /// The smallest fix for a security problem, otherwise the newest version
+    /// the repository can use.
+    pub target: Option<String>,
+    /// The worst advisory's summary, for a security problem.
+    #[serde(default)]
+    pub summary: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -232,6 +252,7 @@ fn to_status(repo: FileRepo) -> MehenRepoStatus {
         fixable: repo.fixable,
         outdated: repo.outdated,
         attention: repo.attention,
+        flagged: repo.flagged,
         problems: repo
             .problems
             .into_iter()
@@ -436,6 +457,38 @@ fn start_background_check(app: AppHandle, exe: PathBuf, only: Option<String>) ->
     });
     Ok(())
 }
+
+/// Watches Mehen's data folder and tells the UI whenever the status file is
+/// rewritten, by any Mehen: the app, the daily task, a check GitWyrm started,
+/// or one run by hand. Without it, a write GitWyrm did not start only showed
+/// up after the window next came into focus. Does nothing when Mehen has never
+/// run here (no folder to watch); focus refreshes still cover that case.
+pub fn watch_status_file(app: AppHandle) {
+    use notify_debouncer_full::notify::RecursiveMode;
+    use notify_debouncer_full::{new_debouncer, DebounceEventResult};
+
+    let Some(dir) = mehen_data_dir().filter(|d| d.is_dir()) else { return };
+    let emit = app.clone();
+    let debouncer = new_debouncer(Duration::from_millis(300), None, move |result: DebounceEventResult| {
+        let touched = result.is_ok_and(|events| {
+            events.iter().flat_map(|e| e.paths.iter()).any(|p| p.file_name().is_some_and(|n| n == STATUS_FILE))
+        });
+        if touched {
+            let _ = emit.emit(STATUS_CHANGED_EVENT, ());
+        }
+    });
+    let Ok(mut debouncer) = debouncer else { return };
+    if let Err(e) = debouncer.watch(&dir, RecursiveMode::NonRecursive) {
+        log::warn!("Could not watch Mehen's folder: {e}");
+        return;
+    }
+    // Lives as long as the app: the watcher stops when it is dropped.
+    app.manage(StatusFileWatcher(Mutex::new(Some(debouncer))));
+}
+
+struct StatusFileWatcher(
+    #[allow(dead_code)] Mutex<Option<notify_debouncer_full::Debouncer<notify_debouncer_full::notify::RecommendedWatcher, notify_debouncer_full::RecommendedCache>>>,
+);
 
 /// When GitWyrm last started a full check, so a Mehen with nothing to check
 /// (no folders set up) is not asked again on every focus.

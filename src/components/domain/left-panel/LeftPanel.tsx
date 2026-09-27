@@ -40,6 +40,7 @@ import { SpecsSection } from './SpecsSection'
 import { useOpenspecChanges, useOpenspecStatus } from '@/hooks/useOpenspec'
 import { openSpecDesk } from '@/lib/specDesk'
 import { SubmodulesSection } from './SubmodulesSection'
+import { MehenSection } from './MehenSection'
 import { WorktreesSection } from './WorktreesSection'
 
 export function LeftPanel() {
@@ -545,6 +546,8 @@ export function LeftPanel() {
           getHoverAction={getHoverAction}
         />
       ))}
+
+      <MehenSection />
 
       <ConfirmDialog
         open={branchToDelete !== null}

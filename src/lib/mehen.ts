@@ -4,7 +4,7 @@
  * GitWyrm never checks packages itself. It shows Mehen's last answer, so every
  * sentence here says when that answer is from and never claims more than it.
  */
-import type { MehenAttention, MehenProblem, MehenPushNote, MehenRepoStatus } from './bindings'
+import type { MehenAttention, MehenFlagged, MehenProblem, MehenPushNote, MehenRepoStatus } from './bindings'
 import { formatRelativeTime } from './gitDisplay'
 import { pathKey } from './paths'
 
@@ -74,7 +74,7 @@ export function newFixes(repos: MehenRepoStatus[], openPaths: string[], seen: Re
  * they have a fix.
  */
 export const MEHEN_TAB_LEVELS = [
-  { id: 'off', label: 'Nothing (hide the badge)' },
+  { id: 'off', label: 'Nothing' },
   { id: 'critical', label: 'Critical security fixes' },
   { id: 'high', label: 'High and critical security fixes' },
   { id: 'moderate', label: 'Medium and higher security fixes' },
@@ -116,4 +116,40 @@ export function mehenTabBadge(attention: MehenAttention, level: MehenTabLevel): 
   const count = included.reduce((sum, key) => sum + attention[key], 0)
   const security = included.filter((key) => ATTENTION_ORDER.indexOf(key) <= ATTENTION_ORDER.indexOf('low')).reduce((sum, key) => sum + attention[key], 0)
   return { count, security }
+}
+
+export type MehenLevel = (typeof ATTENTION_ORDER)[number]
+
+export const MEHEN_LEVEL_LABEL: Record<MehenLevel, string> = {
+  critical: 'Critical',
+  high: 'High',
+  moderate: 'Medium',
+  low: 'Low',
+  major: 'Major',
+  minor: 'Minor',
+  patch: 'Patch',
+}
+
+/** A security fix, as opposed to a plain update. */
+export function isSecurityLevel(level: string): boolean {
+  const at = ATTENTION_ORDER.indexOf(level as MehenLevel)
+  return at >= 0 && at <= ATTENTION_ORDER.indexOf('low')
+}
+
+/** The packages Mehen flags that the chosen level includes, most urgent first. */
+export function flaggedAt(flagged: MehenFlagged[], level: MehenTabLevel): MehenFlagged[] {
+  if (level === 'off') return []
+  const reach = ATTENTION_ORDER.indexOf(LEVEL_REACH[level])
+  return flagged.filter((f) => {
+    const at = ATTENTION_ORDER.indexOf(f.level as MehenLevel)
+    return at >= 0 && at <= reach
+  })
+}
+
+/** One wording for the tab badge, the status bar and the sidebar. */
+export function mehenBadgeLabel({ count, security }: { count: number; security: number }): string {
+  const packages = count === 1 ? '1 package' : `${count} packages`
+  if (security === count) return `${packages} with a security fix waiting`
+  if (security === 0) return `${packages} to update`
+  return `${packages} to update, ${security === 1 ? '1 of them a security fix' : `${security} of them security fixes`}`
 }

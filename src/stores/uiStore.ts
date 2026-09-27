@@ -300,6 +300,7 @@ export const useUiStore = create<UiState>((set) => ({
     issues: false,
     tags: false,
     submodules: true,
+    mehen: true,
   },
   selectedChangeId: null,
   activeModal: null,

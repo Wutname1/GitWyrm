@@ -54,7 +54,8 @@ import { arrangeTabs, bucketByRecency } from "@/lib/tabSorting";
 import { useTabStatusStore } from "@/stores/tabStatusStore";
 import { useUiStore } from "@/stores/uiStore";
 import { useBranches, useRepoTabStatus } from "@/hooks/useGitQueries";
-import { findMehenStatus, useMehenOverview } from "@/hooks/useMehen";
+import { findMehenStatus, openInMehen, useMehenFlags, useMehenOverview } from "@/hooks/useMehen";
+import mehenMark from "@/assets/mehen-mark.png";
 import { mehenTabBadge } from "@/lib/mehen";
 import { useRepoGithubCounts } from "@/hooks/useGithub";
 import { useGitMutations } from "@/hooks/useGitMutations";
@@ -919,6 +920,7 @@ function TabPushItem({ repo, name }: { repo: RepoInfo; name: string }) {
 function TabExternalItems({ repo }: { repo: RepoInfo }) {
   const m = useGitMutations(repo.id);
   const defaultEditor = useWorkspaceStore((state) => state.defaultEditor);
+  const mehen = useMehenFlags(repo.path);
 
   return (
     <>
@@ -936,6 +938,17 @@ function TabExternalItems({ repo }: { repo: RepoInfo }) {
         pending={m.openInEditor.isPending}
         onRun={() => m.openInEditor.mutate(defaultEditor)}
       />
+      {mehen.canOpen && (
+        // Offered whenever Mehen is installed. With security fixes waiting it
+        // opens with them already selected, like the status bar's button.
+        <PendingMenuItem
+          icon={<img src={mehenMark} alt="" className="size-[13px] flex-none" draggable={false} />}
+          label={mehen.badge.security > 0 ? "Fix in Mehen" : "Open in Mehen"}
+          pendingLabel="Opening…"
+          pending={false}
+          onRun={() => void openInMehen(repo.id, mehen.badge.security > 0)}
+        />
+      )}
     </>
   );
 }
