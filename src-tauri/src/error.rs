@@ -221,6 +221,13 @@ const EXPECTED: &[&str] = &[
     // for exactly those two conditions: the network, not the app.
     "the download stopped responding",
     "could not reach the update server",
+    // A saved project or watched code folder that was moved, renamed or deleted
+    // (state.rs FOLDER_NOT_FOUND, GITWYRM-BACKEND-9/A), and a clone pointed at a
+    // folder that already has files in it (remote.rs CLONE_DESTINATION_TAKEN,
+    // GITWYRM-BACKEND-B). Both are our own sentences and both are the user's to
+    // sort out by picking the folder again - nothing in the app is broken.
+    "that folder could not be found",
+    "that folder already has files in it",
     // A checkout could not replace files because something outside GitWyrm holds
     // them open on Windows - a running build, a debugger, an editor indexing the
     // folder, antivirus. Genuinely the user's to sort out, and the one action
@@ -520,6 +527,21 @@ mod tests {
         assert!(is_expected(
             crate::commands::updates::DOWNLOAD_UNREACHABLE_MESSAGE
         ));
+    }
+
+    /// A folder that moved away, or a clone into a folder that is not empty, is
+    /// the user's to fix. Built from the real constants so a rewording cannot
+    /// quietly start filing reports again.
+    #[test]
+    fn a_missing_or_full_folder_is_expected() {
+        assert!(is_expected(&format!(
+            "Command failed: {}",
+            crate::state::FOLDER_NOT_FOUND
+        )));
+        assert!(is_expected(&format!(
+            "Command failed: {}",
+            crate::commands::remote::CLONE_DESTINATION_TAKEN
+        )));
     }
 
     #[test]

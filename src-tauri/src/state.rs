@@ -9,6 +9,12 @@ use git2::{Oid, Repository};
 
 use crate::error::AppError;
 
+/// What the user is told when a folder they had open, or asked to watch, is no
+/// longer where it was. Shared so opening a project and scanning a code folder
+/// say the same thing, and one classifier entry can cover both.
+pub const FOLDER_NOT_FOUND: &str =
+    "That folder could not be found. It may have been moved, renamed or deleted.";
+
 /// Files changed, insertions, deletions for one commit.
 pub type ChangeStats = (u32, u32, u32);
 
@@ -544,6 +550,14 @@ impl RepoManager {
     /// time" cannot be read from a duration alone, since a warm reopen skips
     /// nearly all the work and would otherwise sit in the same average.
     pub fn open(&self, path: &str) -> Result<(String, Arc<OpenRepo>, bool), AppError> {
+        // A saved tab or recent project whose folder was moved or deleted. libgit2
+        // words this as "failed to resolve path ... class=Os (2); code=NotFound",
+        // which the reopen toast showed verbatim (GITWYRM-BACKEND-9). The path is
+        // kept out of the sentence because every caller already names it.
+        if !Path::new(path).exists() {
+            log::info!("open: {path} does not exist");
+            return Err(AppError::Other(FOLDER_NOT_FOUND.into()));
+        }
         let repo = Repository::discover(path)?;
         let workdir = repo
             .workdir()

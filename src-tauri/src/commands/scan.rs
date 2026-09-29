@@ -35,6 +35,12 @@ pub async fn scan_code_folder(folder: String) -> Result<Vec<ScannedRepo>, AppErr
 
 /// The repositories directly inside `root`, one level deep by design.
 pub(crate) fn scan_folder(root: &Path) -> Result<Vec<ScannedRepo>, AppError> {
+    // A watched folder that was moved or deleted (GITWYRM-BACKEND-A). The list
+    // already shows it as unavailable; this is the sentence behind that.
+    if !root.exists() {
+        log::info!("scan: {} does not exist", root.display());
+        return Err(AppError::Other(crate::state::FOLDER_NOT_FOUND.into()));
+    }
     if !root.is_dir() {
         return Err(AppError::Other(format!(
             "not a directory: {}",

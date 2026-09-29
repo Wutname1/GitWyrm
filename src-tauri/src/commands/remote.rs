@@ -1865,6 +1865,13 @@ pub async fn git_clone(
         if url.starts_with('-') {
             return Err(AppError::Other("that clone address isn't valid".into()));
         }
+        // git refuses a destination that already has files, but only after the
+        // network round trip, and in its own words ("destination path ... already
+        // exists and is not an empty directory", GITWYRM-BACKEND-B). Check first
+        // and say it the way creating a worktree already does.
+        if clone_destination_is_taken(std::path::Path::new(&destination)) {
+            return Err(AppError::Other(CLONE_DESTINATION_TAKEN.into()));
+        }
         run_streaming(
             &app,
             "clone",
@@ -2375,6 +2382,49 @@ mod credential_message_tests {
             !got.to_lowercase().contains("authentication failed"),
             "{got}"
         );
+    }
+}
+
+/// What the user is told when a clone is pointed at a folder that already has
+/// files in it.
+pub(crate) const CLONE_DESTINATION_TAKEN: &str =
+    "That folder already has files in it. Pick an empty folder or a new folder name.";
+
+/// Whether git would refuse to clone into `destination`: it exists and is
+/// either a file or a folder with anything in it. An empty folder is fine, the
+/// same as git itself allows.
+fn clone_destination_is_taken(destination: &std::path::Path) -> bool {
+    if !destination.exists() {
+        return false;
+    }
+    match std::fs::read_dir(destination) {
+        Ok(mut entries) => entries.next().is_some(),
+        // A file, or a folder we cannot list: git would refuse it too.
+        Err(_) => true,
+    }
+}
+
+#[cfg(test)]
+mod clone_destination_tests {
+    use super::clone_destination_is_taken;
+
+    #[test]
+    fn only_a_folder_with_files_is_taken() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        assert!(!clone_destination_is_taken(&dir.path().join("new")), "missing is free");
+
+        let empty = dir.path().join("empty");
+        std::fs::create_dir(&empty).expect("empty dir");
+        assert!(!clone_destination_is_taken(&empty), "empty is free");
+
+        let full = dir.path().join("full");
+        std::fs::create_dir(&full).expect("full dir");
+        std::fs::write(full.join("readme.md"), "x").expect("file");
+        assert!(clone_destination_is_taken(&full), "a folder with files is taken");
+
+        let file = dir.path().join("a-file");
+        std::fs::write(&file, "x").expect("file");
+        assert!(clone_destination_is_taken(&file), "a file is taken");
     }
 }
 
