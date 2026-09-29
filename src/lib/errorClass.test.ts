@@ -400,3 +400,50 @@ describe('a push the server refused after accepting it', () => {
     expect(classifyError(new Error(raw)).message).toMatch(/cloud has changes/i)
   })
 })
+
+/**
+ * SSH failures, in the backend's words (commands/remote.rs,
+ * humanize_ssh_failure). Before these, git's bare "Could not read from remote
+ * repository" reached the user unexplained and was filed as a crash every time
+ * a background fetch hit it (GITWYRM-BACKEND-C/F/G).
+ */
+describe('an SSH remote that would not let us in', () => {
+  it('points a refused key at Security, not at connecting an account', () => {
+    const raw =
+      "git push failed: Sign-in needed for github.com: it did not accept the SSH key on this computer. Check your keys in Settings > Security, then try again."
+    const { severity, message, fix } = classifyError(new Error(raw))
+    expect(severity).toBe('warning')
+    expect(message).toMatch(/SSH key/)
+    expect(fix?.section).toBe('security')
+  })
+
+  it('sends an unconfirmed host to the connection test', () => {
+    const raw =
+      'git fetch failed: Sign-in needed for github.com: this computer has not confirmed who that server is yet. Test the connection in Settings > Security, then try again.'
+    const { severity, fix } = classifyError(new Error(raw))
+    expect(severity).toBe('warning')
+    expect(fix?.section).toBe('security')
+  })
+
+  it('leaves an HTTPS sign-in pointing at Integrations', () => {
+    const raw =
+      'git fetch failed: Sign-in needed for https://github.com. Connect the account, then try again.'
+    expect(classifyError(new Error(raw)).fix?.section).toBe('integrations')
+  })
+})
+
+/** The backend has always classed these as expected; the frontend now agrees. */
+describe('a server that could not be reached', () => {
+  it.each([
+    'git push failed: Failed to connect to github.com. Check your internet or VPN connection, then try again.',
+    "git fetch failed: fatal: unable to access 'https://github.com/o/r.git/': Could not resolve host: github.com",
+  ])('is a warning, not a crash: %s', (raw) => {
+    const { severity, message } = classifyError(new Error(raw))
+    expect(severity).toBe('warning')
+    expect(message).toMatch(/internet or VPN/)
+  })
+
+  it('still reports other network-shaped failures as errors', () => {
+    expect(classifyError(new Error('network fetch failed: request failed')).severity).toBe('error')
+  })
+})

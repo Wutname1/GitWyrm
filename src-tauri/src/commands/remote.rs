@@ -277,6 +277,125 @@ fn humanize_credential_failure(detail: &str, stderr_lines: &[String]) -> Option<
     })
 }
 
+/// Say why an SSH remote could not be reached.
+///
+/// Every SSH transport failure ends with the same line, `fatal: Could not read
+/// from remote repository.`, and `failure_detail` rightly picks that `fatal:`
+/// line over the untagged one ssh printed above it. But the ssh line is the
+/// only part that says what went wrong: a key the host refused, a host this
+/// computer has never confirmed, or a network that never answered. Without it,
+/// one machine's background fetch of a single repository filed the identical
+/// bare sentence 158 times in three days (GITWYRM-BACKEND-C), with nothing in
+/// any of them to say which of those it was - and the user saw the same line.
+///
+/// The three known causes are the user's setup, not a fault, so they are put in
+/// the same words the rest of the app uses for a refused sign-in and an
+/// unreachable network. Anything else keeps the generic line, still reported,
+/// with ssh's own reason appended so the next report names the cause.
+fn humanize_ssh_failure(detail: &str, stderr_lines: &[String]) -> Option<String> {
+    if !detail
+        .to_lowercase()
+        .contains("could not read from remote repository")
+    {
+        return None;
+    }
+
+    let lowered: Vec<String> = stderr_lines.iter().map(|l| l.to_lowercase()).collect();
+    let said = |needles: &[&str]| lowered.iter().any(|l| needles.iter().any(|n| l.contains(n)));
+    let host = ssh_host(stderr_lines);
+    let host = host.as_deref().unwrap_or("the server");
+
+    // The host refused every key offered: none set up, the wrong one, or one
+    // with a passphrase ssh could not ask for because nobody is at a terminal.
+    if said(&[
+        "permission denied (publickey",
+        "permission denied, please try again",
+        "too many authentication failures",
+        "no supported authentication methods",
+    ]) {
+        return Some(format!(
+            "Sign-in needed for {host}: it did not accept the SSH key on this computer. Check your keys in Settings > Security, then try again."
+        ));
+    }
+
+    // The first connection to a host asks to confirm who it is, and with no
+    // terminal there is nobody to answer. Testing the host in Settings adds a new
+    // host safely, and still refuses one whose identity has changed.
+    if said(&[
+        "host key verification failed",
+        "remote host identification has changed",
+        "host key is known for",
+    ]) {
+        return Some(format!(
+            "Sign-in needed for {host}: this computer has not confirmed who that server is yet. Test the connection in Settings > Security, then try again."
+        ));
+    }
+
+    if said(&[
+        "could not resolve hostname",
+        "connection timed out",
+        "operation timed out",
+        "connection refused",
+        "network is unreachable",
+        "no route to host",
+        "connection closed by",
+        "connection reset",
+        "kex_exchange_identification",
+    ]) {
+        return Some(format!(
+            "Failed to connect to {host}. Check your internet or VPN connection, then try again."
+        ));
+    }
+
+    // Unknown cause: keep the generic line (and keep reporting it), but carry
+    // whatever ssh said first, so the report explains itself.
+    let reason = stderr_lines.iter().map(|l| l.trim()).find(|l| {
+        let low = l.to_lowercase();
+        !low.is_empty()
+            && !low.contains('%')
+            && !low.contains("could not read from remote repository")
+            && !low.starts_with("please make sure you have the correct access rights")
+            && !low.starts_with("and the repository exists")
+    })?;
+    Some(format!("{detail} ({reason})"))
+}
+
+/// The host an ssh error names, when it names one.
+///
+/// ssh words it three ways: `git@github.com: Permission denied (publickey).`,
+/// `ssh: connect to host github.com port 22: ...`, and `ssh: Could not resolve
+/// hostname github.com: ...`.
+fn ssh_host(stderr_lines: &[String]) -> Option<String> {
+    for line in stderr_lines {
+        let line = line.trim();
+        // ASCII-only lowering keeps byte offsets identical, so an index found in
+        // `low` is always a valid slice point in `line`.
+        let low = line.to_ascii_lowercase();
+        let found = if let Some(at) = low.find("connect to host ") {
+            line[at + "connect to host ".len()..].split_whitespace().next()
+        } else if let Some(at) = low.find("resolve hostname ") {
+            line[at + "resolve hostname ".len()..]
+                .split(|c: char| c == ':' || c.is_whitespace())
+                .next()
+        } else if let Some(at) = low.find("host key is known for ") {
+            line[at + "host key is known for ".len()..].split_whitespace().next()
+        } else if low.contains("permission denied") {
+            line.split_once(": ")
+                .map(|(who, _)| who)
+                .and_then(|who| who.rsplit_once('@'))
+                .map(|(_, host)| host)
+        } else {
+            None
+        };
+        if let Some(host) = found.map(|h| h.trim_end_matches(['.', ':'])) {
+            if !host.is_empty() {
+                return Some(host.to_string());
+            }
+        }
+    }
+    None
+}
+
 fn run_streaming(
     app: &AppHandle,
     repo_id: &str,
@@ -419,7 +538,9 @@ fn run_streaming_with(
                 stderr_lines
             );
         }
-        let detail = humanize_credential_failure(&detail, &stderr_lines).unwrap_or(detail);
+        let detail = humanize_credential_failure(&detail, &stderr_lines)
+            .or_else(|| humanize_ssh_failure(&detail, &stderr_lines))
+            .unwrap_or(detail);
         return Err(AppError::Other(format!("git {operation} failed: {detail}")));
     }
     Ok(stdout)
@@ -611,7 +732,9 @@ pub(crate) fn fetch_all_at(
             || low.contains("terminal prompts disabled")
             || low.contains("authentication failed")
             || low.contains("permission denied (publickey)");
-        let message = humanize_credential_failure(&detail, &lines).unwrap_or_else(|| {
+        let message = humanize_credential_failure(&detail, &lines)
+            .or_else(|| humanize_ssh_failure(&detail, &lines))
+            .unwrap_or_else(|| {
             if needs_sign_in {
                 "The server wants you to sign in before it will send anything.".to_string()
             } else if low.contains("dubious ownership") {
@@ -2252,5 +2375,109 @@ mod credential_message_tests {
             !got.to_lowercase().contains("authentication failed"),
             "{got}"
         );
+    }
+}
+
+#[cfg(test)]
+mod ssh_message_tests {
+    use super::{failure_detail, humanize_ssh_failure};
+
+    fn lines(raw: &[&str]) -> Vec<String> {
+        raw.iter().map(|l| (*l).to_string()).collect()
+    }
+
+    /// What the whole pipeline produces for one stderr: pick the detail, then
+    /// translate it, exactly as run_streaming_with does.
+    fn message_for(stderr: &[&str]) -> String {
+        let stderr = lines(stderr);
+        let detail = failure_detail(&stderr, "");
+        let detail = humanize_ssh_failure(&detail, &stderr).unwrap_or(detail);
+        format!("git fetch failed: {detail}")
+    }
+
+    /// The shape behind GITWYRM-BACKEND-C/F/G: ssh says why, git says only that
+    /// it could not read, and the `fatal:` line wins the ranking.
+    #[test]
+    fn a_refused_key_names_the_host_and_is_a_refusal() {
+        let got = message_for(&[
+            "git@github.com: Permission denied (publickey).",
+            "fatal: Could not read from remote repository.",
+            "Please make sure you have the correct access rights",
+            "and the repository exists.",
+        ]);
+        assert!(got.contains("github.com"), "{got}");
+        assert!(got.contains("Settings > Security"), "{got}");
+        assert!(!got.contains("Could not read from remote"), "{got}");
+        assert!(crate::error::is_expected_for_tests(&got), "{got}");
+    }
+
+    #[test]
+    fn an_unconfirmed_host_is_a_refusal() {
+        let got = message_for(&[
+            "Host key verification failed.",
+            "fatal: Could not read from remote repository.",
+        ]);
+        assert!(got.contains("Settings > Security"), "{got}");
+        assert!(got.contains("the server"), "falls back without a host: {got}");
+        assert!(crate::error::is_expected_for_tests(&got), "{got}");
+
+        let got = message_for(&[
+            "No ED25519 host key is known for gitlab.example.com and you have requested strict checking.",
+            "Host key verification failed.",
+            "fatal: Could not read from remote repository.",
+        ]);
+        assert!(got.contains("gitlab.example.com"), "{got}");
+    }
+
+    #[test]
+    fn an_unreachable_host_is_a_refusal() {
+        for (stderr, host) in [
+            (
+                "ssh: connect to host github.com port 22: Connection timed out",
+                "github.com",
+            ),
+            (
+                "ssh: Could not resolve hostname git.corp.example: No such host is known. ",
+                "git.corp.example",
+            ),
+            (
+                "ssh: connect to host bitbucket.org port 22: Connection refused",
+                "bitbucket.org",
+            ),
+        ] {
+            let got = message_for(&[stderr, "fatal: Could not read from remote repository."]);
+            assert!(got.contains(host), "{got}");
+            assert!(got.contains("internet or VPN"), "{got}");
+            assert!(crate::error::is_expected_for_tests(&got), "{got}");
+        }
+    }
+
+    /// An unknown cause keeps reporting, but now says what ssh said.
+    #[test]
+    fn an_unknown_cause_still_reports_with_the_reason_attached() {
+        let got = message_for(&[
+            "CreateProcessW failed error:2",
+            "fatal: Could not read from remote repository.",
+            "Please make sure you have the correct access rights",
+            "and the repository exists.",
+        ]);
+        assert!(got.contains("Could not read from remote repository"), "{got}");
+        assert!(got.contains("CreateProcessW failed error:2"), "{got}");
+        assert!(!got.contains("Please make sure"), "{got}");
+        assert!(!crate::error::is_expected_for_tests(&got), "{got}");
+    }
+
+    /// Nothing but git's own lines: nothing to add, so the message is unchanged.
+    #[test]
+    fn the_bare_line_is_left_alone_when_ssh_said_nothing() {
+        let got = message_for(&["fatal: Could not read from remote repository."]);
+        assert_eq!(got, "git fetch failed: fatal: Could not read from remote repository.");
+    }
+
+    /// Other failures are not this translator's business.
+    #[test]
+    fn unrelated_failures_pass_through() {
+        assert!(humanize_ssh_failure("fatal: repository 'x' not found", &[]).is_none());
+        assert!(humanize_ssh_failure("! [rejected] main -> main (fetch first)", &[]).is_none());
     }
 }

@@ -49,6 +49,9 @@ interface Rule {
 // a GitLab remote would point at the wrong account.
 const CONNECT_ACCOUNT: ErrorFix = { label: 'Open Integrations', section: 'integrations' }
 
+// Where SSH keys are made, tested and matched to a host.
+const SSH_SETTINGS: ErrorFix = { label: 'Open Security', section: 'security' }
+
 /**
  * Ordered, most-specific first. The git2 `class=`/`code=` tail is the stable
  * part of these strings, so match on that where possible rather than prose that
@@ -270,6 +273,28 @@ const RULES: Rule[] = [
     message: 'That ran into a conflict. Check the changed files and resolve the markers.',
   },
   {
+    // An SSH remote that refused this computer's key. The backend builds this
+    // sentence from ssh's own "Permission denied (publickey)" (commands/remote.rs,
+    // humanize_ssh_failure). It also contains "sign-in needed for", so it must
+    // come before that rule, which points at Integrations: an SSH key is fixed
+    // in Security, not by connecting an account.
+    match: (r) => r.includes('did not accept the ssh key'),
+    severity: 'warning',
+    message:
+      "The server did not accept this computer's SSH key. Check your keys in Security settings, then try again.",
+    fix: SSH_SETTINGS,
+  },
+  {
+    // The first SSH connection to a host has to confirm who the server is, and
+    // a background run has nobody to ask. Testing the host in Security settings
+    // confirms a new host safely.
+    match: (r) => r.includes('has not confirmed who that server is'),
+    severity: 'warning',
+    message:
+      'This computer has not confirmed that server yet. Test the connection in Security settings, then try again.',
+    fix: SSH_SETTINGS,
+  },
+  {
     // A remote with no credentials yet. Ahead of the generic auth rule below,
     // which would file this as an error and replace a sentence the backend
     // already wrote for users. Nothing is broken; the account just needs
@@ -306,8 +331,18 @@ const RULES: Rule[] = [
     message: "Couldn't authenticate with the remote. Check your credentials and try again.",
   },
   {
+    // The network did not carry the request: offline, a VPN that is down, or a
+    // server that did not answer. The backend has always classed these two
+    // wordings as expected (error.rs EXPECTED), but here they fell to the rule
+    // below at error severity, so the same condition still filed a crash report
+    // from the frontend. Both layers now agree; the broader rule below still
+    // catches everything else network-shaped as an error.
+    match: (r) => r.includes('could not resolve host') || r.includes('failed to connect'),
+    severity: 'warning',
+    message: "Couldn't reach the server. Check your internet or VPN connection, then try again.",
+  },
+  {
     match: (r) =>
-      r.includes('could not resolve host') ||
       r.includes('network') ||
       r.includes('timed out') ||
       r.includes('connection'),
