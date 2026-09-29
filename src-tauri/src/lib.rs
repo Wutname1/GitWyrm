@@ -407,6 +407,66 @@ fn fingerprint_key(message: &str) -> String {
     collapsed.to_lowercase()
 }
 
+/// Where the updater plugin's own log records come from. `log::error!` with no
+/// explicit target uses the module path, so every record the plugin writes is
+/// under this prefix (`tauri_plugin_updater::updater` in 2.12).
+const UPDATER_LOG_TARGET: &str = "tauri_plugin_updater";
+
+/// Whether a log record is the updater plugin saying the network would not
+/// carry its request.
+///
+/// The plugin logs `failed to check for updates: error sending request for url
+/// (...latest.json)` at `error` itself, before handing the same error back to
+/// us. Our own copy of that error is already classed as expected (error.rs), but
+/// the plugin's line reaches SentryLogger directly, so every offline launch and
+/// every two-hourly check on a flaky connection filed a Sentry issue
+/// (GITWYRM-BACKEND-E). reqwest words every connect, DNS and timeout failure in
+/// the send phase as "error sending request for url"; an HTTP error status or a
+/// bad manifest is worded differently and still reports.
+fn is_updater_network_failure(record: &log::Record<'_>) -> bool {
+    // Target first, so no other record pays for formatting its message.
+    record.target().starts_with(UPDATER_LOG_TARGET)
+        && record
+            .args()
+            .to_string()
+            .to_lowercase()
+            .contains("error sending request for url")
+}
+
+/// How each log record reaches Sentry: the SDK's default split (errors become
+/// events, warn/info breadcrumbs), except that the updater plugin's network
+/// failures are kept as breadcrumbs instead of events. They still give context
+/// to a real error that follows, and they still reach the log file.
+fn sentry_mapping(record: &log::Record<'_>) -> Vec<sentry_log::RecordMapping> {
+    use sentry_log::{LogFilter, RecordMapping};
+
+    let mut filter = sentry_log::default_filter(record.metadata());
+    let downgrade = filter.contains(LogFilter::Exception) && is_updater_network_failure(record);
+    if downgrade {
+        filter.remove(LogFilter::Exception);
+        filter.insert(LogFilter::Breadcrumb);
+    }
+
+    let mut items = Vec::new();
+    if filter.contains(LogFilter::Breadcrumb) {
+        let mut crumb = sentry_log::breadcrumb_from_record(record);
+        if downgrade {
+            crumb.level = sentry::Level::Warning;
+        }
+        items.push(RecordMapping::Breadcrumb(crumb));
+    }
+    if filter.contains(LogFilter::Event) {
+        items.push(RecordMapping::Event(Box::new(sentry_log::event_from_record(record))));
+    }
+    if filter.contains(LogFilter::Exception) {
+        items.push(RecordMapping::Event(Box::new(sentry_log::exception_from_record(record))));
+    }
+    if filter.contains(LogFilter::Log) {
+        items.push(RecordMapping::Log(sentry_log::log_from_record(record)));
+    }
+    items
+}
+
 fn init_sentry() -> Option<sentry::ClientInitGuard> {
     if cfg!(debug_assertions) {
         return None;
@@ -773,7 +833,7 @@ pub fn run() {
                 Err(e) => eprintln!("could not open the log file: {e}"),
             }
             let (_plugin, max_level, logger) = builder.split(app.handle())?;
-            let bridged = sentry_log::SentryLogger::with_dest(logger);
+            let bridged = sentry_log::SentryLogger::with_dest(logger).mapper(sentry_mapping);
             tauri_plugin_log::attach_logger(max_level, Box::new(bridged))?;
 
             let info = commands::app::build_info();
@@ -850,6 +910,74 @@ pub fn run() {
         .invoke_handler(builder.invoke_handler())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod sentry_mapping_tests {
+    use super::sentry_mapping;
+    use sentry_log::RecordMapping;
+
+    /// (events, breadcrumbs) produced for one log record.
+    fn outcome(level: log::Level, target: &str, message: &str) -> (usize, usize) {
+        let items = sentry_mapping(
+            &log::Record::builder()
+                .level(level)
+                .target(target)
+                .args(format_args!("{message}"))
+                .build(),
+        );
+        let mut events = 0;
+        let mut crumbs = 0;
+        for item in items {
+            match item {
+                RecordMapping::Event(_) => events += 1,
+                RecordMapping::Breadcrumb(_) => crumbs += 1,
+                _ => {}
+            }
+        }
+        (events, crumbs)
+    }
+
+    /// Verbatim shape of GITWYRM-BACKEND-E: the plugin's own line for an update
+    /// check that never reached the server.
+    #[test]
+    fn an_offline_update_check_is_a_breadcrumb_not_an_event() {
+        let got = outcome(
+            log::Level::Error,
+            "tauri_plugin_updater::updater",
+            "failed to check for updates: error sending request for url (https://github.com/o/r/releases/latest/download/latest.json)",
+        );
+        assert_eq!(got, (0, 1));
+    }
+
+    /// Anything else the plugin logs at error still reports.
+    #[test]
+    fn other_updater_errors_still_report() {
+        let got = outcome(
+            log::Level::Error,
+            "tauri_plugin_updater::updater",
+            "update endpoint did not respond with a successful status code",
+        );
+        assert_eq!(got, (1, 0));
+    }
+
+    /// The same words from our own code are not the plugin's: error.rs decides
+    /// those, and this mapping leaves every other error an event.
+    #[test]
+    fn the_same_words_elsewhere_are_untouched() {
+        let got = outcome(
+            log::Level::Error,
+            "gitwyrm_lib::error",
+            "Command failed: error sending request for url (https://api.github.com/)",
+        );
+        assert_eq!(got, (1, 0));
+    }
+
+    #[test]
+    fn warnings_and_debug_keep_the_default_split() {
+        assert_eq!(outcome(log::Level::Warn, "gitwyrm_lib", "x"), (0, 1));
+        assert_eq!(outcome(log::Level::Debug, "gitwyrm_lib", "x"), (0, 0));
+    }
 }
 
 #[cfg(test)]
