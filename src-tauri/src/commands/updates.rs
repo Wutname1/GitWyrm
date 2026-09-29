@@ -120,6 +120,19 @@ pub async fn update_endpoint(app: tauri::AppHandle) -> Result<String, AppError> 
     Ok(endpoint_for(&settings.update_channel).to_string())
 }
 
+/// How long to wait for the update server to accept a connection.
+const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// How long a download may go without a single byte arriving before it counts
+/// as stalled.
+///
+/// An idle limit, not a total one: a 60 MB installer over a slow link can
+/// legitimately take minutes, but a connection that has been silent this long is
+/// not coming back. The plugin builds its client with no timeout at all, so
+/// before this a stalled connection hung the launch update indefinitely, with
+/// the splash (or the update cover) left on screen and nothing in the log.
+const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Build an updater bound to the user's channel.
 ///
 /// Both checking and installing go through this, so the two can never disagree
@@ -141,7 +154,12 @@ async fn updater_for_channel(
     let builder = app
         .updater_builder()
         .endpoints(vec![url])
-        .map_err(|e| AppError::Other(e.to_string()))?;
+        .map_err(|e| AppError::Other(e.to_string()))?
+        .configure_client(|client| {
+            client
+                .connect_timeout(CONNECT_TIMEOUT)
+                .read_timeout(READ_TIMEOUT)
+        });
 
     // Backstop only -- `install_update` raises the cover before it starts, and
     // `spawn_update_cover` is idempotent, so this fires for real only if that
@@ -434,7 +452,44 @@ pub async fn install_toolset(app: tauri::AppHandle) -> Result<Option<String>, Ap
 #[cfg(windows)]
 const HELPER_EXE: &str = "gitwyrm-setup.exe";
 
-/// Show the update-cover window, and report whether it started.
+/// Prefix of the per-process temp copies of the helper. The stale sweep matches
+/// on it, so the name it stages and the name it deletes cannot drift apart.
+#[cfg(windows)]
+const HELPER_COPY_PREFIX: &str = "gitwyrm-update-";
+
+/// The update cover, while one is up.
+///
+/// Held so an install that fails can take the cover down again. The helper is
+/// detached, so without this it sat on "Preparing update" for its full
+/// ten-minute watch, over an app that had given up and was running invisibly
+/// behind it.
+#[cfg(windows)]
+struct Cover {
+    child: std::process::Child,
+    exe: std::path::PathBuf,
+    /// Windows that were on screen when the cover went up, so exactly those
+    /// come back if the update does not happen.
+    hidden: Vec<String>,
+}
+
+/// The cover, once started, so it is never started twice.
+///
+/// Two call sites race for it: the install commands raise the cover just before
+/// installing, and the updater's `on_before_exit` hook is still wired as a
+/// backstop. Without this the common path would spawn two identical windows
+/// stacked on each other, and the second would outlive the handover the first
+/// performed.
+#[cfg(windows)]
+static COVER: std::sync::Mutex<Option<Cover>> = std::sync::Mutex::new(None);
+
+/// The cover slot. A panic elsewhere while it was held leaves nothing
+/// half-written worth refusing over, so a poisoned lock is simply taken.
+#[cfg(windows)]
+fn cover_slot() -> std::sync::MutexGuard<'static, Option<Cover>> {
+    COVER.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Start the update-cover window, unless it is already up.
 ///
 /// The gap this covers is the one between our process exiting and the updated
 /// app reappearing: NSIS runs with `installMode: "quiet"`, so without this there
@@ -450,24 +505,15 @@ const HELPER_EXE: &str = "gitwyrm-setup.exe";
 ///
 /// Failure here is deliberately non-fatal: a missing helper means the update
 /// proceeds with the old blank gap, which is worse-looking but still correct.
-/// Set once the cover has been started, so it is never started twice.
-///
-/// Two call sites race for it: `install_update` raises the cover up front, and
-/// the updater's `on_before_exit` hook is still wired as a backstop. Without
-/// this the common path would spawn two identical windows stacked on each
-/// other, and the second would outlive the handover the first performed.
-#[cfg(windows)]
-static COVER_STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
 #[cfg(windows)]
 fn spawn_update_cover(app: &tauri::AppHandle) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
-    use std::sync::atomic::Ordering;
-    use tauri::Manager;
 
-    // `swap` rather than a load-then-store: the two call sites can in principle
-    // reach here on different threads.
-    if COVER_STARTED.swap(true, Ordering::SeqCst) {
+    // Held across the spawn, so the two call sites cannot both get past the
+    // check. A failed attempt leaves the slot empty, so the `on_before_exit`
+    // backstop still gets its chance.
+    let mut slot = cover_slot();
+    if slot.is_some() {
         return Ok(());
     }
 
@@ -483,56 +529,150 @@ fn spawn_update_cover(app: &tauri::AppHandle) -> Result<(), String> {
         .join("resources")
         .join(HELPER_EXE);
 
-    // Release the claim on any failure below, so a cover that could not be
-    // staged now is still attempted by the `on_before_exit` backstop rather than
-    // being suppressed by a flag set for an attempt that never produced a window.
-    let start = || -> Result<(), String> {
-        if !source.is_file() {
-            return Err(format!("helper missing at {}", source.display()));
+    if !source.is_file() {
+        return Err(format!("helper missing at {}", source.display()));
+    }
+
+    // Name the copy per-process so two updates racing cannot fight over one
+    // file, and so a stale copy left by a killed run is never reused.
+    let exe = std::env::temp_dir().join(format!(
+        "{HELPER_COPY_PREFIX}{}.exe",
+        std::process::id()
+    ));
+
+    std::fs::copy(&source, &exe)
+        .map_err(|e| format!("could not stage helper at {}: {e}", exe.display()))?;
+
+    let child = std::process::Command::new(&exe)
+        .arg("--updating")
+        .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
+        .spawn()
+        .map_err(|e| format!("could not start helper: {e}"))?;
+
+    log::info!("update cover window started from {}", exe.display());
+    *slot = Some(Cover {
+        child,
+        exe,
+        hidden: Vec::new(),
+    });
+    Ok(())
+}
+
+/// Put the update cover up and take the app's own windows off screen.
+///
+/// Called once the installer is downloaded and verified, immediately before it
+/// is handed over. Raising it any earlier puts the cover over the download: the
+/// splash's progress line is hidden behind a card that only says "Preparing
+/// update", and a slow or stalled download looks like the update has hung.
+///
+/// Hiding rather than closing matters -- closing the last window runs the app's
+/// exit path, which would tear down the process that still has an installer to
+/// launch. A cover that fails to start leaves the windows alone: the update
+/// still installs, just with the old blank gap.
+#[cfg(windows)]
+fn raise_update_cover(app: &tauri::AppHandle) {
+    if let Err(e) = spawn_update_cover(app) {
+        log::warn!("update cover window did not start: {e}");
+        return;
+    }
+
+    let mut hidden = Vec::new();
+    for (label, window) in app.webview_windows() {
+        // Assume visible if we cannot tell: hiding one extra window is the old
+        // behaviour, while skipping one would leave it over the cover.
+        let was_visible = window.is_visible().unwrap_or(true);
+        match window.hide() {
+            Ok(()) if was_visible => hidden.push(label),
+            Ok(()) => {}
+            Err(e) => log::warn!("could not hide window {label} for the update: {e}"),
         }
+    }
 
-        // Name the copy per-process so two updates racing cannot fight over one
-        // file, and so a stale copy left by a killed run is never reused.
-        let dest = std::env::temp_dir().join(format!("gitwyrm-update-{}.exe", std::process::id()));
-
-        std::fs::copy(&source, &dest)
-            .map_err(|e| format!("could not stage helper at {}: {e}", dest.display()))?;
-
-        std::process::Command::new(&dest)
-            .arg("--updating")
-            .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
-            .spawn()
-            .map_err(|e| format!("could not start helper: {e}"))?;
-
-        log::info!("update cover window started from {}", dest.display());
-        Ok(())
-    };
-
-    match start() {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            COVER_STARTED.store(false, Ordering::SeqCst);
-            Err(e)
-        }
+    if let Some(cover) = cover_slot().as_mut() {
+        cover.hidden = hidden;
     }
 }
 
-/// Take the app's own windows off screen, now that the cover is up.
+/// Undo `raise_update_cover` after an install that did not go ahead.
 ///
-/// Only cosmetic, and deliberately so: the process carries on downloading and
-/// hands off to the installer exactly as before. Hiding rather than closing
-/// matters -- closing the last window runs the app's exit path, which would
-/// tear down the very process that still has an installer to launch.
-///
-/// Failures are logged and ignored. A window that refuses to hide leaves the
-/// old overlap, which is the behaviour we already had.
+/// The install call only returns on failure, so reaching this means the app is
+/// staying: close the cover and bring the hidden windows back, so the person is
+/// looking at their app and the error rather than a card waiting for a restart
+/// that will never come.
 #[cfg(windows)]
-fn hide_all_windows(app: &tauri::AppHandle) {
-    for (label, window) in app.webview_windows() {
-        if let Err(e) = window.hide() {
-            log::warn!("could not hide window {label} for the update: {e}");
-        }
+fn lower_update_cover(app: &tauri::AppHandle) {
+    let Some(mut cover) = cover_slot().take() else {
+        return;
+    };
+
+    if let Err(e) = cover.child.kill() {
+        log::warn!("could not close the update cover: {e}");
     }
+    // Reap it so the copy is no longer locked, then delete it now rather than
+    // leaving it for the next launch's sweep.
+    let _ = cover.child.wait();
+    let _ = std::fs::remove_file(&cover.exe);
+
+    for label in &cover.hidden {
+        let Some(window) = app.get_webview_window(label) else {
+            continue;
+        };
+        if let Err(e) = window.show() {
+            log::warn!("could not show window {label} after the update failed: {e}");
+            continue;
+        }
+        let _ = window.set_focus();
+    }
+
+    log::info!(
+        "update did not install; closed the cover and restored {} window(s)",
+        cover.hidden.len()
+    );
+}
+
+#[cfg(not(windows))]
+fn raise_update_cover(_app: &tauri::AppHandle) {}
+
+#[cfg(not(windows))]
+fn lower_update_cover(_app: &tauri::AppHandle) {}
+
+/// Delete helper copies that earlier updates left in the temp folder.
+///
+/// Every update stages its own `gitwyrm-update-<pid>.exe`, and a successful one
+/// never comes back to remove it: the process that made it is gone. They piled
+/// up at about 3 MB per update. The copy covering the update that just relaunched
+/// us may still be running when this runs, and Windows will not delete a running
+/// exe; that one is left for the next launch.
+#[cfg(windows)]
+pub fn sweep_stale_update_helpers() {
+    let removed = sweep_helper_copies(&std::env::temp_dir());
+    if removed > 0 {
+        log::info!("removed {removed} leftover update helper(s) from the temp folder");
+    }
+}
+
+/// Delete every helper copy in `dir` that can be deleted, and count them.
+#[cfg(windows)]
+fn sweep_helper_copies(dir: &std::path::Path) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .filter(|entry| entry.file_name().to_str().is_some_and(is_helper_copy_name))
+        .filter(|entry| std::fs::remove_file(entry.path()).is_ok())
+        .count()
+}
+
+/// Whether a temp-folder file name is one of our staged helper copies.
+///
+/// Strict on purpose: the temp folder is shared with every other program, so
+/// only the exact `gitwyrm-update-<digits>.exe` shape is ever touched.
+#[cfg(windows)]
+fn is_helper_copy_name(name: &str) -> bool {
+    name.strip_prefix(HELPER_COPY_PREFIX)
+        .and_then(|rest| rest.strip_suffix(".exe"))
+        .is_some_and(|pid| !pid.is_empty() && pid.bytes().all(|b| b.is_ascii_digit()))
 }
 
 /// Only emit once this many bytes have arrived since the last event.
@@ -542,6 +682,87 @@ fn hide_all_windows(app: &tauri::AppHandle) {
 /// keeps the bar smooth (a hundred-odd updates over a typical installer) without
 /// making the download compete with its own progress reporting.
 const PROGRESS_EMIT_BYTES: u64 = 256 * 1024;
+
+/// Shown when an update download goes quiet for `READ_TIMEOUT`.
+pub(crate) const DOWNLOAD_STALLED_MESSAGE: &str =
+    "The download stopped responding. Check your internet connection and try again.";
+
+/// Shown when the update server cannot be reached at all.
+pub(crate) const DOWNLOAD_UNREACHABLE_MESSAGE: &str =
+    "Could not reach the update server. Check your internet connection and try again.";
+
+/// Say what went wrong with a download in words the user can act on.
+///
+/// Only the two network conditions are reworded; anything else (a bad
+/// signature, a server error) keeps the plugin's own text, since those are
+/// faults worth reporting as they are. A connect timeout is both a connect and a
+/// timeout error, and "could not reach" is the truer description of it.
+fn describe_download_error(e: &tauri_plugin_updater::Error) -> String {
+    if let tauri_plugin_updater::Error::Reqwest(inner) = e {
+        if inner.is_connect() {
+            return DOWNLOAD_UNREACHABLE_MESSAGE.to_owned();
+        }
+        if inner.is_timeout() {
+            return DOWNLOAD_STALLED_MESSAGE.to_owned();
+        }
+    }
+    e.to_string()
+}
+
+/// Download an update's installer, with progress events and a log trail.
+///
+/// Shared by both install paths. The download used to log nothing at all, so
+/// the only record of an update that hung was a log that stopped.
+async fn download_installer(
+    app: &tauri::AppHandle,
+    update: &tauri_plugin_updater::Update,
+) -> Result<Vec<u8>, AppError> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    log::info!(
+        "update {}: downloading from {}",
+        update.version,
+        update.download_url.host_str().unwrap_or("unknown host")
+    );
+
+    let started = std::time::Instant::now();
+    // Outside the closure so a failure can say how far the download got.
+    let received = AtomicU64::new(0);
+    let mut last_emit: u64 = 0;
+
+    let on_chunk = |chunk: usize, total: Option<u64>| {
+        // `on_chunk` hands us the size of *this* chunk, not a running total.
+        let downloaded = received.fetch_add(chunk as u64, Ordering::Relaxed) + chunk as u64;
+
+        // Always emit the final byte so the bar lands on 100% rather than
+        // stopping wherever the last threshold fell.
+        let complete = total.is_some_and(|t| downloaded >= t);
+        if downloaded - last_emit < PROGRESS_EMIT_BYTES && !complete {
+            return;
+        }
+        last_emit = downloaded;
+
+        let _ = app.emit(UPDATE_PROGRESS_EVENT, UpdateProgress { downloaded, total });
+    };
+
+    let result = update.download(on_chunk, || {}).await;
+
+    let mb = received.load(Ordering::Relaxed) as f64 / 1_000_000.0;
+    let secs = started.elapsed().as_secs_f64();
+    match result {
+        Ok(bytes) => {
+            log::info!("update {}: downloaded {mb:.1} MB in {secs:.1}s", update.version);
+            Ok(bytes)
+        }
+        Err(e) => {
+            log::warn!(
+                "update {}: download failed after {mb:.1} MB in {secs:.1}s: {e}",
+                update.version
+            );
+            Err(AppError::Other(describe_download_error(&e)))
+        }
+    }
+}
 
 /// An update downloaded and signature-checked, waiting to be installed.
 ///
@@ -579,25 +800,7 @@ pub async fn download_update(app: tauri::AppHandle) -> Result<Option<String>, Ap
     };
 
     let version = update.version.clone();
-
-    let mut downloaded: u64 = 0;
-    let mut last_emit: u64 = 0;
-    let progress_app = app.clone();
-
-    let on_chunk = move |chunk: usize, total: Option<u64>| {
-        downloaded = downloaded.saturating_add(chunk as u64);
-        let complete = total.is_some_and(|t| downloaded >= t);
-        if downloaded - last_emit < PROGRESS_EMIT_BYTES && !complete {
-            return;
-        }
-        last_emit = downloaded;
-        let _ = progress_app.emit(UPDATE_PROGRESS_EVENT, UpdateProgress { downloaded, total });
-    };
-
-    let bytes = update
-        .download(on_chunk, || {})
-        .await
-        .map_err(|e| AppError::Other(e.to_string()))?;
+    let bytes = download_installer(&app, &update).await?;
 
     {
         let state = app.state::<PendingUpdate>();
@@ -619,29 +822,22 @@ pub async fn download_update(app: tauri::AppHandle) -> Result<Option<String>, Ap
 #[tauri::command]
 #[specta::specta]
 pub async fn install_downloaded_update(app: tauri::AppHandle) -> Result<(), AppError> {
-    let pending = {
-        let state = app.state::<PendingUpdate>();
-        let mut slot = state.0.lock().map_err(|e| AppError::Other(e.to_string()))?;
-        slot.take()
-    };
+    let state = app.state::<PendingUpdate>();
 
-    let Some(pending) = pending else {
+    let has_pending = state
+        .0
+        .lock()
+        .map_err(|e| AppError::Other(e.to_string()))?
+        .is_some();
+    if !has_pending {
         return Err(AppError::Other(
             "no update has been downloaded yet".to_string(),
         ));
-    };
-
-    // Same handover as install_update: cover the screen before the installer
-    // starts, since the app is about to disappear.
-    #[cfg(windows)]
-    {
-        if let Err(e) = spawn_update_cover(&app) {
-            log::warn!("update cover window did not start: {e}");
-        } else {
-            hide_all_windows(&app);
-        }
     }
 
+    // Re-check before taking anything off screen or out of the slot. It is a
+    // network call, and a failure here must leave the app as it was, with the
+    // download still held for another try.
     let updater = updater_for_channel(&app).await?;
     let update = match updater.check().await {
         Ok(Some(update)) => update,
@@ -653,11 +849,31 @@ pub async fn install_downloaded_update(app: tauri::AppHandle) -> Result<(), AppE
         Err(e) => return Err(AppError::Other(e.to_string())),
     };
 
+    let pending = state
+        .0
+        .lock()
+        .map_err(|e| AppError::Other(e.to_string()))?
+        .take();
+    let Some(pending) = pending else {
+        return Err(AppError::Other(
+            "no update has been downloaded yet".to_string(),
+        ));
+    };
+
+    raise_update_cover(&app);
     log::info!("installing downloaded update {}", pending.version);
 
-    update
-        .install(pending.bytes)
-        .map_err(|e| AppError::Other(e.to_string()))?;
+    // Does not return on success: the process exits inside the handoff.
+    if let Err(e) = update.install(&pending.bytes) {
+        log::warn!("update {}: install failed: {e}", pending.version);
+        lower_update_cover(&app);
+        // Put the bytes back so "Restart to update" can be tried again without
+        // downloading everything a second time.
+        if let Ok(mut slot) = state.0.lock() {
+            *slot = Some(pending);
+        }
+        return Err(AppError::Other(e.to_string()));
+    }
 
     Ok(())
 }
@@ -667,8 +883,8 @@ pub async fn install_downloaded_update(app: tauri::AppHandle) -> Result<(), AppE
 /// **This does not return on success.** The updater's Windows install path ends
 /// in `std::process::exit(0)` after handing the installer to ShellExecute, so
 /// the process is gone before this function's caller resumes. Anything that must
-/// happen before the app dies belongs in the `on_before_exit` hook below, not
-/// after the await in the frontend.
+/// happen before the app dies belongs in the `on_before_exit` hook, not after
+/// the await in the frontend.
 ///
 /// Progress is reported on `UPDATE_PROGRESS_EVENT` as the download runs, and the
 /// event's absence afterwards is what tells the frontend the install phase has
@@ -691,47 +907,23 @@ pub async fn install_update(app: tauri::AppHandle) -> Result<InstallOutcome, App
 
     let version = update.version.clone();
 
-    // Hand the screen over before the install starts, not as the process dies.
-    //
-    // The plugin's `on_before_exit` hook sounds like the right moment but runs far
-    // too late: `install_inner` writes the ~100 MB installer out to a temp file
-    // (unzipping it first, when the bundle is zipped) *before* calling the hook,
-    // and only then exits. So the cover appeared several seconds after the user
-    // clicked, with the app sitting there fully interactive in the meantime -- the
-    // 5-10s of apparently-nothing-happening that this replaces.
-    //
-    // Raising the cover here and hiding our own window in the same breath makes
-    // the swap immediate. The hook stays wired as a backstop; the flag inside
-    // `spawn_update_cover` keeps it from producing a second window.
-    #[cfg(windows)]
-    {
-        if let Err(e) = spawn_update_cover(&app) {
-            log::warn!("update cover window did not start: {e}");
-        } else {
-            hide_all_windows(&app);
-        }
-    }
+    // Download with the app still on screen, so the splash or the toast can
+    // narrate it. A failure here leaves nothing to undo.
+    let bytes = download_installer(&app, &update).await?;
 
-    let mut downloaded: u64 = 0;
-    let mut last_emit: u64 = 0;
-    let progress_app = app.clone();
+    // Now hand the screen over, before the install rather than as the process
+    // dies. The plugin's `on_before_exit` hook sounds like the right moment but
+    // runs too late: `install` writes the installer out to a temp file first
+    // (unzipping it, when the bundle is zipped), so the cover used to appear
+    // several seconds after the download finished, with the app sitting there
+    // fully interactive in the meantime. The hook stays wired as a backstop.
+    raise_update_cover(&app);
+    log::info!("installing update {version}");
 
-    let on_chunk = move |chunk: usize, total: Option<u64>| {
-        // `on_chunk` hands us the size of *this* chunk, not a running total.
-        downloaded = downloaded.saturating_add(chunk as u64);
+    // On Windows this does not return on success.
+    if let Err(e) = update.install(&bytes) {
+        lower_update_cover(&app);
 
-        // Always emit the final byte so the bar lands on 100% rather than
-        // stopping wherever the last threshold fell.
-        let complete = total.is_some_and(|t| downloaded >= t);
-        if downloaded - last_emit < PROGRESS_EMIT_BYTES && !complete {
-            return;
-        }
-        last_emit = downloaded;
-
-        let _ = progress_app.emit(UPDATE_PROGRESS_EVENT, UpdateProgress { downloaded, total });
-    };
-
-    if let Err(e) = update.download_and_install(on_chunk, || {}).await {
         // On Linux a package install needs root. The updater tries pkexec, then a
         // graphical sudo, then a terminal sudo; when every one is missing or the
         // user dismisses the prompt, this is not a failure they can act on by
@@ -745,6 +937,7 @@ pub async fn install_update(app: tauri::AppHandle) -> Result<InstallOutcome, App
             });
         }
 
+        log::warn!("update {version}: install failed: {e}");
         return Err(AppError::Other(e.to_string()));
     }
 
@@ -775,6 +968,49 @@ fn is_privilege_failure(e: &tauri_plugin_updater::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn only_staged_helper_copies_match() {
+        assert!(is_helper_copy_name("gitwyrm-update-23040.exe"));
+        assert!(is_helper_copy_name("gitwyrm-update-8.exe"));
+
+        // The temp folder is shared: anything that is not exactly our shape stays.
+        assert!(!is_helper_copy_name("gitwyrm-update-.exe"));
+        assert!(!is_helper_copy_name("gitwyrm-update-123.exe.tmp"));
+        assert!(!is_helper_copy_name("gitwyrm-update-12a.exe"));
+        assert!(!is_helper_copy_name("gitwyrm-update-123.dll"));
+        assert!(!is_helper_copy_name("gitwyrm-setup.exe"));
+        assert!(!is_helper_copy_name("GitWyrm-Setup.log"));
+        assert!(!is_helper_copy_name("other-gitwyrm-update-123.exe"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn sweep_removes_helper_copies_and_nothing_else() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["gitwyrm-update-1.exe", "gitwyrm-update-22.exe", "keep.exe", "gitwyrm-update-x.exe"] {
+            std::fs::write(dir.path().join(name), b"x").unwrap();
+        }
+        // A directory with a matching name is not a file we staged.
+        std::fs::create_dir(dir.path().join("gitwyrm-update-3.exe")).unwrap();
+
+        assert_eq!(sweep_helper_copies(dir.path()), 2);
+
+        let mut left: Vec<String> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        left.sort();
+        assert_eq!(left, ["gitwyrm-update-3.exe", "gitwyrm-update-x.exe", "keep.exe"]);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn sweep_of_a_missing_folder_is_a_no_op() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(sweep_helper_copies(&dir.path().join("gone")), 0);
+    }
 
     #[test]
     fn install_mode_is_a_known_value() {

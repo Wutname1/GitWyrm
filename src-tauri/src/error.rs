@@ -216,6 +216,11 @@ const EXPECTED: &[&str] = &[
     // updater plugin on a flavor we do not publish (a dev or WSL/Linux run
     // against a Windows-only manifest); nothing is wrong with the app.
     "were found in the response `platforms` object",
+    // An update download that stalled or could not connect. Our own wording
+    // (describe_download_error in commands/updates.rs), which replaces reqwest's
+    // for exactly those two conditions: the network, not the app.
+    "the download stopped responding",
+    "could not reach the update server",
     // A checkout could not replace files because something outside GitWyrm holds
     // them open on Windows - a running build, a debugger, an editor indexing the
     // folder, antivirus. Genuinely the user's to sort out, and the one action
@@ -504,6 +509,17 @@ mod tests {
         assert!(is_expected(
       "None of the fallback platforms `[\"linux-x86_64-deb\", \"linux-x86_64\"]` were found in the response `platforms` object"
     ));
+    }
+
+    /// A stalled or unreachable update download is the network, not a fault.
+    #[test]
+    fn update_download_network_failures_are_expected() {
+        assert!(is_expected(
+            crate::commands::updates::DOWNLOAD_STALLED_MESSAGE
+        ));
+        assert!(is_expected(
+            crate::commands::updates::DOWNLOAD_UNREACHABLE_MESSAGE
+        ));
     }
 
     #[test]

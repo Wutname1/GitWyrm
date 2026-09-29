@@ -823,6 +823,16 @@ pub fn run() {
             // behind between sessions.
             logs::sweep(app.handle());
 
+            // Delete update-cover copies that earlier updates left in the temp
+            // folder. Delayed so the copy covering this very launch's update has
+            // closed and can go too; on its own thread so a crowded temp folder
+            // costs startup nothing.
+            #[cfg(windows)]
+            std::thread::spawn(|| {
+                std::thread::sleep(std::time::Duration::from_secs(30));
+                commands::updates::sweep_stale_update_helpers();
+            });
+
             // Stash any folder Explorer passed us. The webview does not exist yet, so
             // this waits in a slot for the frontend to collect once it is ready.
             commands::app::set_pending_launch_path(commands::app::repo_path_from_args(

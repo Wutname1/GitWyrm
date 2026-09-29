@@ -7,6 +7,7 @@ import {
   type InstallOutcome,
 } from "@/lib/bindings";
 import { clearSplashBar, setSplashBar } from "@/lib/splash";
+import { describeError, log } from "@/lib/log";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 
 export type UpdateState =
@@ -348,6 +349,7 @@ export const useUpdater = create<UpdaterStore>((set, get) => ({
         await get().restartAndInstall();
       }
     } catch (e) {
+      log.warn(`update download failed: ${describeError(e)}`);
       set({ state: "error", progress: null });
       toast.error(`Download failed: ${(e as Error).message}`);
     } finally {
@@ -362,6 +364,7 @@ export const useUpdater = create<UpdaterStore>((set, get) => ({
       const res = await commands.installDownloadedUpdate();
       if (res.status === "error") throw new Error(res.error);
     } catch (e) {
+      log.warn(`update install failed: ${describeError(e)}`);
       set({ state: "error" });
       toast.error(`Update failed: ${(e as Error).message}`);
     }
@@ -392,6 +395,9 @@ export const useUpdater = create<UpdaterStore>((set, get) => ({
         );
       }
     } catch (e) {
+      // Info, not warn: the automatic check runs every two hours, and being
+      // offline for one of them is routine.
+      log.info(`update check failed: ${describeError(e)}`);
       set({ state: "error" });
       if (!silent) toast.error(`Update check failed: ${(e as Error).message}`);
     }
@@ -415,6 +421,7 @@ export const useUpdater = create<UpdaterStore>((set, get) => ({
       }
       await runInstall(version, set);
     } catch (e) {
+      log.warn(`update install failed: ${describeError(e)}`);
       set({ state: "error" });
       toast.error(`Update failed: ${(e as Error).message}`);
     }
@@ -440,6 +447,11 @@ export const useUpdater = create<UpdaterStore>((set, get) => ({
       // startup. The timeout lives here now: the check runs in Rust, and losing
       // the race only abandons the wait, it does not cancel the command.
       const offer = await withTimeout(fetchUpdateOffer(), LAUNCH_CHECK_TIMEOUT_MS);
+      if (!offer) {
+        log.info(
+          `launch update check took over ${LAUNCH_CHECK_TIMEOUT_MS / 1000}s; starting without it`,
+        );
+      }
       if (!offer?.version) {
         set({ state: "none", version: null, manualUrl: null });
         return;
@@ -494,9 +506,11 @@ export const useUpdater = create<UpdaterStore>((set, get) => ({
 
       set({ state: "ready" });
       onStatus("Restarting to finish the update");
-    } catch {
+    } catch (e) {
       // A failed update must never keep someone out of their repositories:
-      // fall through to a normal boot and let them retry from Settings.
+      // fall through to a normal boot and let them retry from Settings. The
+      // backend has already put the app's window back if it had hidden it.
+      log.warn(`launch update failed: ${describeError(e)}`);
       set({ state: "error" });
     }
   },
