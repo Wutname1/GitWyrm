@@ -323,6 +323,7 @@ pub async fn discard_all(
             &repo_id,
             "discard",
         );
+        let _finish = progress.finish_on_drop();
         let repo = open.repo.lock().unwrap();
         discard_everything(&repo, reset_submodules, &progress).map_err(AppError::Git)
     })

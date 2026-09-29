@@ -206,6 +206,7 @@ pub async fn merge_branch(
             &repo_id,
             "merge",
         );
+        let _finish = progress.finish_on_drop();
         let repo = open.repo.lock().unwrap();
         do_merge(&repo, &reference, &progress)
     })
@@ -237,6 +238,7 @@ pub async fn merge_directional(
             &repo_id,
             "merge",
         );
+        let _finish = progress.finish_on_drop();
         let repo = open.repo.lock().unwrap();
 
         let on_target = repo
