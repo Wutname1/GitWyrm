@@ -140,35 +140,73 @@ pub async fn get_file_diff(
     let open = manager.get(&repo_id)?;
     tauri::async_runtime::spawn_blocking(move || {
         let repo = open.repo.lock().unwrap();
-        let mut opts = DiffOptions::new();
-        opts.pathspec(&path)
-            .include_untracked(true)
-            .recurse_untracked_dirs(true)
-            .show_untracked_content(true)
-            .context_lines(3);
+        let read = || -> Result<FileDiff, AppError> {
+            let mut opts = DiffOptions::new();
+            opts.pathspec(&path)
+                .include_untracked(true)
+                .recurse_untracked_dirs(true)
+                .show_untracked_content(true)
+                .context_lines(3);
 
-        let mut diff = match &source {
-            DiffSource::Unstaged => repo.diff_index_to_workdir(None, Some(&mut opts))?,
-            DiffSource::Staged => {
-                let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
-                repo.diff_tree_to_index(head_tree.as_ref(), None, Some(&mut opts))?
-            }
-            DiffSource::Commit { sha } => {
-                let oid = Oid::from_str(sha)?;
-                let commit = repo.find_commit(oid)?;
-                let tree = commit.tree()?;
-                let parent_tree = commit.parent(0).ok().and_then(|p| p.tree().ok());
-                repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), Some(&mut opts))?
-            }
+            let mut diff = match &source {
+                DiffSource::Unstaged => repo.diff_index_to_workdir(None, Some(&mut opts))?,
+                DiffSource::Staged => {
+                    let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
+                    repo.diff_tree_to_index(head_tree.as_ref(), None, Some(&mut opts))?
+                }
+                DiffSource::Commit { sha } => {
+                    let oid = Oid::from_str(sha)?;
+                    let commit = repo.find_commit(oid)?;
+                    let tree = commit.tree()?;
+                    let parent_tree = commit.parent(0).ok().and_then(|p| p.tree().ok());
+                    repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), Some(&mut opts))?
+                }
+            };
+
+            // Detect renames so `old_path` can be populated for renamed files.
+            crate::git::rename_detect::find_renames(&mut diff)?;
+
+            build_file_diff(&diff, &path)
         };
 
-        // Detect renames so `old_path` can be populated for renamed files.
-        crate::git::rename_detect::find_renames(&mut diff)?;
-
-        build_file_diff(&diff, &path)
+        // Only a working-tree diff reads files something else may be writing.
+        let mut attempt = 1;
+        loop {
+            match read() {
+                Err(e)
+                    if matches!(source, DiffSource::Unstaged)
+                        && attempt < FILE_CHANGED_ATTEMPTS
+                        && is_file_changed_race(&e) =>
+                {
+                    log::info!("get_file_diff: {path} changed while being read; reading it again");
+                    attempt += 1;
+                    std::thread::sleep(FILE_CHANGED_RETRY_DELAY);
+                }
+                other => return other,
+            }
+        }
     })
     .await
     .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// How many times to read a working-tree diff whose file keeps changing.
+const FILE_CHANGED_ATTEMPTS: u32 = 3;
+const FILE_CHANGED_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(150);
+
+/// libgit2 notes a working file's size while building the diff, then refuses
+/// to read its content if the size changed in between: "file changed before we
+/// could read it" (class=Filesystem, diff_file.c). It means another program -
+/// a build, a log writer, an editor saving - was writing the file at that
+/// moment. A fresh diff a moment later almost always succeeds, so it is retried
+/// rather than shown as a failure (GITWYRM-BACKEND-D).
+fn is_file_changed_race(e: &AppError) -> bool {
+    matches!(
+        e,
+        AppError::Git(g)
+            if g.class() == git2::ErrorClass::Filesystem
+                && g.message().contains("file changed before we could read it")
+    )
 }
 
 #[tauri::command]
@@ -247,4 +285,31 @@ pub async fn get_commit_detail(
     })
     .await
     .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+#[cfg(test)]
+mod file_changed_tests {
+    use super::is_file_changed_race;
+    use crate::error::AppError;
+
+    #[test]
+    fn only_the_read_race_is_retried() {
+        let race = AppError::Git(git2::Error::new(
+            git2::ErrorCode::GenericError,
+            git2::ErrorClass::Filesystem,
+            "file changed before we could read it",
+        ));
+        assert!(is_file_changed_race(&race));
+
+        // A real filesystem fault must fail straight away, not three times.
+        let denied = AppError::Git(git2::Error::new(
+            git2::ErrorCode::GenericError,
+            git2::ErrorClass::Filesystem,
+            "failed to open file: permission denied",
+        ));
+        assert!(!is_file_changed_race(&denied));
+        assert!(!is_file_changed_race(&AppError::Other(
+            "file changed before we could read it".into()
+        )));
+    }
 }
