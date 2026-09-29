@@ -8,6 +8,7 @@ import {
 import { toast } from 'sonner'
 import {
   commands,
+  type BranchList,
   type DirtyChoice,
   type EditorKind,
   type PullResult,
@@ -17,6 +18,7 @@ import {
   type ResetMode,
   type SelectedLine,
   type SubmoduleFollowed,
+  type WorkingStatus,
 } from '@/lib/bindings'
 import { beginGitOperation, keys, trimLogToFirstPage, unwrap } from '@/lib/queryKeys'
 import { useHostResolver } from '@/hooks/useGitQueries'
@@ -694,6 +696,15 @@ export function useGitMutations(repoId: string | null) {
       // so without this the row would vanish and the graph would collapse a
       // row, then push everything back down when the commit finally arrives.
       commitLanding(sha)
+      // A commit that succeeded took everything that was staged, so clear that
+      // list now instead of waiting for the status refetch. That refetch queues
+      // behind the graph and branch reloads for the same repository lock, which
+      // left committed files on screen for seconds after the message box had
+      // already emptied (GITWYRM-FRONTEND-19). Unstaged files are untouched by a
+      // commit and stay as they are; the refetch below confirms the real state.
+      qc.setQueryData<WorkingStatus>(keys.status(id), (current) =>
+        current ? { ...current, staged: [] } : current,
+      )
       invalidate(qc, id, ['status', 'log', 'branches'])
       toast(args.amend ? `Amended ${shortSha(sha)}` : `Committed ${shortSha(sha)}`)
     },
@@ -733,6 +744,12 @@ export function useGitMutations(repoId: string | null) {
         })
         return
       }
+      // Drop it from the list straight away; the refetch that confirms it waits
+      // on the graph reload, and a deleted branch lingering there read as the
+      // delete itself being slow (GITWYRM-FRONTEND-19).
+      qc.setQueryData<BranchList>(keys.branches(id), (current) =>
+        current ? { ...current, local: current.local.filter((b) => b.name !== name) } : current,
+      )
       invalidate(qc, id, REFS)
       toast(`Deleted branch ${name}`)
     },
