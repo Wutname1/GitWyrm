@@ -65,8 +65,12 @@ KNOWN = {
     "linux-x86_64-appimage",
     "linux-x86_64-deb",
     "linux-x86_64",
+    "darwin-aarch64",
+    "darwin-x86_64",
 }
-BUNDLES = ("nsis", "msi")
+# "app" is the macOS updater bundle (.app.tar.gz): tauri emits both
+# "darwin-aarch64" and "darwin-aarch64-app" for it.
+BUNDLES = ("nsis", "msi", "app")
 
 
 def arch_of(key):
@@ -104,6 +108,8 @@ required = {
     "windows-aarch64",
     "linux-x86_64-appimage",
     "linux-x86_64-deb",
+    "darwin-aarch64",
+    "darwin-x86_64",
 }
 missing = sorted(required - covered)
 if missing:

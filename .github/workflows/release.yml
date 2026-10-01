@@ -87,6 +87,23 @@ jobs:
             tauri_args: "--config src-tauri/tauri.linux.conf.json"
             bundle_base: src-tauri/target/release/bundle
             portable_suffix: ""
+          # macOS ships a .dmg for first installs and a .app.tar.gz for the
+          # updater. Each architecture builds natively on its own runner: the
+          # bundled Copilot CLI and the static libraries are chosen per host,
+          # so cross-compiling x86_64 from an Apple Silicon runner is a gamble
+          # that a native build avoids.
+          - arch: aarch64-macos
+            os: macos-latest
+            rust_target: aarch64-apple-darwin
+            tauri_args: "--target aarch64-apple-darwin --config src-tauri/tauri.macos.conf.json"
+            bundle_base: src-tauri/target/aarch64-apple-darwin/release/bundle
+            portable_suffix: ""
+          - arch: x86_64-macos
+            os: macos-15-intel
+            rust_target: x86_64-apple-darwin
+            tauri_args: "--target x86_64-apple-darwin --config src-tauri/tauri.macos.conf.json"
+            bundle_base: src-tauri/target/x86_64-apple-darwin/release/bundle
+            portable_suffix: ""
     runs-on: ${{ matrix.os }}
     permissions:
       contents: write
@@ -156,11 +173,11 @@ jobs:
 
           npm version $version --no-git-tag-version --allow-same-version
 
-      # The same four edits as the pwsh step above, for the Linux runner. Kept
+      # The same four edits as the pwsh step above, for the Linux and macOS runners. Kept
       # as a separate step rather than porting both to bash: the Windows legs
       # are the shipping path today and are not worth re-proving for this.
-      - name: Sync version to tag (Linux)
-        if: runner.os == 'Linux'
+      - name: Sync version to tag (Linux and macOS)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           set -euo pipefail
@@ -309,6 +326,39 @@ jobs:
           pip install awscli
           .github/scripts/publish-toolset.sh ${{ matrix.arch }} toolset-staging
 
+      # Signs and notarizes the macOS app when the Apple secrets exist, and
+      # builds an ad-hoc signed app (tauri.macos.conf.json) when they do not.
+      #
+      # The variables are exported only when ALL of them are set. A repository
+      # secret that does not exist reaches the job as an empty string, and the
+      # bundler treats a variable that is merely present as "sign with this":
+      # an empty APPLE_CERTIFICATE makes it try to import nothing and fail the
+      # build instead of falling back to ad-hoc signing.
+      - name: Configure Apple signing
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY \
+                      APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!name}" ]; then
+              echo "::notice::$name is not set; building an unsigned (ad-hoc) macOS app."
+              exit 0
+            fi
+          done
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY \
+                      APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            echo "$name=${!name}" >> "$GITHUB_ENV"
+          done
+          echo "Apple signing and notarization enabled."
+
       - name: Build and release (NSIS + updater manifest)
         uses: tauri-apps/tauri-action@v1
         env:
@@ -425,6 +475,41 @@ jobs:
           deb="$(find "$base/deb" -name '*.deb' -type f | head -1)"
           upload "$deb" "GitWyrm-amd64.deb"
           cp "$deb" apt-staging.deb
+
+      # Fixed-name disk images, for the same reason as the Linux packages above.
+      # The updater does not use the .dmg: it downloads the .app.tar.gz that
+      # tauri-action already attached, so that one only has to exist and be
+      # signed. A build with signing misconfigured still produces a good-looking
+      # .dmg while latest.json quietly loses the darwin entry.
+      - name: Attach fixed-name macOS disk image
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          base="${{ matrix.bundle_base }}"
+
+          updater=$(find "$base/macos" -name '*.app.tar.gz' -type f | head -1)
+          if [ -z "$updater" ] || [ ! -f "${updater}.sig" ]; then
+            echo "::error::No signed .app.tar.gz under $base/macos; the updater would have nothing to install."
+            exit 1
+          fi
+
+          dmg=$(find "$base/dmg" -name '*.dmg' -type f | head -1)
+          if [ -z "$dmg" ]; then
+            echo "::error::No .dmg found under $base/dmg"
+            exit 1
+          fi
+
+          case "${{ matrix.arch }}" in
+            aarch64-macos) dest="GitWyrm-macOS-arm64.dmg" ;;
+            x86_64-macos)  dest="GitWyrm-macOS-x64.dmg" ;;
+            *) echo "::error::Unknown macOS arch ${{ matrix.arch }}"; exit 1 ;;
+          esac
+          cp "$dmg" "$dest"
+          gh release upload "${{ github.ref_name }}" "$dest" --clobber
+          echo "Attached $dmg as $dest"
 
       # Handed to publish-apt directly so the APT repo is built from this run's
       # bytes, without reading a draft release back.
@@ -656,13 +741,13 @@ jobs:
           # bootstrapper and download links, so publishing without one of them
           # would break that platform's fresh installs.
           missing=0
-          for required in latest.json x64-setup.exe arm64-setup.exe .AppImage .deb; do
+          for required in latest.json x64-setup.exe arm64-setup.exe .AppImage .deb .dmg .app.tar.gz; do
             if ! echo "$assets" | grep -q -- "$required"; then
               echo "::error::Missing required asset matching '$required'"
               missing=1
             fi
           done
-          for required in GitWyrm-Setup.exe GitWyrm-Setup-ARM64.exe GitWyrm-x86_64.AppImage GitWyrm-amd64.deb; do
+          for required in GitWyrm-Setup.exe GitWyrm-Setup-ARM64.exe GitWyrm-x86_64.AppImage GitWyrm-amd64.deb GitWyrm-macOS-arm64.dmg GitWyrm-macOS-x64.dmg; do
             if ! echo "$assets" | grep -qxF -- "$required"; then
               echo "::error::Missing fixed-name asset '$required'"
               missing=1
@@ -750,6 +835,9 @@ jobs:
 
           **Linux:** [AppImage](https://github.com/Wutname1/GitWyrm/releases/latest/download/GitWyrm-x86_64.AppImage) ·
           [Ubuntu / Debian / Mint](https://github.com/Wutname1/GitWyrm/releases/latest/download/GitWyrm-amd64.deb)
+
+          **Mac:** [Apple Silicon](https://github.com/Wutname1/GitWyrm/releases/latest/download/GitWyrm-macOS-arm64.dmg) ·
+          [Intel](https://github.com/Wutname1/GitWyrm/releases/latest/download/GitWyrm-macOS-x64.dmg)
 
           The installers attached below are pinned to this specific version. `gitwyrm-portable.exe`
           needs no install but does not auto-update.
