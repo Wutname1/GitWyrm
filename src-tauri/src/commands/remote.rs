@@ -396,6 +396,20 @@ fn ssh_host(stderr_lines: &[String]) -> Option<String> {
     None
 }
 
+/// Say so when git's own install is broken, usually because it is mid-update.
+///
+/// Git for Windows starts through a small launcher in `bin\git.exe` that runs
+/// the real program under `mingw64`. When that program is missing the launcher
+/// would start itself, and refuses with `BUG (fork bomb): <path>`. Seen in a
+/// two-minute burst on one machine (GITWYRM-BACKEND-J, with K and M beside it)
+/// while the system gitconfig had also vanished: Git was being reinstalled
+/// under the running app.
+fn humanize_git_install_failure(detail: &str) -> Option<String> {
+    detail.to_lowercase().contains("bug (fork bomb)").then(|| {
+        "Git could not start one of its own programs. This happens while Git is being installed or updated - wait for that to finish, then try again.".to_string()
+    })
+}
+
 fn run_streaming(
     app: &AppHandle,
     repo_id: &str,
@@ -540,7 +554,18 @@ fn run_streaming_with(
         }
         let detail = humanize_credential_failure(&detail, &stderr_lines)
             .or_else(|| humanize_ssh_failure(&detail, &stderr_lines))
+            .or_else(|| humanize_git_install_failure(&detail))
             .unwrap_or(detail);
+        // git exited without printing anything. The exit code is then the only
+        // clue (GITWYRM-BACKEND-M reported a bare "git fetch failed:").
+        let detail = if detail.is_empty() {
+            match output.status.code() {
+                Some(code) => format!("git stopped without saying why (exit code {code})"),
+                None => "git stopped without saying why".to_string(),
+            }
+        } else {
+            detail
+        };
         return Err(AppError::Other(format!("git {operation} failed: {detail}")));
     }
     Ok(stdout)
@@ -579,11 +604,32 @@ pub async fn git_fetch(
             "fetch",
             &["fetch", "--all", "--prune", "--progress"],
             attended,
-        )?;
+        )
+        .map_err(|e| quiet_when_unattended(e, attended))?;
         Ok(())
     })
     .await
     .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Keep a background fetch's failure out of Sentry unless it is a real fault.
+///
+/// The sweep fetches every open repository on a timer. A remote that refuses
+/// the key, a network that drops, or a Git install being updated underneath
+/// the app fails the same way on every pass: one machine filed the same SSH
+/// failure 258 times (GITWYRM-BACKEND-C). None of it is ours to fix, and the
+/// user did not ask for the fetch, so it is shown beside the Fetch button and
+/// logged as a warning instead. Damaged repository data still reports.
+fn quiet_when_unattended(e: AppError, attended: Attended) -> AppError {
+    match e {
+        AppError::Other(message)
+            if attended == Attended::Background
+                && !crate::error::looks_like_corruption(&message) =>
+        {
+            AppError::Unattended(message)
+        }
+        other => other,
+    }
 }
 
 /// The remote-tracking ref a failed fetch/pull could not lock, if that is what
@@ -734,6 +780,7 @@ pub(crate) fn fetch_all_at(
             || low.contains("permission denied (publickey)");
         let message = humanize_credential_failure(&detail, &lines)
             .or_else(|| humanize_ssh_failure(&detail, &lines))
+            .or_else(|| humanize_git_install_failure(&detail))
             .unwrap_or_else(|| {
             if needs_sign_in {
                 "The server wants you to sign in before it will send anything.".to_string()
@@ -2529,5 +2576,46 @@ mod ssh_message_tests {
     fn unrelated_failures_pass_through() {
         assert!(humanize_ssh_failure("fatal: repository 'x' not found", &[]).is_none());
         assert!(humanize_ssh_failure("! [rejected] main -> main (fetch first)", &[]).is_none());
+    }
+}
+
+#[cfg(test)]
+mod background_fetch_tests {
+    use super::*;
+
+    /// GITWYRM-BACKEND-J verbatim: Git for Windows' launcher with its real
+    /// program missing, mid-update.
+    #[test]
+    fn a_git_install_mid_update_is_explained_and_not_reported() {
+        let detail = failure_detail(&[r"BUG (fork bomb): C:\Program Files\Git\bin\git.exe".to_string()], "");
+        let message = humanize_git_install_failure(&detail).expect("should be translated");
+        assert!(!message.contains("fork bomb"), "{message}");
+        assert!(crate::error::is_expected_for_tests(&message), "{message}");
+        assert!(humanize_git_install_failure("fatal: Could not read from remote repository.").is_none());
+    }
+
+    /// The sweep's failures are the user's network, sign-in or git install:
+    /// shown and logged, not filed. The same failure from a fetch the user
+    /// asked for keeps its normal classification.
+    #[test]
+    fn background_failures_are_quiet_but_corruption_still_reports() {
+        for message in [
+            "git fetch failed: fatal: Could not read from remote repository. (Connection closed)",
+            "git fetch failed: fatal: remote helper 'https' aborted session",
+            "git fetch failed: git stopped without saying why (exit code 128)",
+        ] {
+            let quiet = quiet_when_unattended(AppError::Other(message.into()), Attended::Background);
+            assert!(matches!(quiet, AppError::Unattended(_)), "{message}");
+            assert_eq!(quiet.to_string(), message, "the UI still gets the same words");
+
+            let asked = quiet_when_unattended(AppError::Other(message.into()), Attended::User);
+            assert!(matches!(asked, AppError::Other(_)), "{message}");
+        }
+
+        let corrupt = quiet_when_unattended(
+            AppError::Other("git fetch failed: fatal: bad object refs/remotes/origin/main".into()),
+            Attended::Background,
+        );
+        assert!(matches!(corrupt, AppError::Other(_)));
     }
 }

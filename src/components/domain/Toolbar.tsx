@@ -41,6 +41,7 @@ import { useBranches, useRemotes, useStashes } from "@/hooks/useGitQueries";
 import { useMehenPushNote } from "@/hooks/useMehen";
 import { pushNoteHint } from "@/lib/mehen";
 import { useGitMutations } from "@/hooks/useGitMutations";
+import { useAutoFetchFailure } from "@/hooks/useAutoFetch";
 import { useUiStore } from "@/stores/uiStore";
 import { useActiveRepo } from "@/stores/workspaceStore";
 
@@ -292,6 +293,7 @@ export function Toolbar() {
   const openRemoteSync = useUiStore((s) => s.openRemoteSync);
   const head = branches.data?.local.find((b) => b.is_head);
   const pushNote = useMehenPushNote(repo?.id ?? null, head).data;
+  const autoFetchFailure = useAutoFetchFailure(repo?.id ?? null);
   const syncAction = m.fetch.isPending
     ? "fetch"
     : m.pull.isPending
@@ -341,6 +343,11 @@ export function Toolbar() {
         disabled={noRepo || syncPending}
         reason={noRepoReason}
         pending={m.fetch.isPending}
+        hint={
+          autoFetchFailure
+            ? `The last automatic fetch did not work: ${autoFetchFailure.replace(/^git fetch failed:\s*/, "")}`
+            : undefined
+        }
       />
       <ToolbarButton
         icon={<ArrowDown size={16} strokeWidth={1.9} />}

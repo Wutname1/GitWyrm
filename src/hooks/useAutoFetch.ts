@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { create } from 'zustand'
 import { commands } from '@/lib/bindings'
 import { keys } from '@/lib/queryKeys'
 import { log } from '@/lib/log'
@@ -31,6 +32,32 @@ export {
  * their access, and it means the pause can never become permanent.
  */
 const authBlocked = new Set<string>()
+
+/**
+ * Why each repo's last automatic fetch failed, shown on the Fetch button.
+ *
+ * These failures are the user's network, sign-in or git install, so they are
+ * not reported as errors. Saying nothing at all left one SSH remote failing
+ * every sweep for days with nobody aware of it.
+ */
+const useAutoFetchFailures = create<{ byRepo: Record<string, string> }>(() => ({ byRepo: {} }))
+
+function setFailure(repoId: string, message: string | null) {
+  useAutoFetchFailures.setState((s) => {
+    if (message === null) {
+      if (!(repoId in s.byRepo)) return s
+      const { [repoId]: _, ...rest } = s.byRepo
+      return { byRepo: rest }
+    }
+    if (s.byRepo[repoId] === message) return s
+    return { byRepo: { ...s.byRepo, [repoId]: message } }
+  })
+}
+
+/** The last automatic fetch failure for a repo, or null when it worked. */
+export function useAutoFetchFailure(repoId: string | null): string | null {
+  return useAutoFetchFailures((s) => (repoId ? (s.byRepo[repoId] ?? null) : null))
+}
 
 /** Repos currently skipped by the sweep, for tests and diagnostics. */
 export function authBlockedCount(): number {
@@ -64,6 +91,7 @@ export function noteManualFetch(repoId: string) {
   // sorted out their access, so give the sweep another chance at this repo.
   // Without this the pause would outlive the problem for the whole session.
   authBlocked.delete(repoId)
+  setFailure(repoId, null)
 }
 
 /** Forgets a closed repo so its ids do not accumulate for the session. */
@@ -72,6 +100,7 @@ function forget(repoId: string) {
   inFlight.delete(repoId)
   lastFetchedAt.delete(repoId)
   scheduled.delete(repoId)
+  setFailure(repoId, null)
 }
 
 /**
@@ -97,18 +126,20 @@ async function fetchIfDue(qc: QueryClient, repoId: string, minAgeMs: number) {
     const res = await commands.gitFetch(repoId, true)
     if (res.status === 'error') {
       // Expected and common: no remote, offline, or credentials not set up.
-      // A background fetch the user did not ask for must stay silent -- it is
-      // logged for diagnosis and otherwise ignored.
+      // A background fetch the user did not ask for must not interrupt: it is
+      // logged and noted quietly on the Fetch button.
       if (isAuthFailure(res.error)) {
         authBlocked.add(repoId)
         log.info(`auto-fetch paused for ${repoId} until you fetch by hand: ${res.error}`)
       } else {
         log.info(`auto-fetch skipped for ${repoId}: ${res.error}`)
       }
+      setFailure(repoId, res.error)
       return
     }
     // A success clears any earlier block: access evidently works again.
     authBlocked.delete(repoId)
+    setFailure(repoId, null)
 
     // Remote-tracking refs only. A background fetch must not call
     // trimLogToFirstPage: that would snap a scrolled graph back to the top

@@ -8,6 +8,23 @@ pub enum AppError {
     Io(#[from] std::io::Error),
     #[error("{0}")]
     Other(String),
+    /// A failure of work nobody asked for, such as the background fetch sweep,
+    /// whose cause is the user's network, sign-in or git install. The UI still
+    /// gets the message; it is logged as a warning so it does not file a
+    /// Sentry issue every time a timer fires (GITWYRM-BACKEND-C, J, K, M).
+    #[error("{0}")]
+    Unattended(String),
+}
+
+/// Whether a failure message describes damaged repository data.
+///
+/// Kept reportable even when background work hits it: corruption is a real
+/// fault worth seeing, unlike a network or sign-in failure.
+pub fn looks_like_corruption(message: &str) -> bool {
+    let lowered = message.to_lowercase();
+    ["corrupt", "bad object", "invalid data in index", "loose object"]
+        .iter()
+        .any(|needle| lowered.contains(needle))
 }
 
 /// Say what to do about a corrupt git index.
@@ -239,6 +256,16 @@ const EXPECTED: &[&str] = &[
     // needle broad enough to reach them would be exactly the over-broad match
     // this list warns against.
     "another program is holding files open",
+    // A toolset update that downloaded and verified but could not be swapped in
+    // because something held the old or new files open - antivirus scanning the
+    // fresh executables, or a git command still running from the old tree
+    // (GITWYRM-BACKEND-N). Our own sentence (toolset_fetch::STAGED_MESSAGE); the
+    // next start finishes the swap, so nothing is left broken.
+    "will finish the update the next time it starts",
+    // Git for Windows' own launcher could not find the program it starts,
+    // which happens while Git is being installed or updated
+    // (GITWYRM-BACKEND-J). Our sentence (remote.rs humanize_git_install_failure).
+    "while git is being installed or updated",
 ];
 
 fn is_expected(message: &str) -> bool {
@@ -272,7 +299,9 @@ impl Serialize for AppError {
         // the app log either way -- and as Sentry breadcrumbs, so they still give
         // context to a real error that follows -- without burying genuine bugs
         // under hundreds of reports of the remote saying no.
-        if is_expected(&message) {
+        if matches!(self, AppError::Unattended(_)) {
+            log::warn!("Background work failed: {message}");
+        } else if is_expected(&message) {
             log::warn!("Command refused: {message}");
         } else {
             log::error!("Command failed: {message}");
