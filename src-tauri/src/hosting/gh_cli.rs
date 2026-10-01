@@ -34,6 +34,34 @@ use crate::git::shell::CREATE_NO_WINDOW;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 const CALL_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Prefix of every error meaning `gh` gave no answer at all: it hung, or could
+/// not be started. Distinct from `gh` reaching GitHub and being told no.
+const RUN_FAILURE: &str = "could not run the GitHub CLI";
+
+/// How long the fallback stays off after `gh` gave no answer. Without this,
+/// every request a panel makes waits out the full timeout again
+/// (GITWYRM-BACKEND-H: 11 timeouts in a row from one machine).
+const STALL_PAUSE: Duration = Duration::from_secs(5 * 60);
+
+static STALLED_AT: Mutex<Option<Instant>> = Mutex::new(None);
+
+/// Whether `gh` recently failed to answer, so the fallback should not wait on it.
+pub fn stalled_recently() -> bool {
+    STALLED_AT
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .is_some_and(|at| at.elapsed() < STALL_PAUSE)
+}
+
+fn note_stall() {
+    *STALLED_AT.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
+}
+
+/// Whether `message` says `gh` never answered, as opposed to GitHub refusing.
+pub fn could_not_run(message: &str) -> bool {
+    message.starts_with(RUN_FAILURE)
+}
+
 /// Why the fallback is unavailable, phrased for the settings row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Unavailable {
@@ -119,13 +147,32 @@ pub fn find_executable() -> Option<PathBuf> {
 /// `Command::output()` has no timeout of its own, so a `gh` that decides to
 /// prompt would block the calling request forever. Running it on a thread we
 /// can abandon bounds the damage: the thread leaks, the request does not.
+///
+/// `input`, when given, is written to the child's stdin inside the same bounded
+/// wait, so a write request cannot hang either.
 fn output_with_timeout(
     mut cmd: Command,
+    input: Option<String>,
     timeout: Duration,
 ) -> Result<std::process::Output, String> {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let _ = tx.send(cmd.output());
+        let result = match input {
+            None => cmd.output(),
+            Some(input) => {
+                use std::io::Write;
+                cmd.stdin(std::process::Stdio::piped());
+                cmd.stdout(std::process::Stdio::piped());
+                cmd.stderr(std::process::Stdio::piped());
+                cmd.spawn().and_then(|mut child| {
+                    if let Some(mut stdin) = child.stdin.take() {
+                        stdin.write_all(input.as_bytes())?;
+                    }
+                    child.wait_with_output()
+                })
+            }
+        };
+        let _ = tx.send(result);
     });
     match rx.recv_timeout(timeout) {
         Ok(Ok(out)) => Ok(out),
@@ -171,6 +218,7 @@ static LAST_AVAILABLE: Mutex<Option<(Instant, PathBuf)>> = Mutex::new(None);
 /// we can see, so the settings row calls this before reporting status.
 pub fn invalidate_availability() {
     *LAST_AVAILABLE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    *STALLED_AT.lock().unwrap_or_else(|e| e.into_inner()) = None;
 }
 
 /// True when `gh` is installed and has a usable login.
@@ -199,7 +247,7 @@ pub fn availability() -> Result<PathBuf, Unavailable> {
     let exe = find_executable().ok_or(Unavailable::NotInstalled)?;
     let mut cmd = base_command(&exe);
     cmd.args(["auth", "status"]);
-    match output_with_timeout(cmd, PROBE_TIMEOUT) {
+    match output_with_timeout(cmd, None, PROBE_TIMEOUT) {
         Ok(out) if out.status.success() => {
             *LAST_AVAILABLE.lock().unwrap_or_else(|e| e.into_inner()) =
                 Some((Instant::now(), exe.clone()));
@@ -228,32 +276,16 @@ pub fn api(
     cmd.args(["-H", "Accept: application/vnd.github+json"]);
     cmd.args(["-H", "X-GitHub-Api-Version: 2022-11-28"]);
 
-    if let Some(body) = body {
-        // `--input -` reads the raw JSON body from stdin, which avoids `-f`'s
-        // key=value parsing mangling values that contain `=` or newlines -- a
-        // comment body is arbitrary user text and routinely contains both.
+    // `--input -` reads the raw JSON body from stdin, which avoids `-f`'s
+    // key=value parsing mangling values that contain `=` or newlines -- a
+    // comment body is arbitrary user text and routinely contains both.
+    if body.is_some() {
         cmd.args(["--input", "-"]);
-        cmd.stdin(std::process::Stdio::piped());
-        cmd.stdout(std::process::Stdio::piped());
-        cmd.stderr(std::process::Stdio::piped());
-        let payload = body.to_string();
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| AppError::Other(format!("could not run the GitHub CLI: {e}")))?;
-        if let Some(mut stdin) = child.stdin.take() {
-            use std::io::Write;
-            stdin
-                .write_all(payload.as_bytes())
-                .map_err(|e| AppError::Other(format!("could not run the GitHub CLI: {e}")))?;
-        }
-        let out = child
-            .wait_with_output()
-            .map_err(|e| AppError::Other(format!("could not run the GitHub CLI: {e}")))?;
-        return finish(out);
     }
-
-    let out = output_with_timeout(cmd, CALL_TIMEOUT)
-        .map_err(|e| AppError::Other(format!("could not run the GitHub CLI: {e}")))?;
+    let out = output_with_timeout(cmd, body.map(|b| b.to_string()), CALL_TIMEOUT).map_err(|e| {
+        note_stall();
+        AppError::Other(format!("{RUN_FAILURE}: {e}"))
+    })?;
     finish(out)
 }
 
@@ -331,6 +363,26 @@ fn extract_api_message(stderr: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// GITWYRM-BACKEND-H: a `gh` that never answers must be told apart from
+    /// GitHub refusing, so a read can fall back to the refusal it already has.
+    #[test]
+    fn a_cli_that_never_answered_is_not_a_refusal() {
+        assert!(could_not_run(&format!("{RUN_FAILURE}: timed out")));
+        assert!(!could_not_run(&describe_cli_failure(Some(404), "Not Found")));
+        assert!(!could_not_run(&describe_cli_failure(Some(403), "Resource not accessible")));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_slow_command_times_out_with_or_without_input() {
+        for input in [None, Some("{}".to_string())] {
+            let mut cmd = Command::new("cmd");
+            cmd.args(["/C", "ping -n 3 127.0.0.1 >NUL"]);
+            let result = output_with_timeout(cmd, input, Duration::from_millis(100));
+            assert_eq!(result.err().as_deref(), Some("timed out"));
+        }
+    }
 
     /// The whole point of the module is reaching the same paths the HTTP client
     /// uses, so a leading slash must not survive into the argument.
