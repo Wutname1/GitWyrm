@@ -12,6 +12,7 @@ export type CenterView =
   | 'fileHistory'
   | 'blame'
   | 'raw'
+  | 'rendered'
   | 'repoPicker'
 
 export type ModalKind =
@@ -245,6 +246,8 @@ interface UiState {
   openBlame: (path: string, sha?: string | null) => void
   /** Show the whole file, as of the pinned commit or the working copy. */
   openRaw: (path: string) => void
+  /** Show a Markdown file rendered, from the same version Raw would show. */
+  openRendered: (path: string) => void
   openConflict: (path: string) => void
   showSettings: (section?: SettingsSection) => void
   showGraph: () => void
@@ -279,6 +282,7 @@ const REPO_SCOPED_VIEWS = new Set<CenterView>([
   'fileHistory',
   'blame',
   'raw',
+  'rendered',
 ])
 
 export const useUiStore = create<UiState>((set) => ({
@@ -429,6 +433,12 @@ export const useUiStore = create<UiState>((set) => ({
   openRaw: (path) =>
     set((s) => ({
       centerView: 'raw',
+      fileTarget: { path, sha: s.fileTarget?.path === path ? (s.fileTarget.sha ?? null) : null },
+      diffRequest: null,
+    })),
+  openRendered: (path) =>
+    set((s) => ({
+      centerView: 'rendered',
       fileTarget: { path, sha: s.fileTarget?.path === path ? (s.fileTarget.sha ?? null) : null },
       diffRequest: null,
     })),
