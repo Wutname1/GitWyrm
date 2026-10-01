@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { WindowControls } from "@/components/domain/WindowControls";
+import { titleBarInsetStyle } from "@/lib/platform";
 import { RepositoryTabs } from "@/components/domain/RepositoryTabs";
 import {
   UpdateAllContextItems,
@@ -594,6 +595,7 @@ export function TabBar() {
           data-dim-on-drag
           onMouseDownCapture={onTitleBarMouseDown}
           onDoubleClick={onTitleBarDoubleClick}
+          style={titleBarInsetStyle()}
           className="flex h-9 flex-none items-stretch border-b border-border bg-background pl-2.5"
         >
           <div data-tauri-drag-region className="mr-4 flex items-center">
@@ -621,6 +623,7 @@ export function TabBar() {
       data-dim-on-drag
       onMouseDownCapture={onTitleBarMouseDown}
       onDoubleClick={onTitleBarDoubleClick}
+      style={titleBarInsetStyle()}
       className="flex h-9 flex-none items-stretch gap-0.5 border-b border-border bg-background pl-2.5"
     >
       <div

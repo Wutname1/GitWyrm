@@ -100,12 +100,24 @@ pub async fn open_spec_desk(
     // the user has already arranged reopens where they left it rather than
     // snapping back to these numbers. Keeping the default is what makes the very
     // first open sensible.
-    WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(url.into()))
+    let builder = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(url.into()))
         .title(format!("Spec Desk - {repo_name}"))
         .inner_size(940.0, 760.0)
         .min_inner_size(720.0, 560.0)
-        .decorations(false)
-        .background_color(tauri::window::Color(0x12, 0x12, 0x12, 0xff))
+        .background_color(tauri::window::Color(0x12, 0x12, 0x12, 0xff));
+
+    // Every other platform gets the Desk's own window buttons. A Mac window
+    // keeps its native ones, drawn over the top-left of the Desk's title bar.
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .decorations(true)
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true)
+        .traffic_light_position(tauri::LogicalPosition::new(16.0, 13.0));
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.decorations(false);
+
+    builder
         .build()
         .map_err(|e| AppError::Other(format!("could not open the Spec Desk window: {e}")))?;
 

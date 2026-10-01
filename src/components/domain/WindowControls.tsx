@@ -4,6 +4,7 @@ import { TooltipButton } from '@/components/ui/tooltip'
 import { useIsMaximized } from '@/hooks/useIsMaximized'
 import { useSnapLayouts } from '@/hooks/useSnapLayouts'
 import { describeError, log } from '@/lib/log'
+import { isMac } from '@/lib/platform'
 
 const inTauri = '__TAURI_INTERNALS__' in window
 
@@ -41,7 +42,8 @@ export function WindowControls() {
   // than the DOM.
   const { ref: maxRef, hovered: maxHovered } = useSnapLayouts(toggleMaximize)
 
-  if (!inTauri) return null
+  // A Mac window keeps its own close, minimize and zoom buttons.
+  if (!inTauri || isMac()) return null
 
   const btn =
     'inline-flex h-full w-11 flex-none items-center justify-center text-sub transition-colors hover:bg-panel3 hover:text-foreground active:bg-panel2 active:text-foreground'

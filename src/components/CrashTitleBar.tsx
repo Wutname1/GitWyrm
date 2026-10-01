@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { Copy, Minus, Square, X } from 'lucide-react'
 import logoUrl from '@/assets/logo.png'
+import { isMac, titleBarInsetStyle } from '@/lib/platform'
 
 const inTauri = '__TAURI_INTERNALS__' in window
 
@@ -61,6 +62,7 @@ export function CrashTitleBar() {
       onDoubleClick={(e) => {
         if ((e.target as HTMLElement).hasAttribute('data-tauri-drag-region')) toggleMaximize()
       }}
+      style={titleBarInsetStyle()}
       className="flex h-9 flex-none items-stretch border-b border-border bg-background pl-2.5"
     >
       <div data-tauri-drag-region className="flex items-center gap-[7px]">
@@ -79,7 +81,7 @@ export function CrashTitleBar() {
         </span>
       </div>
       <div data-tauri-drag-region className="min-w-0 flex-1" />
-      {inTauri && (
+      {inTauri && !isMac() && (
         <div className="titlebar-no-drag flex h-full items-stretch">
           <button
             type="button"

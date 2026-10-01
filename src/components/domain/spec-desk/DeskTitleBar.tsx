@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import specDeskLogo from "@/assets/icons/specdesk.png";
 import { WindowControls } from "@/components/domain/WindowControls";
+import { titleBarInsetStyle } from "@/lib/platform";
 import { AiProviderChip } from "./AiProviderChip";
 import { SpecRefreshButton } from "./SpecRefreshButton";
 
@@ -23,6 +24,7 @@ export function DeskTitleBar({
   return (
     <div
       data-tauri-drag-region
+      style={titleBarInsetStyle()}
       className="flex h-10 flex-none select-none items-center gap-2.5 border-b border-border bg-panel pl-3 pr-0"
     >
       {/* The window icon. Decorations are off, so this titlebar is the only
