@@ -862,6 +862,8 @@ pub fn run() {
             // sit outside the install directory so an app update leaves them alone;
             // see git::toolset. Absent in dev and before the first download, where
             // the system tools are used instead.
+            #[cfg(windows)]
+            git::toolset_fetch::finish_staged_install();
             let bundle_root = git::toolset::toolset_dir().filter(|dir| dir.is_dir());
             git::bundled::set_bundle_root(bundle_root);
 

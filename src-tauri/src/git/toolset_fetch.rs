@@ -231,7 +231,7 @@ where
     // -------------------------------------------------------------------- unpack
     // Into a scratch directory beside the destination, so the move below is a
     // rename on the same volume rather than a copy.
-    let scratch = parent.join(".tools-incoming");
+    let scratch = parent.join(INCOMING);
     let _ = std::fs::remove_dir_all(&scratch);
     std::fs::create_dir_all(&scratch)?;
 
@@ -257,7 +257,7 @@ where
 
     // Sanity-check the shape before swapping it in. An archive that unpacked but
     // has no git in it would otherwise replace a working toolset with a broken one.
-    if !scratch.join("git/cmd/git.exe").is_file() {
+    if !is_complete(&scratch) {
         let _ = std::fs::remove_dir_all(&scratch);
         return Err(AppError::Other(
             "the downloaded toolset does not contain git".into(),
@@ -265,31 +265,35 @@ where
     }
 
     // ---------------------------------------------------------------------- swap
-    // Old tree out of the way first: Windows will not rename onto an existing
-    // directory. Kept until the new one is in place so a failure here is
-    // recoverable rather than leaving the user with nothing.
-    let retired = parent.join(".tools-old");
-    let _ = std::fs::remove_dir_all(&retired);
-    let had_previous = dir.exists();
-    if had_previous {
-        std::fs::rename(&dir, &retired)
-            .map_err(|e| AppError::Other(format!("could not move the old toolset aside: {e}")))?;
-    }
+    // Off the async runtime: the swap may wait several seconds for a lock to
+    // clear, and that wait must not hold a runtime worker.
+    let swap_parent = parent.to_path_buf();
+    let swap_dir = dir.clone();
+    let swapped = tauri::async_runtime::spawn_blocking(move || {
+        swap_into_place(&swap_parent, &swap_dir, INSTALL_BACKOFF_MS)
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?;
 
-    match std::fs::rename(&scratch, &dir) {
-        Ok(()) => {
-            let _ = std::fs::remove_dir_all(&retired);
+    if let Err(failure) = swapped {
+        if is_lock(&failure.error) {
+            // Fresh executables are what antivirus scans hardest, and a git
+            // command still running from the old tree holds it open too. The
+            // verified tree stays staged and the next start finishes the swap,
+            // before anything has run from either tree.
+            log::warn!(
+                "toolset {} staged for the next start: {}: {}",
+                manifest.version,
+                failure.step,
+                failure.error
+            );
+            return Err(AppError::Other(STAGED_MESSAGE.into()));
         }
-        Err(e) => {
-            // Put the old one back rather than leaving the user with no tools at all.
-            if had_previous {
-                let _ = std::fs::rename(&retired, &dir);
-            }
-            let _ = std::fs::remove_dir_all(&scratch);
-            return Err(AppError::Other(format!(
-                "could not move the new toolset into place: {e}"
-            )));
-        }
+        let _ = std::fs::remove_dir_all(&scratch);
+        return Err(AppError::Other(format!(
+            "{}: {}",
+            failure.step, failure.error
+        )));
     }
 
     // The resolver caches where it found git; without this the tools stay
@@ -302,6 +306,120 @@ where
         dir.display()
     );
     Ok(())
+}
+
+/// Scratch directory beside the toolset. A fresh download is unpacked here, and
+/// a verified tree that could not be swapped in waits here for the next start.
+const INCOMING: &str = ".tools-incoming";
+
+/// Where the previous tree sits while the new one moves in.
+const RETIRED: &str = ".tools-old";
+
+/// Waits between rename attempts while something holds the tree open. About
+/// seven seconds in all: long enough for an antivirus scan of the new files.
+const INSTALL_BACKOFF_MS: &[u64] = &[100, 250, 500, 1_000, 2_000, 3_000];
+
+/// Shorter at startup, where the wait delays the window opening.
+#[cfg(windows)]
+const STARTUP_BACKOFF_MS: &[u64] = &[100, 250, 500];
+
+/// What the user is told when the swap is left for the next start.
+pub const STAGED_MESSAGE: &str = "The updated git tools are downloaded, but another program is using the current ones (often antivirus or a git command that is still running). GitWyrm will finish the update the next time it starts.";
+
+/// Whether `root` holds a whole, labelled toolset rather than a partial unpack.
+fn is_complete(root: &Path) -> bool {
+    root.join(VERSION_FILE).is_file() && root.join("git/cmd/git.exe").is_file()
+}
+
+/// Windows refuses to rename a directory while any file inside it is open, and
+/// says so as access denied (5) or a sharing or lock violation (32, 33).
+fn is_lock(e: &std::io::Error) -> bool {
+    e.kind() == std::io::ErrorKind::PermissionDenied
+        || matches!(e.raw_os_error(), Some(5 | 32 | 33))
+}
+
+fn rename_with_retry(from: &Path, to: &Path, backoff_ms: &[u64]) -> std::io::Result<()> {
+    let mut waits = backoff_ms.iter();
+    loop {
+        match std::fs::rename(from, to) {
+            Ok(()) => return Ok(()),
+            Err(e) if is_lock(&e) => match waits.next() {
+                Some(ms) => std::thread::sleep(std::time::Duration::from_millis(*ms)),
+                None => return Err(e),
+            },
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+struct SwapFailure {
+    step: &'static str,
+    error: std::io::Error,
+}
+
+/// Move the verified tree in `parent/.tools-incoming` to `dir`.
+///
+/// The old tree is moved aside first, because Windows will not rename onto an
+/// existing directory, and kept until the new one is in place so a failure
+/// puts it back rather than leaving the user with no tools. On failure the
+/// incoming tree is left where it is for the caller to keep or discard.
+fn swap_into_place(parent: &Path, dir: &Path, backoff_ms: &[u64]) -> Result<(), SwapFailure> {
+    let incoming = parent.join(INCOMING);
+    let retired = parent.join(RETIRED);
+    let _ = std::fs::remove_dir_all(&retired);
+
+    let had_previous = dir.exists();
+    if had_previous {
+        rename_with_retry(dir, &retired, backoff_ms).map_err(|error| SwapFailure {
+            step: "could not move the old toolset aside",
+            error,
+        })?;
+    }
+
+    if let Err(error) = rename_with_retry(&incoming, dir, backoff_ms) {
+        if had_previous {
+            let _ = rename_with_retry(&retired, dir, backoff_ms);
+        }
+        return Err(SwapFailure {
+            step: "could not move the new toolset into place",
+            error,
+        });
+    }
+
+    let _ = std::fs::remove_dir_all(&retired);
+    Ok(())
+}
+
+/// Finish an update the last run downloaded but could not swap in.
+///
+/// Called at startup before the tool resolver is pointed at the toolset, so
+/// nothing of ours is running from either tree yet. A partial unpack is
+/// discarded; a tree that still cannot move stays staged for the next start,
+/// and the update check fetches it again in the meantime if it has to.
+#[cfg(windows)]
+pub fn finish_staged_install() {
+    let Some(dir) = toolset::toolset_dir() else {
+        return;
+    };
+    let Some(parent) = dir.parent() else {
+        return;
+    };
+    let incoming = parent.join(INCOMING);
+    if !incoming.is_dir() {
+        return;
+    }
+    if !is_complete(&incoming) {
+        let _ = std::fs::remove_dir_all(&incoming);
+        return;
+    }
+    match swap_into_place(parent, &dir, STARTUP_BACKOFF_MS) {
+        Ok(()) => log::info!("finished the toolset update staged by the last run"),
+        Err(failure) => log::warn!(
+            "the staged toolset is still waiting: {}: {}",
+            failure.step,
+            failure.error
+        ),
+    }
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -454,5 +572,94 @@ mod tests {
         let document: ComponentsDocument =
             serde_json::from_str(raw).expect("should parse despite unknown keys");
         assert_eq!(document.components.len(), 1);
+    }
+
+    fn fake_tree(root: &Path, version: &str) {
+        std::fs::create_dir_all(root.join("git/cmd")).unwrap();
+        std::fs::write(root.join("git/cmd/git.exe"), b"").unwrap();
+        std::fs::write(root.join(VERSION_FILE), version).unwrap();
+    }
+
+    #[test]
+    fn a_swap_replaces_the_old_tree_and_clears_the_leftovers() {
+        let parent = tempfile::tempdir().unwrap();
+        let dir = parent.path().join("tools");
+        fake_tree(&dir, "v1");
+        fake_tree(&parent.path().join(INCOMING), "v2");
+
+        assert!(swap_into_place(parent.path(), &dir, &[]).is_ok());
+        assert_eq!(
+            std::fs::read_to_string(dir.join(VERSION_FILE)).unwrap(),
+            "v2"
+        );
+        assert!(!parent.path().join(INCOMING).exists());
+        assert!(!parent.path().join(RETIRED).exists());
+    }
+
+    #[test]
+    fn only_a_labelled_tree_with_git_counts_as_complete() {
+        let parent = tempfile::tempdir().unwrap();
+        let root = parent.path().join("t");
+        assert!(!is_complete(&root));
+        fake_tree(&root, "v1");
+        assert!(is_complete(&root));
+        std::fs::remove_file(root.join(VERSION_FILE)).unwrap();
+        assert!(
+            !is_complete(&root),
+            "an interrupted unpack is not a toolset"
+        );
+    }
+
+    #[test]
+    fn access_denied_and_sharing_violations_count_as_locks() {
+        assert!(is_lock(&std::io::Error::from_raw_os_error(5)));
+        assert!(is_lock(&std::io::Error::from_raw_os_error(32)));
+        assert!(is_lock(&std::io::Error::from(
+            std::io::ErrorKind::PermissionDenied
+        )));
+        assert!(!is_lock(&std::io::Error::from(
+            std::io::ErrorKind::NotFound
+        )));
+    }
+
+    /// GITWYRM-BACKEND-N: something held a file in the new tree open. The old
+    /// tree must be put back and the new one kept staged for the next start.
+    #[cfg(windows)]
+    #[test]
+    fn a_held_file_keeps_the_old_tree_and_stages_the_new_one() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let parent = tempfile::tempdir().unwrap();
+        let dir = parent.path().join("tools");
+        let incoming = parent.path().join(INCOMING);
+        fake_tree(&dir, "v1");
+        fake_tree(&incoming, "v2");
+
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(incoming.join("git/cmd/git.exe"))
+            .unwrap();
+        let failure = swap_into_place(parent.path(), &dir, &[])
+            .err()
+            .expect("should fail");
+        assert!(is_lock(&failure.error), "{}", failure.error);
+        assert_eq!(
+            std::fs::read_to_string(dir.join(VERSION_FILE)).unwrap(),
+            "v1"
+        );
+        assert!(is_complete(&incoming), "the new tree stays staged");
+
+        drop(held);
+        assert!(swap_into_place(parent.path(), &dir, &[]).is_ok());
+        assert_eq!(
+            std::fs::read_to_string(dir.join(VERSION_FILE)).unwrap(),
+            "v2"
+        );
+    }
+
+    #[test]
+    fn the_staged_message_is_not_reported_as_a_fault() {
+        assert!(crate::error::is_expected_for_tests(STAGED_MESSAGE));
     }
 }
