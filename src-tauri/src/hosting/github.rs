@@ -10,8 +10,8 @@ use super::http::{self, TIMEOUT};
 use super::patch::parse_file_patch;
 use super::registry::ProviderId;
 use super::{
-    not_connected, AuthKind, HostCapabilities, HostComment, HostProvider, IssueDetail,
-    IssueSummary, MergeMethod, PrCommit, PrDetail, PrFile, PrSummary, RepoSlug,
+    not_connected, AuthKind, HostCapabilities, HostComment, HostProvider, HostRelease,
+    IssueDetail, IssueSummary, MergeMethod, PrCommit, PrDetail, PrFile, PrSummary, RepoSlug,
 };
 use crate::error::AppError;
 use crate::git::remote_url::{self, RemoteProvider};
@@ -478,10 +478,112 @@ impl HostProvider for GitHub {
         .await?;
         Ok(())
     }
+
+    /// Scans the release list rather than asking `/releases/tags/{tag}`: that
+    /// endpoint never returns drafts, and a draft is the usual thing left behind
+    /// when a tag is cut, found wrong, and deleted. Drafts sort first, so a few
+    /// pages cover every real case; a published release older than that is not
+    /// found, and the tag is then deleted without offering to touch it.
+    ///
+    /// Not signed in answers None: a draft is invisible without a token, and
+    /// the delete that would follow needs one anyway.
+    async fn release_for_tag(
+        &self,
+        app: &tauri::AppHandle,
+        slug: &RepoSlug,
+        tag: &str,
+    ) -> Result<Option<HostRelease>, AppError> {
+        if http::credential(app, ProviderId::Github)?.is_none() {
+            return Ok(None);
+        }
+        for page in 1..=RELEASE_PAGES {
+            let path = format!(
+                "/repos/{}/{}/releases?per_page={RELEASE_PAGE_SIZE}&page={page}",
+                slug.owner, slug.repo
+            );
+            let releases: Vec<ApiRelease> = http::send_json_via_gh(
+                self.request(app, reqwest::Method::GET, &path)?,
+                HOST,
+                ERROR_KEYS,
+                http::GhFallback::get(&path),
+            )
+            .await?;
+            let last_page = releases.len() < RELEASE_PAGE_SIZE;
+            if let Some(found) = pick_release(releases, tag) {
+                return Ok(Some(found));
+            }
+            if last_page {
+                break;
+            }
+        }
+        Ok(None)
+    }
+
+    async fn delete_release(
+        &self,
+        app: &tauri::AppHandle,
+        slug: &RepoSlug,
+        release_id: &str,
+    ) -> Result<(), AppError> {
+        // The id came back from `release_for_tag`; refusing anything but digits
+        // keeps a malformed one from being spliced into a different API path.
+        if release_id.is_empty() || !release_id.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(AppError::Other(format!("not a {HOST} release id: {release_id}")));
+        }
+        let path = format!("/repos/{}/{}/releases/{release_id}", slug.owner, slug.repo);
+        http::send_via_gh(
+            self.request(app, reqwest::Method::DELETE, &path)?,
+            HOST,
+            ERROR_KEYS,
+            http::GhFallback {
+                method: "DELETE",
+                path: path.clone(),
+                body: None,
+            },
+        )
+        .await?;
+        Ok(())
+    }
+}
+
+/// Releases are listed 100 to a page, GitHub's maximum.
+const RELEASE_PAGE_SIZE: usize = 100;
+/// How many pages `release_for_tag` reads before giving up.
+const RELEASE_PAGES: u32 = 3;
+
+/// The release whose tag is exactly `tag`. Tag names are case-sensitive in git,
+/// so `V1.0` and `v1.0` are different tags with different releases.
+fn pick_release(releases: Vec<ApiRelease>, tag: &str) -> Option<HostRelease> {
+    releases
+        .into_iter()
+        .find(|r| r.tag_name == tag)
+        .map(|r| HostRelease {
+            id: r.id.to_string(),
+            name: r
+                .name
+                .filter(|n| !n.trim().is_empty())
+                .unwrap_or_else(|| r.tag_name.clone()),
+            draft: r.draft,
+            prerelease: r.prerelease,
+            html_url: r.html_url,
+        })
 }
 
 // ---------------------------------------------------------------------------
 // Response shapes, straight off the REST API
+
+#[derive(Deserialize)]
+struct ApiRelease {
+    id: u64,
+    tag_name: String,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    draft: bool,
+    #[serde(default)]
+    prerelease: bool,
+    html_url: String,
+}
 
 #[derive(Deserialize)]
 struct ApiUser {
@@ -709,5 +811,60 @@ mod tests {
         assert!(GitHub
             .slug_from_remote("https://gitlab.com/o/r.git")
             .is_none());
+    }
+
+    fn release(id: u64, tag: &str, name: Option<&str>, draft: bool) -> ApiRelease {
+        ApiRelease {
+            id,
+            tag_name: tag.into(),
+            name: name.map(Into::into),
+            draft,
+            prerelease: false,
+            html_url: format!("https://github.com/o/r/releases/{id}"),
+        }
+    }
+
+    #[test]
+    fn release_is_matched_by_exact_tag_drafts_included() {
+        let found = pick_release(
+            vec![
+                release(1, "1.2.30", Some("Wrong"), false),
+                release(2, "1.2.3", Some("Spring update"), true),
+            ],
+            "1.2.3",
+        )
+        .expect("the draft for 1.2.3");
+        assert_eq!(found.id, "2");
+        assert_eq!(found.name, "Spring update");
+        assert!(found.draft);
+    }
+
+    #[test]
+    fn release_without_a_title_is_named_after_its_tag() {
+        let found = pick_release(vec![release(7, "v2.0", Some("  "), false)], "v2.0").unwrap();
+        assert_eq!(found.name, "v2.0");
+        let found = pick_release(vec![release(8, "v2.1", None, false)], "v2.1").unwrap();
+        assert_eq!(found.name, "v2.1");
+    }
+
+    #[test]
+    fn release_tags_are_case_sensitive() {
+        assert!(pick_release(vec![release(1, "V1.0", None, false)], "v1.0").is_none());
+    }
+
+    #[test]
+    fn release_id_keeps_its_full_64_bit_value() {
+        let found = pick_release(vec![release(u64::MAX, "t", None, false)], "t").unwrap();
+        assert_eq!(found.id, u64::MAX.to_string());
+    }
+
+    #[test]
+    fn release_list_parses_from_the_api_shape() {
+        let body = r#"[{"id":123456789012,"tag_name":"1.0.0","name":null,"draft":true,
+            "prerelease":false,"html_url":"https://github.com/o/r/releases/tag/untagged-abc"}]"#;
+        let list: Vec<ApiRelease> = serde_json::from_str(body).unwrap();
+        let found = pick_release(list, "1.0.0").unwrap();
+        assert_eq!(found.id, "123456789012");
+        assert!(found.draft);
     }
 }

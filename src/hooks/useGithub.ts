@@ -35,6 +35,8 @@ export const githubKeys = {
 export const hostingKeys = {
   providers: ['hosting-providers'] as const,
   repoProvider: (repoId: string) => ['hosting-repo-provider', repoId] as const,
+  release: (repoId: string, tag: string) => ['hosting-release', repoId, tag] as const,
+  releasesAll: (repoId: string) => ['hosting-release', repoId] as const,
   ghCli: ['gh-cli-status'] as const,
 }
 
@@ -81,6 +83,24 @@ export function useRepoHostProvider(repoId: string | null) {
     staleTime: 5 * 60 * 1000,
     retry: false,
     queryFn: async () => unwrap(await commands.repoHostProvider(repoId!)),
+  })
+}
+
+/**
+ * The release on the code host that uses `tag`, drafts included, or null when
+ * there is none. Asked only while a tag-delete dialog is open, so the dialog
+ * can offer to delete the release along with the tag.
+ *
+ * Always fetched fresh: a release drafted a minute ago in the browser is
+ * exactly the one someone opens this dialog to clean up.
+ */
+export function useTagRelease(repoId: string | null, tag: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: hostingKeys.release(repoId ?? '', tag ?? ''),
+    enabled: isTauri && enabled && repoId != null && !!tag,
+    staleTime: 0,
+    retry: false,
+    queryFn: async () => unwrap(await commands.hostReleaseForTag(repoId!, tag!)),
   })
 }
 

@@ -599,8 +599,8 @@ async checkForUpdate() : Promise<Result<string | null, string>> {
  * **This does not return on success.** The updater's Windows install path ends
  * in `std::process::exit(0)` after handing the installer to ShellExecute, so
  * the process is gone before this function's caller resumes. Anything that must
- * happen before the app dies belongs in the `on_before_exit` hook below, not
- * after the await in the frontend.
+ * happen before the app dies belongs in the `on_before_exit` hook, not after
+ * the await in the frontend.
  * 
  * Progress is reported on `UPDATE_PROGRESS_EVENT` as the download runs, and the
  * event's absence afterwards is what tells the frontend the install phase has
@@ -2921,6 +2921,32 @@ async githubCloseIssue(repoId: string | null, owner: string, repo: string, numbe
 }
 },
 /**
+ * The release on the repository's host for `tag`, drafts included.
+ * 
+ * None when the repository is not on a host GitWyrm integrates with, when that
+ * host is not connected, or when no release uses the tag. The tag-delete
+ * dialogs ask this to decide whether to offer deleting the release as well.
+ */
+async hostReleaseForTag(repoId: string, tag: string) : Promise<Result<HostRelease | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("host_release_for_tag", { repoId, tag }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Deletes a release found by `host_release_for_tag`. The tag is untouched.
+ */
+async hostDeleteRelease(repoId: string, releaseId: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("host_delete_release", { repoId, releaseId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Cross-references the SSH keys on this computer against the ones registered
  * on the signed-in GitHub account.
  * 
@@ -4109,6 +4135,23 @@ required_scopes: string[];
  * The signed-in account name, or None when not connected.
  */
 connected_as: string | null; capabilities: HostCapabilities }
+/**
+ * A release published (or drafted) on the host for one tag.
+ */
+export type HostRelease = { 
+/**
+ * The host's id for the release, as text: GitHub's are 64-bit numbers,
+ * which the generated bindings cannot carry as a number.
+ */
+id: string; 
+/**
+ * The release title, falling back to the tag when it has none.
+ */
+name: string; 
+/**
+ * Not yet published, so nobody but the project's maintainers can see it.
+ */
+draft: boolean; prerelease: boolean; html_url: string }
 /**
  * A `@@ -old_start,old_lines +new_start,new_lines @@` hunk boundary.
  */

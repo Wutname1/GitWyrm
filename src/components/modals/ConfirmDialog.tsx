@@ -14,6 +14,8 @@ interface ConfirmDialogProps {
   onConfirm: () => void
   pending?: boolean
   pendingLabel?: string
+  /** False disables the confirm button only; Cancel and closing still work. */
+  canConfirm?: boolean
   keepOpenOnConfirm?: boolean
 }
 
@@ -28,6 +30,7 @@ export function ConfirmDialog({
   onConfirm,
   pending = false,
   pendingLabel,
+  canConfirm = true,
   keepOpenOnConfirm = false,
 }: ConfirmDialogProps) {
   return (
@@ -39,6 +42,7 @@ export function ConfirmDialog({
       submitLabel={confirmLabel}
       pendingLabel={pendingLabel ?? 'Working…'}
       pending={pending}
+      canSubmit={canConfirm}
       destructive={destructive}
       onSubmit={() => {
         onConfirm()

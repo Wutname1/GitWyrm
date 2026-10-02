@@ -22,6 +22,7 @@ import {
 } from '@/lib/bindings'
 import { beginGitOperation, keys, trimLogToFirstPage, unwrap } from '@/lib/queryKeys'
 import { useHostResolver } from '@/hooks/useGitQueries'
+import { hostingKeys } from '@/hooks/useGithub'
 import { timed } from '@/lib/perfTrail'
 import { noteManualFetch } from '@/hooks/useAutoFetch'
 import { cachedPushNote, showPushNoteToast } from '@/hooks/useMehen'
@@ -980,15 +981,24 @@ export function useGitMutations(repoId: string | null) {
    * the two never drift apart in the UI. The remote goes first: if it fails the
    * tag is still here to try again, whereas the reverse would leave a published
    * tag with no local copy to delete it from.
+   *
+   * A release on the host (`releaseId`) goes before both, for the same reason:
+   * if deleting it fails, nothing else has changed yet and the whole delete can
+   * simply be tried again.
    */
   const deleteTag = useMutation({
     mutationFn: async (args: {
       name: string
       alsoRemote?: boolean
       remote?: string
+      /** The host release for this tag, deleted first. Only with `alsoRemote`. */
+      releaseId?: string
       /** Caller reports the failure itself (a progress modal); skip the toast. */
       quiet?: boolean
     }) => {
+      if (args.alsoRemote && args.releaseId) {
+        await unwrap(await commands.hostDeleteRelease(id, args.releaseId))
+      }
       if (args.alsoRemote) {
         await unwrap(await commands.deleteRemoteTag(id, args.name, args.remote ?? ''))
       }
@@ -998,7 +1008,14 @@ export function useGitMutations(repoId: string | null) {
     onSuccess: (args) => {
       invalidate(qc, id, ['tags', 'log'])
       if (args.alsoRemote) qc.invalidateQueries({ queryKey: keys.remoteTagsAll(id) })
-      toast(args.alsoRemote ? `Deleted tag ${args.name} everywhere` : `Deleted tag ${args.name}`)
+      if (args.releaseId) qc.invalidateQueries({ queryKey: hostingKeys.releasesAll(id) })
+      toast(
+        args.alsoRemote && args.releaseId
+          ? `Deleted tag ${args.name} and its release everywhere`
+          : args.alsoRemote
+            ? `Deleted tag ${args.name} everywhere`
+            : `Deleted tag ${args.name}`
+      )
     },
     onError: (e, args) => (args.quiet ? logQuietFailure(e) : onError(e)),
   })
@@ -1022,13 +1039,20 @@ export function useGitMutations(repoId: string | null) {
    * un-published without losing it here.
    */
   const deleteRemoteTag = useMutation({
-    mutationFn: async (args: { name: string; remote?: string }) => {
+    mutationFn: async (args: { name: string; remote?: string; releaseId?: string }) => {
+      // Release first, so a failure leaves the tag published and retryable.
+      if (args.releaseId) await unwrap(await commands.hostDeleteRelease(id, args.releaseId))
       await unwrap(await commands.deleteRemoteTag(id, args.name, args.remote ?? ''))
-      return args.name
+      return args
     },
-    onSuccess: (name) => {
+    onSuccess: (args) => {
       qc.invalidateQueries({ queryKey: keys.remoteTagsAll(id) })
-      toast(`Removed tag ${name} from the remote`)
+      if (args.releaseId) qc.invalidateQueries({ queryKey: hostingKeys.releasesAll(id) })
+      toast(
+        args.releaseId
+          ? `Removed tag ${args.name} and its release from the remote`
+          : `Removed tag ${args.name} from the remote`
+      )
     },
     onError,
   })
