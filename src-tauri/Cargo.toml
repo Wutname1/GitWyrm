@@ -60,7 +60,7 @@ specta-typescript = "0.0.9"
 tauri-specta = { version = "=2.0.0-rc.21", features = ["derive", "typescript"] }
 # Minor-pinned: commands/updates.rs configures the plugin's reqwest client, and
 # the plugin may move to a new reqwest in a minor release.
-tauri-plugin-updater = "~2.12.0"
+tauri-plugin-updater = "~2.13.1"
 tauri-plugin-process = "2.3.1"
 # 0.13 moved `form` (and `query`) behind opt-in features, and renamed the TLS
 # feature `rustls-tls` -> `rustls`. The device-flow calls in ai/copilot.rs post
