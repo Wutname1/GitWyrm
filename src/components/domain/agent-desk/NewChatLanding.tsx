@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { useState } from 'react'
 import { ChevronDown, FolderGit2, FolderOpen, Link2 } from 'lucide-react'
 import type { SessionSource } from '@/lib/bindings'
@@ -102,6 +103,7 @@ export function NewChatLanding({
   starters,
   onStarterPick,
   source,
+  children,
 }: {
   projectName: string
   projectPath: string
@@ -121,6 +123,8 @@ export function NewChatLanding({
   onStarterPick: (starter: ChatStarter) => void
   /** What started this chat. `null` while the session is still loading. */
   source: SessionSource | null
+  /** The message box, placed between the heading and the starting points. */
+  children?: ReactNode
 }) {
   const [browsing, setBrowsing] = useState(false)
   const startedFrom = describeSource(source)
@@ -219,6 +223,8 @@ export function NewChatLanding({
           )}
         </div>
       </div>
+
+      {children && <div className="w-full max-w-[52rem]">{children}</div>}
 
       {/* Only ever what the repository really offers. No starters is the
           ordinary case for a clean tree and renders nothing at all, rather

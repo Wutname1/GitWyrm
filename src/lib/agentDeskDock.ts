@@ -209,11 +209,6 @@ export function resolveResponsiveMode(
   return 'wide'
 }
 
-/** True when workspace-bar buttons should show icons only (mockup's 760px rule). */
-export function shouldHideButtonLabels(mode: ResponsiveMode): boolean {
-  return mode !== 'wide'
-}
-
 /**
  * True when the conversation column is too narrow to keep a right-side dock
  * without making a chat unusable.

@@ -12,7 +12,6 @@ import {ALL_DOCK_KINDS, ALL_DOCK_ZONES,
   resolveResponsiveMode,
   resolveSplitPresentation,
   shouldAutoHideRightDock,
-  shouldHideButtonLabels,
   zoneLabel,
 } from './agentDeskDock'
 import { MAX_DOCK_SIZE_PX, MIN_DOCK_SIZE_PX, type DockState } from './agentWorkspaceLayout'
@@ -186,12 +185,6 @@ describe('responsive mode', () => {
     expect(resolveResponsiveMode(NARROW_BREAKPOINT_PX)).toBe('compact')
     expect(resolveResponsiveMode(COMPACT_BREAKPOINT_PX - 1)).toBe('compact')
     expect(resolveResponsiveMode(COMPACT_BREAKPOINT_PX)).toBe('wide')
-  })
-
-  it('hides button labels below the wide breakpoint', () => {
-    expect(shouldHideButtonLabels('wide')).toBe(false)
-    expect(shouldHideButtonLabels('compact')).toBe(true)
-    expect(shouldHideButtonLabels('narrow')).toBe(true)
   })
 })
 

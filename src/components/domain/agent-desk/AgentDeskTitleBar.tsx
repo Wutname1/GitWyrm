@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { Plus } from 'lucide-react'
 import { useWindowWidth } from '@/hooks/useWindowWidth'
 import { isCompactWidth, isNarrowWidth } from '@/lib/agentDeskDockPlacement'
@@ -35,12 +36,15 @@ export function AgentDeskTitleBar({
   onNewChat,
   centerView,
   onChangeCenterView,
+  layoutControls,
 }: {
   repoName: string
   repoId: string | null
   onNewChat: () => void
   centerView: CenterView
   onChangeCenterView: (view: CenterView) => void
+  /** Split view and the Panels menu, shown only beside a conversation. */
+  layoutControls?: ReactNode
 }) {
   const windowWidth = useWindowWidth()
   const compact = isCompactWidth(windowWidth)
@@ -96,22 +100,19 @@ export function AgentDeskTitleBar({
       </nav>
 
       <div className={cn('ml-auto flex h-full flex-none items-center gap-2', compact ? 'pl-1' : 'pl-3')}>
-        <Button
-          size="sm"
-          variant="secondary"
-          onClick={onNewChat}
-          disabled={!repoId}
-          // The design system's own tooltip, which also supplies the
-          // accessible name -- so the icon-only form still announces itself.
-          tooltip={narrow ? 'New chat' : undefined}
-          className={narrow ? 'px-2' : undefined}
-        >
-          {narrow ? <Plus size={14} aria-hidden /> : 'New chat'}
-        </Button>
-        {/* Which AI is selected is also shown on the composer, right where a
-            message is about to be sent, so this copy of it is what goes when
-            the bar is tight rather than something with no other home. */}
-        {!compact && <AiProviderChip repoId={repoId} scope="writing" />}
+        {layoutControls}
+        {/* The chat list already starts with New chat. Only once it folds
+            into a drawer does the title bar need its own. */}
+        {narrow && (
+          <Button size="sm" variant="secondary" onClick={onNewChat} disabled={!repoId} tooltip="New chat" className="px-2">
+            <Plus size={14} aria-hidden />
+          </Button>
+        )}
+        {/* The app-wide writing AI (commit messages, spec drafts). A chat
+            names its own AI beside its message box, so showing this one over
+            a chat put two different answers to "which AI?" on screen. It
+            belongs with the OpenSpec work it actually drives. */}
+        {!compact && centerView === 'openspec' && <AiProviderChip repoId={repoId} scope="writing" />}
         <div className="flex h-full items-stretch">
           <WindowControls />
         </div>

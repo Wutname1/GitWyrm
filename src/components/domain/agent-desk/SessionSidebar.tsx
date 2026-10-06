@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { PanelLeftClose, PanelLeftOpen, Search, X } from 'lucide-react'
+import { Clock3, FileDiff, Folders, ListFilter, PanelLeftClose, PanelLeftOpen, Search, X } from 'lucide-react'
 import { commands, type SessionListFilterInput } from '@/lib/bindings'
 import { unwrap } from '@/lib/queryKeys'
 import { summarizeDiskUsage } from '@/lib/agentDeskResult'
@@ -9,7 +9,21 @@ import { ConfirmDialog } from '@/components/modals/ConfirmDialog'
 import { useAgentSessionMutations } from '@/hooks/useAgentSessionMutations'
 import { NewSessionButton } from '@/components/domain/agent-desk/NewSessionButton'
 import { SessionGroups } from '@/components/domain/agent-desk/SessionGroups'
-import { resolveSessionRepoFilter } from '@/lib/agentSessionGrouping'
+import { resolveSessionRepoFilter, type SidebarGroupMode } from '@/lib/agentSessionGrouping'
+import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 
 /** Below this width the sidebar becomes a drawer instead of a fixed column (design.md's "narrow widths" clause, tasks.md 3.1). */
@@ -100,6 +114,10 @@ export function SessionSidebar({
   // one could reach, because reaching it needed a row the query could never
   // return. Worse, the delete dialog recommends Archive as the safe option.
   const [showArchived, setShowArchived] = useState(false)
+  // Persisted: someone who works by project should not re-pick it on every
+  // launch (architecture.md lists sidebar grouping among agentDeskUiStore's state).
+  const grouping = useAgentDeskUiStore((s) => s.layout.sidebarGrouping)
+  const setGrouping = useAgentDeskUiStore((s) => s.setSidebarGrouping)
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   useEffect(() => {
@@ -228,8 +246,8 @@ export function SessionSidebar({
         <NewSessionButton onNewSession={handleNewSession} />
       </div>
 
-      <div className="flex-none px-1.5 pb-1.5">
-        <div className="flex items-center gap-1 rounded border border-border bg-panel2 px-1.5 focus-within:border-primary">
+      <div className="flex flex-none items-center gap-1 px-1.5 pb-1.5">
+        <div className="flex min-w-0 flex-1 items-center gap-1 rounded border border-border bg-panel2 px-1.5 focus-within:border-primary">
           <Search size={11} className="flex-none text-muted-foreground" aria-hidden />
           <input
             type="text"
@@ -250,58 +268,39 @@ export function SessionSidebar({
             </button>
           )}
         </div>
+        <ChatListFilterMenu
+          grouping={grouping}
+          onGroupingChange={setGrouping}
+          showArchived={showArchived}
+          onShowArchivedChange={setShowArchived}
+          scopeToCurrentRepo={scopeToCurrentRepo}
+          onScopeToCurrentRepoChange={setScopeToCurrentRepo}
+          currentRepoId={currentRepoId}
+          currentRepoName={currentRepoName}
+        />
       </div>
 
-      {/* R4.1: repo filtering is an optional, visible narrowing of an
-          app-wide list -- never the list's identity. Disabled (not hidden)
-          while the main window's repo is still opening, with an honest
-          reason, rather than silently doing nothing on click. */}
-      <div className="flex-none px-1.5 pb-1.5">
-        <div role="tablist" aria-label="Which chats to show" className="flex gap-0.5">
-          {([false, true] as const).map((archived) => (
-            <button
-              key={String(archived)}
-              type="button"
-              role="tab"
-              aria-selected={showArchived === archived}
-              onClick={() => setShowArchived(archived)}
-              className={cn(
-                'flex-1 rounded border-b-2 px-1.5 py-0.5 text-2xs font-semibold',
-                showArchived === archived
-                  ? 'border-primary bg-panel2 text-foreground'
-                  : 'border-transparent text-muted-foreground hover:bg-panel2 hover:text-foreground'
-              )}
-            >
-              {archived ? 'Archived' : 'Active'}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="flex-none px-1.5 pb-1.5">
-        <label
-          className={cn(
-            'flex items-center gap-1.5 rounded px-1.5 py-1 text-2xs text-muted-foreground',
-            currentRepoId ? 'cursor-pointer hover:bg-panel2 hover:text-foreground' : 'cursor-not-allowed opacity-60'
-          )}
-          title={
-            currentRepoId
-              ? `Only show chats from ${currentRepoName ?? 'this project'}`
-              : 'This project has not finished opening yet.'
-          }
-        >
-          <input
-            type="checkbox"
-            checked={scopeToCurrentRepo}
-            disabled={!currentRepoId}
-            onChange={(e) => setScopeToCurrentRepo(e.target.checked)}
-            className="h-3 w-3 flex-none accent-[var(--gw-accent)]"
-          />
-          <span className="truncate">
-            {scopeToCurrentRepo && currentRepoName ? `Only ${currentRepoName}` : 'This project only'}
+      {/* A filter that hides chats has to say so where the list is, or a
+          person who switched to archived chats last week reads the list as
+          "my chats are gone". */}
+      {(showArchived || scopeToCurrentRepo) && (
+        <div className="flex flex-none items-center gap-1.5 px-2.5 pb-1 text-2xs text-muted-foreground">
+          <span className="min-w-0 truncate">
+            {showArchived ? 'Archived chats' : 'Active chats'}
+            {scopeToCurrentRepo && currentRepoName ? ` in ${currentRepoName}` : ''}
           </span>
-        </label>
-      </div>
+          <button
+            type="button"
+            onClick={() => {
+              setShowArchived(false)
+              setScopeToCurrentRepo(false)
+            }}
+            className="flex-none rounded px-1 text-accent-text hover:bg-panel2"
+          >
+            Show all
+          </button>
+        </div>
+      )}
 
       <SessionGroups
         headers={headers}
@@ -469,5 +468,117 @@ export function SessionSidebar({
         </>
       )}
     </div>
+  )
+}
+
+const GROUPINGS: { id: SidebarGroupMode; label: string; icon: typeof Clock3 }[] = [
+  { id: 'recent', label: 'Last updated', icon: Clock3 },
+  { id: 'project', label: 'Project', icon: Folders },
+  { id: 'diff', label: 'Changed files', icon: FileDiff },
+]
+
+/**
+ * Every way to narrow or arrange the chat list, behind one button beside the
+ * search box. These were three stacked rows (Active/Archived tabs, a project
+ * checkbox, Recent/Project/Diff tabs) above a list most people never filter.
+ * The button lights up while anything other than the defaults is on.
+ */
+function ChatListFilterMenu({
+  grouping,
+  onGroupingChange,
+  showArchived,
+  onShowArchivedChange,
+  scopeToCurrentRepo,
+  onScopeToCurrentRepoChange,
+  currentRepoId,
+  currentRepoName,
+}: {
+  grouping: SidebarGroupMode
+  onGroupingChange: (mode: SidebarGroupMode) => void
+  showArchived: boolean
+  onShowArchivedChange: (archived: boolean) => void
+  scopeToCurrentRepo: boolean
+  onScopeToCurrentRepoChange: (scoped: boolean) => void
+  currentRepoId: string | null
+  currentRepoName: string | null
+}) {
+  const changed = showArchived || scopeToCurrentRepo || grouping !== 'recent'
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label="Filter and arrange chats"
+          title="Filter and arrange chats"
+          className={cn(
+            'flex h-[24px] w-[24px] flex-none items-center justify-center rounded border border-transparent text-muted-foreground',
+            'hover:border-border hover:bg-panel2 hover:text-foreground',
+            changed && 'border-primary/60 bg-soft text-accent-text'
+          )}
+        >
+          <ListFilter size={12} aria-hidden />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-52">
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger className="text-xs">
+            Grouping
+            <span className="ml-auto pl-3 text-2xs text-muted-foreground">
+              {GROUPINGS.find((g) => g.id === grouping)?.label}
+            </span>
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent>
+            <DropdownMenuRadioGroup value={grouping} onValueChange={(v) => onGroupingChange(v as SidebarGroupMode)}>
+              {GROUPINGS.map((g) => (
+                <DropdownMenuRadioItem key={g.id} value={g.id} className="text-xs">
+                  <g.icon size={12} aria-hidden className="mr-1.5 text-muted-foreground" />
+                  {g.label}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger className="text-xs">
+            Show
+            <span className="ml-auto pl-3 text-2xs text-muted-foreground">
+              {showArchived ? 'Archived' : 'Active'}
+            </span>
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="w-56">
+            <DropdownMenuCheckboxItem
+              className="text-xs"
+              checked={scopeToCurrentRepo}
+              disabled={!currentRepoId}
+              onCheckedChange={(checked) => onScopeToCurrentRepoChange(checked === true)}
+            >
+              {currentRepoId ? `Only ${currentRepoName ?? 'this project'}` : 'Only this project (still opening)'}
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem
+              className="text-xs"
+              checked={showArchived}
+              onCheckedChange={(checked) => onShowArchivedChange(checked === true)}
+            >
+              Archived chats
+            </DropdownMenuCheckboxItem>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+        {changed && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="text-xs"
+              onSelect={() => {
+                onGroupingChange('recent')
+                onShowArchivedChange(false)
+                onScopeToCurrentRepoChange(false)
+              }}
+            >
+              Reset filters
+            </DropdownMenuItem>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

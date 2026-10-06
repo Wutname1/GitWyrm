@@ -1,19 +1,11 @@
 import { useMemo, useState } from 'react'
 import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
-import { Clock3, FileDiff, Folders } from 'lucide-react'
 import type { AgentSessionHeader } from '@/lib/bindings'
 import { buildSidebarRows, sidebarEmptyMessage, type SidebarGroupMode } from '@/lib/agentSessionGrouping'
 import { VirtualSessionList } from '@/components/domain/agent-desk/VirtualSessionList'
-import { cn } from '@/lib/utils'
-
-const MODES: { id: SidebarGroupMode; label: string; icon: typeof Clock3 }[] = [
-  { id: 'recent', label: 'Recent', icon: Clock3 },
-  { id: 'project', label: 'Project', icon: Folders },
-  { id: 'diff', label: 'Diff', icon: FileDiff },
-]
 
 /**
- * Grouping-mode picker (mockup `.ag-sidebar-filters`) plus the collapsible
+ * The chat list's collapsible
  * group headers tasks.md 3.3 requires -- the mockup's headers are compact but
  * have no collapse affordance at all, so collapse state is new here, kept per
  * grouping mode (a group collapsed under Project should not also affect
@@ -49,7 +41,6 @@ export function SessionGroups({
   // grouping" among what `agentDeskUiStore` holds, and it did not -- so a
   // person who works by project re-picked it on every launch.
   const mode = useAgentDeskUiStore((s) => s.layout.sidebarGrouping)
-  const setMode = useAgentDeskUiStore((s) => s.setSidebarGrouping)
   // Separate collapse sets per mode: collapsing "Today" in Recent should not
   // leave a same-named/keyed group collapsed if the user switches to Project.
   const [collapsedByMode, setCollapsedByMode] = useState<Record<SidebarGroupMode, Set<string>>>({
@@ -74,29 +65,6 @@ export function SessionGroups({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex gap-0.5 px-1.5 pt-1.5" role="tablist" aria-label="Arrange chats">
-        {MODES.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            type="button"
-            role="tab"
-            aria-selected={mode === id}
-            onClick={() => setMode(id)}
-            className={cn(
-              // A one-step tonal shift is not a selected state on its own
-              // (DESIGN.md); the mint edge is what makes it read.
-              'flex h-6 flex-1 items-center justify-center gap-1 rounded border-b-2 text-2xs',
-              mode === id
-                ? 'border-primary bg-panel2 text-foreground'
-                : 'border-transparent text-muted-foreground hover:bg-panel2 hover:text-foreground'
-            )}
-          >
-            <Icon size={11} />
-            {label}
-          </button>
-        ))}
-      </div>
-
       <VirtualSessionList
         rows={rows}
         selectedId={selectedId}

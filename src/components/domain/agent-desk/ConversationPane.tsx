@@ -601,7 +601,7 @@ export function ConversationPane({
   const header = (
     <div ref={headerAnchorRef} className="flex flex-none items-center gap-2 border-b border-border px-3 py-1.5">
       <p className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">
-        {session?.header.title || (sessionId ? 'Opening…' : 'No chat selected')}
+        {session?.header.title || (session ? 'New chat' : sessionId ? 'Opening…' : 'No chat selected')}
       </p>
       {headerSlot}
     </div>
@@ -640,7 +640,7 @@ export function ConversationPane({
         {/* A shaped skeleton rather than a spinner: it stands where the
             source banner and first messages will land, so the pane does not
             visibly jump once the real content arrives. */}
-        <div className="flex min-h-0 flex-1 flex-col gap-3 p-3" aria-busy="true" aria-live="polite">
+        <div className="mx-auto flex min-h-0 w-full max-w-[52rem] flex-1 flex-col gap-3 p-3" aria-busy="true" aria-live="polite">
           <span className="sr-only">Opening this chat…</span>
           <div className="h-11 flex-none animate-pulse rounded-md bg-panel2 motion-reduce:animate-none" aria-hidden />
           <div className="flex flex-col gap-2" aria-hidden>
@@ -706,7 +706,12 @@ export function ConversationPane({
           tall blank band above the very form it was making space for. One
           of them has to yield, and it is the one with nothing in it. */}
       <div className={cn('relative flex min-h-0', messages.length === 0 ? 'flex-none' : 'flex-1')}>
-        <div ref={transcriptRef} className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-3 py-3 empty:p-0">
+        <div
+          ref={transcriptRef}
+          // Each row keeps a reading width in the middle of the pane rather than
+          // stretching a line of chat across a maximised window.
+          className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-3 py-3 empty:p-0 *:mx-auto *:w-full *:max-w-[52rem]"
+        >
           {messages.length === 0 ? (
             /* Nothing here on purpose: `SessionComposer` grows into this space
                with the mode, team and AI choices while a chat is empty. Two
@@ -865,7 +870,7 @@ export function ConversationPane({
           summary with no Keep/Commit actions rather than being hidden
           outright -- the user still gets to see what happened. */}
       {shouldShowResultPanel(state ?? session.header.state, session.header.activeExecutionId) && (
-        <div className="flex-none border-t border-border">
+        <div className="flex-none border-t border-border empty:hidden">
           <ResultReviewPanel
             sessionId={sessionId}
             repoId={session.header.repoId}

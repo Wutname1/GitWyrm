@@ -214,9 +214,9 @@ export function ResultReviewPanel({
       </div>
     )
   }
-  if (!record) {
-    return <div className="p-3 text-xs text-muted-foreground">No result yet for this execution.</div>
-  }
+  // Nothing to review is not news: a line saying so sat above the composer of
+  // every plain chat that changed nothing. The caller hides its frame too.
+  if (!record) return null
 
   const availability = resultActionAvailability(record)
   const changedLine = changedPathsSummaryLine(record.changedPaths, record.changedPathsUnreadable)

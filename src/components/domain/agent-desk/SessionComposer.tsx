@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { ArrowUp, Paperclip, Sparkles, Square } from 'lucide-react'
+import { ArrowUp, Sparkles, Square } from 'lucide-react'
 import { commands, type AgentSessionHeader } from '@/lib/bindings'
 import { unwrap, keys } from '@/lib/queryKeys'
 import { describeOutcome, describeSetPreferencesFailure, explainStopOutcome, runIsActive } from '@/lib/agentDeskResult'
@@ -510,34 +510,12 @@ export function SessionComposer({
     }
   }
 
-  return (
-    <div className={cn(isEmpty ? 'flex min-h-0 flex-1 flex-col' : 'flex-none', 'border-t border-border p-2')}>
-      {/* Before there is anything to read, the choices that shape the run get
-          the space instead of hiding as chips under the box. They edit the
-          same state the compact controls do, so nothing is lost when this
-          gives way to the transcript. */}
-      {isEmpty && (
-        <NewChatLanding
-          projectPath={header?.repoPath ?? ''}
-          projectName={header?.repoName ?? 'Current project'}
-          projects={projects}
-          onProjectChange={(project) => void changeProject(project)}
-          onProjectPathChosen={(path) => void changeProject({ path, name: folderName(path) })}
-          projectChanging={changingProject}
-          starters={starters}
-          onStarterPick={(starter) => {
-            setDraft(starter.prompt)
-            // Straight into the box with the caret at the end: a starter is a
-            // first draft to edit, not a command that fires on its own.
-            const box = document.getElementById(`agent-desk-composer-${sessionId ?? 'none'}`)
-            if (box instanceof HTMLTextAreaElement) {
-              box.focus()
-              box.setSelectionRange(starter.prompt.length, starter.prompt.length)
-            }
-          }}
-          source={header?.source ?? null}
-        />
-      )}
+  // The message box itself. While the chat is empty it sits in the middle of
+  // the screen between the heading and the starting points, the way a fresh
+  // conversation should open; once there is a transcript it settles at the
+  // bottom in the same reading width as the messages above it.
+  const composerBox = (
+    <>
       {startFailure && (
         <div className="mb-1.5">
           <StartFailureCard
@@ -588,24 +566,6 @@ export function SessionComposer({
             Send keeps `ml-auto` so it stays on the trailing edge whether the
             row is one line or two. */}
         <div className="flex flex-wrap items-center gap-1.5 px-0.5 pt-1">
-          {/* Disabled rather than toast-on-click: a button that looks live and
-              only apologises teaches the user that controls here are decorative.
-              There is no attachment picker behind this yet, so it says so. */}
-          <button
-            type="button"
-            // `aria-disabled`, not `disabled`, for the reason
-            // `OperatingModeControl` and `ProviderControl` both write down: a
-            // truly disabled button leaves the tab order, so the explanation
-            // attached to it is never announced -- decorative for exactly the
-            // people who need it read aloud. The click is guarded instead.
-            aria-disabled
-            onClick={(e) => e.preventDefault()}
-            aria-label="Attach context (not available yet)"
-            title="Attaching files and notes is not available yet"
-            className="flex h-6 w-6 flex-none cursor-not-allowed items-center justify-center rounded text-muted-foreground opacity-40"
-          >
-            <Paperclip size={13} />
-          </button>
           {/* The mockup names a lead agent ("Sol"), but nothing produces that
               name -- the session carries no agent identity, and hardcoding one
               claims something untrue about whichever provider is really
@@ -669,6 +629,41 @@ export function SessionComposer({
           )}
         </div>
       </div>
+    </>
+  )
+
+  if (isEmpty) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col">
+        <NewChatLanding
+          projectPath={header?.repoPath ?? ''}
+          projectName={header?.repoName ?? 'Current project'}
+          projects={projects}
+          onProjectChange={(project) => void changeProject(project)}
+          onProjectPathChosen={(path) => void changeProject({ path, name: folderName(path) })}
+          projectChanging={changingProject}
+          starters={starters}
+          onStarterPick={(starter) => {
+            setDraft(starter.prompt)
+            // Straight into the box with the caret at the end: a starter is a
+            // first draft to edit, not a command that fires on its own.
+            const box = document.getElementById(`agent-desk-composer-${sessionId ?? 'none'}`)
+            if (box instanceof HTMLTextAreaElement) {
+              box.focus()
+              box.setSelectionRange(starter.prompt.length, starter.prompt.length)
+            }
+          }}
+          source={header?.source ?? null}
+        >
+          {composerBox}
+        </NewChatLanding>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex-none px-3 pb-3">
+      <div className="mx-auto w-full max-w-[52rem]">{composerBox}</div>
     </div>
   )
 }

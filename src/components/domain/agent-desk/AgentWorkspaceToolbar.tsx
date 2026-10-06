@@ -1,6 +1,7 @@
-import { Columns2, PanelTopClose, PanelTopOpen, PanelsTopLeft, RotateCcw } from 'lucide-react'
+import { Columns2, PanelsTopLeft, RotateCcw } from 'lucide-react'
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
@@ -15,15 +16,13 @@ import type { DockZone } from '@/lib/agentDeskDockPlacement'
 import type { DockKind, DockState } from '@/lib/agentWorkspaceLayout'
 
 /**
- * The workspace bar above the conversation panes (mockup's
- * `.ag-workspace-bar`): Split View, source-bar visibility, and the panel
- * menu, plus Reset workspace layout.
+ * The layout controls for the chat area: Split View and the Panels menu
+ * (pinned panel, source bars, Reset workspace layout).
  *
- * Structure follows the mockup; colours and type come from the app's own
- * `--gw-*` tokens rather than the mockup's `--ag-*` palette. Every button
- * carries a pressed state and a label that says what the *current* state is,
- * matching the mockup's swapping button text (tasks.md 5.1, 8.1) -- so the
- * bar always reports the truth rather than only offering a verb.
+ * These used to be a full-width "Workspace" strip of their own between the
+ * title bar and the chat. They are layout settings most people touch once, so
+ * they now sit as two icon buttons in the title bar. Each still shows when it
+ * is on, so the current layout is never a mystery.
  */
 export function AgentWorkspaceToolbar({
   split,
@@ -35,7 +34,6 @@ export function AgentWorkspaceToolbar({
   onUnpinDock,
   onPinDock,
   onResetLayout,
-  hideLabels,
 }: {
   split: boolean
   onToggleSplit: () => void
@@ -46,60 +44,33 @@ export function AgentWorkspaceToolbar({
   onUnpinDock: () => void
   onPinDock: (kind: DockKind, zone: DockZone) => void
   onResetLayout: () => void
-  /** Icons only, at compact/narrow widths (mockup's 760px rule). */
-  hideLabels: boolean
 }) {
-  const SourceIcon = sourceBarsVisible ? PanelTopClose : PanelTopOpen
-  // The label reports the state, not the verb -- "Source bars hidden" while
-  // they are hidden, matching the mockup's `data-toggle-source` text swap.
-  const sourceLabel = sourceBarsVisible ? 'Source bars shown' : 'Source bars hidden'
-
   return (
-    <div className="flex h-[35px] flex-none items-center gap-1.5 border-b border-border bg-panel pl-2.5 pr-1.5">
-      <span className="flex-none text-2xs text-muted-foreground">Workspace</span>
-      {!hideLabels && (
-        <span className="min-w-0 truncate text-2xs text-sub">Chat clicks replace the active pane</span>
-      )}
-      <span className="flex-1" />
-
-      <ToolbarButton
+    <div className="flex flex-none items-center gap-0.5">
+      <IconToggle
         icon={Columns2}
-        label={split ? 'Split view on' : 'Split view'}
+        label={split ? 'Close split view' : 'Show two chats side by side'}
         pressed={split}
-        hideLabel={hideLabels}
         onClick={onToggleSplit}
-        title="Show two chats side by side (Ctrl+Alt+S toggles source bars)"
-      />
-
-      <ToolbarButton
-        icon={SourceIcon}
-        label={sourceLabel}
-        pressed={!sourceBarsVisible}
-        hideLabel={hideLabels}
-        onClick={onToggleSourceBars}
-        title="Hide or show the big source bar above each chat (Ctrl+Alt+S)"
       />
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button
             type="button"
-            aria-label="Panels"
+            aria-label="Panels and layout"
+            title="Panels and layout"
             className={cn(
-              'flex h-[25px] flex-none items-center gap-1.5 rounded border border-transparent px-1.5 text-2xs text-sub',
-              'hover:border-border hover:bg-panel3 hover:text-foreground',
-              // "On" used the same three declarations as this button's own hover, and
-              // --gw-panel3 and --gw-border are the same hex in most themes -- so a
-              // toggle that was on looked unset the moment the pointer moved away.
-              // The house pattern for a selected control is border-primary/bg-soft.
+              iconButtonClass,
+              // The house pattern for a selected control is border-primary/bg-soft;
+              // a hover-only style would make an on toggle look unset.
               dock && 'border-primary/60 bg-soft text-accent-text'
             )}
           >
-            <PanelsTopLeft size={13} aria-hidden />
-            {!hideLabels && <span>Panels</span>}
+            <PanelsTopLeft size={14} aria-hidden />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuContent align="end" className="w-64">
           {dock ? (
             <>
               {ALL_DOCK_ZONES.map((zone) => (
@@ -111,27 +82,27 @@ export function AgentWorkspaceToolbar({
               <DropdownMenuItem onSelect={onUnpinDock}>Unpin this panel</DropdownMenuItem>
             </>
           ) : (
-            <>
-              {/* Every zone, not just the right. All three items used to pin
-                  to the right, and the right edge is unavailable below a
-                  window width the moving path already knows about -- so on a
-                  narrow window the only pinning affordance in the product
-                  produced no visible change at all. Bottom and left are safe
-                  at that width and were unreachable from a cold start. */}
-              {ALL_DOCK_KINDS.map((kind) => (
-                <DropdownMenuSub key={kind}>
-                  <DropdownMenuSubTrigger>Pin {dockKindLabel(kind).toLowerCase()}…</DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent>
-                    {ALL_DOCK_ZONES.map((zone) => (
-                      <DropdownMenuItem key={zone} onSelect={() => onPinDock(kind, zone)}>
-                        {zoneLabel(zone)}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
-              ))}
-            </>
+            // Every zone, not just the right: the right edge is unavailable
+            // below a window width the moving path already knows about, and
+            // bottom and left are safe there.
+            ALL_DOCK_KINDS.map((kind) => (
+              <DropdownMenuSub key={kind}>
+                <DropdownMenuSubTrigger>Pin {dockKindLabel(kind).toLowerCase()}…</DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  {ALL_DOCK_ZONES.map((zone) => (
+                    <DropdownMenuItem key={zone} onSelect={() => onPinDock(kind, zone)}>
+                      {zoneLabel(zone)}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            ))
           )}
+          <DropdownMenuSeparator />
+          <DropdownMenuCheckboxItem checked={sourceBarsVisible} onCheckedChange={onToggleSourceBars}>
+            Show where chats started
+            <span className="ml-auto pl-3 text-2xs text-muted-foreground">Ctrl+Alt+S</span>
+          </DropdownMenuCheckboxItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={onResetLayout}>
             <RotateCcw size={13} aria-hidden />
@@ -143,20 +114,21 @@ export function AgentWorkspaceToolbar({
   )
 }
 
-function ToolbarButton({
+const iconButtonClass = cn(
+  'flex h-[26px] w-[26px] flex-none items-center justify-center rounded border border-transparent text-sub',
+  'hover:border-border hover:bg-panel3 hover:text-foreground'
+)
+
+function IconToggle({
   icon: Icon,
   label,
   pressed,
-  hideLabel,
   onClick,
-  title,
 }: {
   icon: React.ComponentType<{ size?: number; className?: string; 'aria-hidden'?: boolean }>
   label: string
   pressed: boolean
-  hideLabel: boolean
   onClick: () => void
-  title: string
 }) {
   return (
     <button
@@ -164,15 +136,10 @@ function ToolbarButton({
       onClick={onClick}
       aria-pressed={pressed}
       aria-label={label}
-      title={title}
-      className={cn(
-        'flex h-[25px] flex-none items-center gap-1.5 rounded border border-transparent px-1.5 text-2xs text-sub',
-        'hover:border-border hover:bg-panel3 hover:text-foreground',
-        pressed && 'border-primary/60 bg-soft text-accent-text'
-      )}
+      title={label}
+      className={cn(iconButtonClass, pressed && 'border-primary/60 bg-soft text-accent-text')}
     >
-      <Icon size={13} aria-hidden />
-      {!hideLabel && <span>{label}</span>}
+      <Icon size={14} aria-hidden />
     </button>
   )
 }

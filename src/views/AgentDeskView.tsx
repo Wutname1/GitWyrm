@@ -26,7 +26,7 @@ import { OpenSpecEmbeddedDetail } from '@/components/domain/agent-desk/OpenSpecE
 import { useAgentSession, useAgentSessionExistence, useAgentSessionHeaders } from '@/hooks/useAgentSessions'
 import { useOrphanResultReconciliation } from '@/hooks/useOrphanResultReconciliation'
 import { useContainerWidth } from '@/hooks/useContainerWidth'
-import { dockKindLabel, resolveDrop, resolvePin, resolveResponsiveMode, resolveSplitPresentation, shouldHideButtonLabels, zoneLabel } from '@/lib/agentDeskDock'
+import { dockKindLabel, resolveDrop, resolvePin, resolveResponsiveMode, resolveSplitPresentation, zoneLabel } from '@/lib/agentDeskDock'
 import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
 import { cn } from '@/lib/utils'
 import { resolveAgentDeskShellState } from '@/views/agentDeskViewState'
@@ -783,6 +783,21 @@ export function AgentDeskView() {
         onNewChat={() => void onNewChat()}
         centerView={centerView}
         onChangeCenterView={setCenterView}
+        layoutControls={
+          centerView === 'conversation' && repo && shellState !== 'empty' ? (
+            <AgentWorkspaceToolbar
+              split={layout.split}
+              onToggleSplit={() => (layout.split ? closeSplit() : openSplit())}
+              sourceBarsVisible={layout.sourceBarsVisible}
+              onToggleSourceBars={toggleSourceBarsVisible}
+              dock={layout.dock}
+              onMoveDock={onMoveDock}
+              onUnpinDock={closeDock}
+              onPinDock={onPinDock}
+              onResetLayout={() => setResetConfirmOpen(true)}
+            />
+          ) : null
+        }
       />
 
       {/* Explicit no-repository state: the window was opened with nothing to
@@ -859,22 +874,6 @@ export function AgentDeskView() {
           ) : (
             <>
               <div ref={composerFocusRef} tabIndex={-1} className="relative flex min-h-0 flex-1 flex-col outline-none">
-                {/* Workspace toolbar: Split View, source-bar visibility, the
-                    panel/dock menu, and the reset-layout escape hatch
-                    (tasks.md 5.1, 7.4, 8.1, 8.6). */}
-                <AgentWorkspaceToolbar
-                  split={layout.split}
-                  onToggleSplit={() => (layout.split ? closeSplit() : openSplit())}
-                  sourceBarsVisible={layout.sourceBarsVisible}
-                  onToggleSourceBars={toggleSourceBarsVisible}
-                  dock={layout.dock}
-                  onMoveDock={onMoveDock}
-                  onUnpinDock={closeDock}
-                  onPinDock={onPinDock}
-                  onResetLayout={() => setResetConfirmOpen(true)}
-                  hideLabels={shouldHideButtonLabels(responsiveMode)}
-                />
-
                 {/* Explicit empty state when there are no chats at all yet:
                     SessionSidebar already covers "no rows"; here the
                     center column explains what a first click gets you. */}
