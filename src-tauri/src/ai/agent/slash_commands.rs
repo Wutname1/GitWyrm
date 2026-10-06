@@ -202,28 +202,100 @@ fn command_dirs(home: &Path, repo: Option<&Path>, agent_id: &str) -> Vec<(PathBu
     dirs
 }
 
-/// Skills one level under `dir`, named `<prefix><folder>`.
+/// Skills one level under `dir`, named `<prefix><folder>`, each followed by
+/// its sub-commands when it declares any (see [`sub_commands`]).
 fn skills_in(dir: &Path, prefix: &str) -> Vec<SlashCommandInfo> {
     let Ok(entries) = fs::read_dir(dir) else { return Vec::new() };
-    entries
-        .flatten()
-        .filter_map(|entry| {
-            let path = entry.path();
-            let text = fs::read_to_string(path.join("SKILL.md")).ok()?;
-            let folder = path.file_name()?.to_string_lossy().into_owned();
-            let front = front_matter(&text);
-            // A skill that turns off its own slash entry stays out of the menu.
-            if front.get("user-invocable").map(|v| v == "false").unwrap_or(false) {
-                return None;
-            }
-            Some(SlashCommandInfo {
-                name: format!("{prefix}{folder}"),
-                description: front.get("description").cloned().unwrap_or_default(),
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(text) = fs::read_to_string(path.join("SKILL.md")) else { continue };
+        let Some(folder) = path.file_name().map(|f| f.to_string_lossy().into_owned()) else { continue };
+        let front = front_matter(&text);
+        // A skill that turns off its own slash entry stays out of the menu.
+        if front.get("user-invocable").map(|v| v == "false").unwrap_or(false) {
+            continue;
+        }
+        let name = format!("{prefix}{folder}");
+        let hint = front.get("argument-hint").cloned();
+        let subs = sub_commands(&name, hint.as_deref(), &text);
+        out.push(SlashCommandInfo {
+            name,
+            description: front.get("description").cloned().unwrap_or_default(),
+            kind: SlashCommandKind::Skill,
+            // Once its sub-commands are rows of their own, the long
+            // alternatives list says nothing the menu does not.
+            argument_hint: if subs.is_empty() { hint } else { None },
+        });
+        out.extend(subs);
+    }
+    out
+}
+
+/// A skill's sub-commands, as "skill sub" rows.
+///
+/// Skills like `impeccable` declare these twice: the first bracket of
+/// `argument-hint` lists the words ("[shape · audit|critique · live]"), and a
+/// Markdown table in the body describes each one in a row that opens with the
+/// word in backticks (`` | `audit [target]` | ... | Technical quality checks |``).
+/// A word must appear in BOTH to count. Plenty of skills have tables of
+/// backticked commands that are not sub-commands at all -- a CLI reference,
+/// say -- and the hint is what says these words are ones the skill accepts.
+/// A hint with no table still gives the rows, without descriptions.
+fn sub_commands(skill: &str, hint: Option<&str>, text: &str) -> Vec<SlashCommandInfo> {
+    let Some(hint) = hint else { return Vec::new() };
+    let Some(first) = hint.trim().strip_prefix('[').and_then(|h| h.split(']').next()) else {
+        return Vec::new();
+    };
+    let words: Vec<&str> = first
+        .split(|c: char| c == '|' || c == '·' || c.is_whitespace())
+        .map(str::trim)
+        .filter(|w| !w.is_empty() && w.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
+        .collect();
+    // One alternative is a placeholder, not a menu ("[target]").
+    if words.len() < 2 {
+        return Vec::new();
+    }
+    let described = command_table(text);
+    words
+        .into_iter()
+        .map(|word| {
+            let (description, argument_hint) = described.get(word).cloned().unwrap_or_default();
+            SlashCommandInfo {
+                name: format!("{skill} {word}"),
+                description,
                 kind: SlashCommandKind::Skill,
-                argument_hint: front.get("argument-hint").cloned(),
-            })
+                argument_hint,
+            }
         })
         .collect()
+}
+
+/// Rows of Markdown tables whose first cell is a backticked command, keyed by
+/// its first word: (the "Description" column, the rest of the backticked cell).
+fn command_table(text: &str) -> HashMap<String, (String, Option<String>)> {
+    let mut out = HashMap::new();
+    let mut description_col: Option<usize> = None;
+    for line in text.lines() {
+        let line = line.trim();
+        if !line.starts_with('|') {
+            description_col = None;
+            continue;
+        }
+        let cells: Vec<&str> = line.trim_matches('|').split('|').map(str::trim).collect();
+        if let Some(col) = cells.iter().position(|c| c.eq_ignore_ascii_case("description")) {
+            description_col = Some(col);
+            continue;
+        }
+        let (Some(col), Some(first)) = (description_col, cells.first()) else { continue };
+        let Some(code) = first.strip_prefix('`').and_then(|c| c.split('`').next()) else { continue };
+        let mut parts = code.splitn(2, ' ');
+        let Some(word) = parts.next().filter(|w| !w.is_empty()) else { continue };
+        let rest = parts.next().map(str::trim).filter(|r| !r.is_empty()).map(str::to_string);
+        let description = cells.get(col).map(|d| d.to_string()).unwrap_or_default();
+        out.entry(word.to_string()).or_insert((description, rest));
+    }
+    out
 }
 
 /// Command files under `dir`, recursing; a sub-folder becomes a `folder:` prefix.
@@ -389,6 +461,34 @@ mod tests {
         let goal = list(h, None, "claude").into_iter().find(|c| c.name == "goal").unwrap();
         assert_eq!(goal.description, "Set a goal");
         assert_eq!(goal.argument_hint.as_deref(), Some("<goal>"));
+    }
+
+    #[test]
+    fn a_skill_with_a_hint_and_a_commands_table_gets_sub_command_rows() {
+        let home = tempfile::TempDir::new().unwrap();
+        let h = home.path();
+        write(
+            &h.join(".claude/skills/impeccable/SKILL.md"),
+            "---\ndescription: Design\nargument-hint: \"[shape · audit|critique · live] [target]\"\n---\n\n\
+             ## Commands\n\n| Command | Category | Description | Reference |\n|---|---|---|---|\n\
+             | `audit [target]` | Evaluate | Technical quality checks | [a](a.md) |\n\
+             | `live` | Iterate | Visual variant mode | [l](l.md) |\n\
+             | `craft` | Build | Not in the hint, so not offered | [c](c.md) |\n",
+        );
+        // A table of backticked commands with no hint is a reference, not a menu.
+        write(
+            &h.join(".claude/skills/wrangler/SKILL.md"),
+            "---\ndescription: CLI\n---\n| Command | Description |\n|---|---|\n| `deploy` | Ship it |\n",
+        );
+        let all = list(h, None, "claude");
+        let get = |n: &str| all.iter().find(|c| c.name == n);
+        assert_eq!(get("impeccable audit").map(|c| c.description.as_str()), Some("Technical quality checks"));
+        assert_eq!(get("impeccable audit").and_then(|c| c.argument_hint.as_deref()), Some("[target]"));
+        assert_eq!(get("impeccable live").map(|c| c.description.as_str()), Some("Visual variant mode"));
+        assert!(get("impeccable shape").is_some(), "a hinted word with no table row still gets a row");
+        assert!(get("impeccable craft").is_none());
+        assert!(get("impeccable").unwrap().argument_hint.is_none(), "the parent drops the long hint");
+        assert!(!all.iter().any(|c| c.name.starts_with("wrangler ")));
     }
 
     #[test]
