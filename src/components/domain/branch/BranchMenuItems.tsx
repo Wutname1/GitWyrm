@@ -33,7 +33,8 @@ import { PendingMenuItem } from '@/components/ui/pending-menu-item'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useBranchHost, useRemotes } from '@/hooks/useGitQueries'
 import { useGithubPrForBranch } from '@/hooks/useGithub'
-import { branchActions } from '@/lib/branchActions'
+import { branchActions, branchSync } from '@/lib/branchActions'
+import { useUiStore } from '@/stores/uiStore'
 import { copyToClipboard } from '@/lib/clipboard'
 import { openWebUrl, remoteBranchWebUrl, remoteWebTarget } from '@/lib/remoteWeb'
 import type { PreviewMode } from '@/lib/syncPreview'
@@ -115,7 +116,12 @@ export function BranchMenuItems({
   const isPushing = m.pushBranch.isPending && m.pushBranch.variables === branch.name
   const isPulling = m.pullBranch.isPending && m.pullBranch.variables === branch.name
   const isSwitching = m.checkout.isPending && m.checkout.variables === branch.name
-  const busy = m.pushBranch.isPending || m.pullBranch.isPending
+  const busy = m.pushBranch.isPending || m.pullBranch.isPending || m.pushBranchForce.isPending
+  const openPushChoice = useUiStore((s) => s.openPushChoice)
+  // Behind its cloud copy (after a rebase, say): a plain push is refused, so ask
+  // whether to get those changes first or force push.
+  const pushOrAsk = () =>
+    branchSync(branch).behind > 0 ? openPushChoice(branch.name) : m.pushBranch.mutate(branch.name)
 
   // Reset rewinds the checked-out branch TO this one, so it only makes sense on
   // some other branch. Soft/Mixed keep your files, so they run straight away;
@@ -141,7 +147,7 @@ export function BranchMenuItems({
           pendingLabel="Sending…"
           pending={isPushing}
           disabled={opInProgress || busy}
-          onRun={() => m.pushBranch.mutate(branch.name)}
+          onRun={pushOrAsk}
         />
       )}
       {actions.pull.show && (

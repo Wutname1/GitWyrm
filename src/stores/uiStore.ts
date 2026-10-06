@@ -96,6 +96,8 @@ interface UiState {
    * diverged is ignored, so a stale preselect can never run the wrong action.
    */
   syncMode: PreviewMode | null
+  /** The branch the push choice window is about. Null means the checked-out one. */
+  pushChoiceBranch: string | null
   tagTargetSha: string | null
   branchTargetSha: string | null
   /**
@@ -238,6 +240,11 @@ interface UiState {
    * moves. `mode` preselects an option -- see `syncMode`.
    */
   openRemoteSync: (source: string, target: string, mode?: PreviewMode) => void
+  /**
+   * Ask how to push a branch that is behind its cloud copy: get those changes
+   * first, or force push. Leave `branch` out for the checked-out branch.
+   */
+  openPushChoice: (branch?: string) => void
   /** Flip the sync direction in the open Sync modal (source <-> target). */
   swapSync: () => void
   openDiff: (request: DiffRequest) => void
@@ -312,6 +319,7 @@ export const useUiStore = create<UiState>((set) => ({
   syncSource: null,
   syncTarget: null,
   syncMode: null,
+  pushChoiceBranch: null,
   tagTargetSha: null,
   branchTargetSha: null,
   tagsToPush: null,
@@ -403,6 +411,7 @@ export const useUiStore = create<UiState>((set) => ({
       syncTarget: target,
       syncMode: mode ?? null,
     }),
+  openPushChoice: (branch) => set({ activeModal: 'push-choice', pushChoiceBranch: branch ?? null }),
   swapSync: () => set((s) => ({ syncSource: s.syncTarget, syncTarget: s.syncSource })),
   // Remember which commit a diff came from, so the file view tabs can offer
   // that commit's blame and diff rather than dropping back to the working tree.
@@ -481,6 +490,7 @@ export const useUiStore = create<UiState>((set) => ({
       syncSource: null,
       syncTarget: null,
       syncMode: null,
+      pushChoiceBranch: null,
       tagTargetSha: null,
       branchTargetSha: null,
       remoteToEdit: null,

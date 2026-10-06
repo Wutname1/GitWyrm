@@ -2050,6 +2050,19 @@ async gitPushBranch(repoId: string, branch: string) : Promise<Result<PushResult,
 }
 },
 /**
+ * Force-push a named local branch with `--force-with-lease`, which need not be
+ * the one checked out. For a branch rebased or rewound away from its upstream;
+ * the lease still refuses to overwrite remote commits that were never fetched.
+ */
+async gitPushBranchForce(repoId: string, branch: string) : Promise<Result<PushResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("git_push_branch_force", { repoId, branch }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Bring a branch up to date with its upstream without checking it out.
  * 
  * A branch that is only behind fast-forwards cleanly. One that has also moved

@@ -1452,6 +1452,25 @@ export function useGitMutations(repoId: string | null) {
     onError,
   })
 
+  // Force-push a branch by name, which may not be the one checked out.
+  const pushBranchForce = useMutation({
+    mutationKey: syncKey(id, 'pushBranchForce'),
+    mutationFn: async (branch: string) =>
+      asGitOperation(id, async () =>
+        timed('git.pushBranchForce', async () => unwrap(await commands.gitPushBranchForce(id, branch))),
+      ),
+    onSuccess: (result) => {
+      invalidate(qc, id, REMOTE_REFS)
+      const host = hostOf(result.upstream)
+      toast(
+        result.pushed === 0
+          ? `Force-push finished - ${describeTarget(result, host)} already matched`
+          : `Force-pushed ${commitCount(result.pushed)} to ${describeTarget(result, host)}`
+      )
+    },
+    onError,
+  })
+
   const rebase = useMutation({
     mutationFn: async (args: { onto: string; branch?: string }) => ({
       onto: args.onto,
@@ -1888,6 +1907,7 @@ export function useGitMutations(repoId: string | null) {
     pushBranch: useIsMutating({ mutationKey: syncKey(id, 'pushBranch') }),
     pullBranch: useIsMutating({ mutationKey: syncKey(id, 'pullBranch') }),
     pushForce: useIsMutating({ mutationKey: syncKey(id, 'pushForce') }),
+    pushBranchForce: useIsMutating({ mutationKey: syncKey(id, 'pushBranchForce') }),
   }
 
   return {
@@ -1946,6 +1966,7 @@ export function useGitMutations(repoId: string | null) {
     renameBranch,
     reconnectBranch,
     pushForce: scopeToRepo(pushForce, running.pushForce),
+    pushBranchForce: scopeToRepo(pushBranchForce, running.pushBranchForce),
     rebase,
     addRemote,
     renameRemote,

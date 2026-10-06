@@ -10,7 +10,8 @@ import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
 
 /**
- * Shown when Push is pressed on a branch that is behind its upstream. A plain
+ * Shown when Push is pressed on a branch that is behind its upstream, from the
+ * toolbar (the checked-out branch) or from any branch's own menu. A plain
  * push would be refused as non-fast-forward, so instead of firing one that we
  * know fails, the user picks up front: get the cloud's changes first (safe), or
  * force push to replace the cloud's history with theirs.
@@ -23,32 +24,43 @@ export function PushChoiceModal() {
   const open = useUiStore((s) => s.activeModal === 'push-choice')
   const closeModal = useUiStore((s) => s.closeModal)
   const openRemoteSync = useUiStore((s) => s.openRemoteSync)
+  const branchName = useUiStore((s) => s.pushChoiceBranch)
 
   const repo = useActiveRepo()
   const branches = useBranches(repo?.id ?? null)
   const m = useGitMutations(repo?.id ?? null)
 
-  const head = branches.data?.local.find((b) => b.is_head)
-  const sync = head ? branchSync(head) : null
+  // Opened from a branch's own menu it is about that branch; from the toolbar,
+  // the checked-out one.
+  const target = branches.data?.local.find((b) => (branchName ? b.name === branchName : b.is_head))
+  const sync = target ? branchSync(target) : null
   const behind = sync?.behind ?? 0
   const ahead = sync?.ahead ?? 0
   const commits = (n: number) => plural(n, 'commit')
 
-  const pending = m.pull.isPending || m.pushForce.isPending
+  const pending = m.pull.isPending || m.pullBranch.isPending || m.pushForce.isPending || m.pushBranchForce.isPending
 
   // With work on both sides, "get first" would blend via a merge commit chosen
   // for the user. Hand that to the sync modal, which offers blend / stack /
   // replace and draws the result. A pure catch-up still pulls directly.
-  const canChooseSync = pullNeedsChoice({ upstream: head?.upstream, ahead, behind })
+  const canChooseSync = pullNeedsChoice({ upstream: target?.upstream, ahead, behind })
   const getFirst = () => {
     if (canChooseSync) {
       closeModal()
-      openRemoteSync(head!.upstream!, head!.name)
+      openRemoteSync(target!.upstream!, target!.name)
+      return
+    }
+    if (target && !target.is_head) {
+      m.pullBranch.mutate(target.name, { onSuccess: () => closeModal() })
       return
     }
     m.pull.mutate(undefined, { onSuccess: () => closeModal() })
   }
-  const forcePush = () => m.pushForce.mutate(undefined, { onSuccess: () => closeModal() })
+  const forcePush = () => {
+    if (!target) return
+    if (target.is_head) m.pushForce.mutate(undefined, { onSuccess: () => closeModal() })
+    else m.pushBranchForce.mutate(target.name, { onSuccess: () => closeModal() })
+  }
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && closeModal()}>
@@ -65,7 +77,7 @@ export function PushChoiceModal() {
             <span className="flex items-start gap-1.5 text-modified">
               <AlertTriangle size={13} className="mt-[1px] flex-none" />
               <span>
-                The cloud has {commits(behind)} that {head?.name ?? 'this branch'} doesn't
+                The cloud has {commits(behind)} that {target?.name ?? 'this branch'} doesn't
                 {ahead > 0 ? `, and you have ${commits(ahead)} it doesn't` : ''}. A normal push
                 would be turned down.
               </span>
@@ -95,14 +107,14 @@ export function PushChoiceModal() {
           </Button>
           <Button variant="secondary" size="sm" disabled={pending} onClick={getFirst}>
             <ArrowDown size={13} />{' '}
-            {m.pull.isPending
+            {m.pull.isPending || m.pullBranch.isPending
               ? 'Getting…'
               : canChooseSync
                 ? 'Choose how to combine'
                 : 'Get changes first'}
           </Button>
-          <Button variant="destructive" size="sm" disabled={pending} onClick={forcePush}>
-            {m.pushForce.isPending ? 'Force pushing…' : 'Force push'}
+          <Button variant="destructive" size="sm" disabled={pending || !target} onClick={forcePush}>
+            {m.pushForce.isPending || m.pushBranchForce.isPending ? 'Force pushing…' : 'Force push'}
           </Button>
         </div>
       </DialogContent>

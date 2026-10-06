@@ -973,6 +973,30 @@ pub async fn git_push_branch(
     repo_id: String,
     branch: String,
 ) -> Result<PushResult, AppError> {
+    push_named_branch(app, manager, repo_id, branch, false).await
+}
+
+/// Force-push a named local branch with `--force-with-lease`, which need not be
+/// the one checked out. For a branch rebased or rewound away from its upstream;
+/// the lease still refuses to overwrite remote commits that were never fetched.
+#[tauri::command]
+#[specta::specta]
+pub async fn git_push_branch_force(
+    app: AppHandle,
+    manager: State<'_, RepoManager>,
+    repo_id: String,
+    branch: String,
+) -> Result<PushResult, AppError> {
+    push_named_branch(app, manager, repo_id, branch, true).await
+}
+
+async fn push_named_branch(
+    app: AppHandle,
+    manager: State<'_, RepoManager>,
+    repo_id: String,
+    branch: String,
+    force: bool,
+) -> Result<PushResult, AppError> {
     let open = manager.get(&repo_id)?;
     let path = open.path.to_string_lossy().into_owned();
     tauri::async_runtime::spawn_blocking(move || {
@@ -999,6 +1023,9 @@ pub async fn git_push_branch(
         // happens to be checked out.
         let refspec = format!("refs/heads/{branch}");
         let mut args: Vec<&str> = vec!["push", "--progress"];
+        if force {
+            args.push("--force-with-lease");
+        }
         // Link on a first publish, and also when the upstream ref went missing:
         // the config still names it, but the tracking ref needs recreating.
         if publish.is_some() {

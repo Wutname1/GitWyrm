@@ -222,6 +222,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::remote::git_pull,
             commands::remote::git_push,
             commands::remote::git_push_branch,
+            commands::remote::git_push_branch_force,
             commands::remote::git_pull_branch,
             commands::update_all::pull_branches,
             commands::update_all::update_all_start,

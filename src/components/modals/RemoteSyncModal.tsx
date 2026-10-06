@@ -178,6 +178,8 @@ export function RemoteSyncModal() {
     m.push.isPending ||
     m.pushBranch.isPending ||
     m.pushForce.isPending ||
+    m.pushBranchForce.isPending ||
+    m.pullBranch.isPending ||
     m.rebase.isPending ||
     m.mergeDirectional.isPending ||
     m.fastForwardBranch.isPending
@@ -192,9 +194,14 @@ export function RemoteSyncModal() {
   const run = () => {
     if (!active) return
     const tracking = pair?.kind === 'tracking' ? pair : null
+    // A branch dragged onto its own upstream need not be the checked-out one.
+    // The HEAD-only mutations would then act on the wrong branch -- a force push
+    // overwriting some other branch's cloud copy -- so name the branch instead.
+    const other = tracking && !tracking.branch.is_head ? tracking.branch.name : null
 
     switch (active) {
       case 'get':
+        if (other) return void m.pullBranch.mutate(other, done)
         if (tracking) return void m.pull.mutate(undefined, done)
         if (branchPair)
           return void m.fastForwardBranch.mutate(
@@ -203,6 +210,7 @@ export function RemoteSyncModal() {
           )
         return
       case 'send':
+        if (other) return void m.pushBranch.mutate(other, done)
         if (tracking) return void m.push.mutate(undefined, done)
         // Two local branches: "send" means the other branch simply catches up
         // to this one, which is a fast-forward of the source ref.
@@ -213,11 +221,17 @@ export function RemoteSyncModal() {
           )
         return
       case 'replace':
-        // A force-push goes to the checked-out branch's own upstream, so it
-        // only means "replace theirs" when that upstream is the pair on screen.
+        // Only a branch and its own upstream: a force push always lands on the
+        // branch's upstream, which is the pair on screen only for a tracking pair.
         if (!tracking) return
+        if (other) return void m.pushBranchForce.mutate(other, done)
         return void m.pushForce.mutate(undefined, done)
       case 'blend':
+        if (other)
+          return void m.mergeDirectional.mutate(
+            { target: other, source: tracking!.upstream },
+            { onSuccess: ({ result }) => onConflicts(result.conflicts) }
+          )
         if (tracking) return void m.pull.mutate(undefined, done)
         if (branchPair)
           return void m.mergeDirectional.mutate(
@@ -228,7 +242,7 @@ export function RemoteSyncModal() {
       case 'stack':
         if (tracking)
           return void m.rebase.mutate(
-            { onto: tracking.upstream },
+            { onto: tracking.upstream, branch: other ?? undefined },
             { onSuccess: ({ result }) => onConflicts(result.conflicts) }
           )
         if (branchPair)
