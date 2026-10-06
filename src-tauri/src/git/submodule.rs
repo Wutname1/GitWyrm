@@ -10,6 +10,7 @@
 use std::collections::HashMap;
 
 use crate::error::AppError;
+use crate::git::head_attach::{attach_head, head_has_unsaved_commits, AttachMode, AttachOutcome};
 use crate::git::shell::run_git;
 use crate::git::types::{SubmoduleFollowed, SubmoduleMove, SubmoduleState, SubmoduleStatus};
 
@@ -191,6 +192,55 @@ pub fn all_submodules(repo: &git2::Repository) -> Vec<SubmoduleStatus> {
     out
 }
 
+/// The commit each submodule is pinned to right now, by path.
+///
+/// Taken before an operation that can move pins (pull, rebase, branch switch),
+/// so the follow-up afterwards can tell a pin the operation moved from a
+/// submodule the user moved themselves. Only the first should be followed.
+pub fn recorded_pins(repo: &git2::Repository) -> HashMap<String, git2::Oid> {
+    refresh_index(repo);
+    let Ok(subs) = repo.submodules() else {
+        return HashMap::new();
+    };
+    subs.iter()
+        .filter_map(|sub| {
+            let path = sub.path().to_str()?.to_string();
+            let pin = sub.index_id().or_else(|| sub.head_id())?;
+            Some((path, pin))
+        })
+        .collect()
+}
+
+/// Put a submodule's checkout on its branch after something left it detached,
+/// without moving it off the commit it sits at. Best effort: a submodule that
+/// cannot be attached simply stays where it is, which is still correct.
+pub fn attach_submodule(repo_path: &str, sub_path: &str) {
+    let branch = git2::Repository::open(repo_path)
+        .ok()
+        .and_then(|parent| followed_branch(&parent, sub_path));
+    let branch = branch.as_deref();
+    let nested = std::path::Path::new(repo_path).join(sub_path);
+    let Ok(nested_repo) = git2::Repository::open(&nested) else {
+        return;
+    };
+    let nested = nested.to_string_lossy().into_owned();
+    if let AttachOutcome::NotAttached { reason } =
+        attach_head(&nested_repo, &nested, branch, AttachMode::KeepCommit)
+    {
+        log::info!("left submodule {sub_path} off a branch: {reason}");
+    }
+}
+
+/// The branch `.gitmodules` says a submodule follows, if any.
+fn followed_branch(repo: &git2::Repository, sub_path: &str) -> Option<String> {
+    repo.find_submodule(sub_path)
+        .ok()?
+        .branch()
+        .ok()
+        .flatten()
+        .map(str::to_string)
+}
+
 /// True when `path` names a submodule in this repo (moved or not).
 pub fn is_submodule(repo: &git2::Repository, path: &str) -> bool {
     repo.find_submodule(path).is_ok()
@@ -294,19 +344,30 @@ fn nested_is_dirty(repo_path: &str, path: &str) -> bool {
 ///
 /// Failures are per-submodule and never propagate: the pull already succeeded,
 /// and a submodule whose commit is unreachable must not turn that into an error.
+///
+/// `pins_before` is [`recorded_pins`] taken before the operation. A submodule is
+/// followed when the operation moved its pin, or when its checkout is simply
+/// behind the pin (nothing of the user's to lose). One the USER moved ahead --
+/// commits made inside it -- is left alone: following it would snap it back to
+/// the old pin, off its branch, every time the parent was pulled.
 pub fn follow_recorded_pins(
     repo: &git2::Repository,
     repo_path: &str,
+    pins_before: &HashMap<String, git2::Oid>,
 ) -> Result<Vec<FollowResult>, AppError> {
     let mut results = Vec::new();
 
-    // Only submodules whose pin actually moved, so a repo with healthy submodules
-    // does no work and reports nothing.
     let mut moved: Vec<SubmoduleMove> = moved_submodules(repo)
         .into_values()
         // An uninitialized submodule has no checkout to move. Downloading one is a
         // separate, explicit choice the user makes, not a side effect of pulling.
         .filter(|m| m.initialized)
+        .filter(|m| {
+            let pin_moved =
+                pins_before.get(&m.path).map(|oid| oid.to_string()) != Some(m.recorded_sha.clone());
+            let only_behind = m.ahead == 0 && m.behind > 0;
+            pin_moved || only_behind
+        })
         .collect();
     if moved.is_empty() {
         return Ok(results);
@@ -314,6 +375,34 @@ pub fn follow_recorded_pins(
     moved.sort_by(|a, b| a.path.cmp(&b.path));
 
     for m in moved {
+        let nested = std::path::Path::new(repo_path)
+            .join(&m.path)
+            .to_string_lossy()
+            .into_owned();
+        let branch = followed_branch(repo, &m.path);
+
+        // A detached checkout with commits of its own would lose them from every
+        // branch when it moves. Put them on their branch first; if that is not
+        // possible, leave the submodule where it is and say why.
+        if let Ok(nested_repo) = git2::Repository::open(&nested) {
+            let _ = attach_head(
+                &nested_repo,
+                &nested,
+                branch.as_deref(),
+                AttachMode::KeepCommit,
+            );
+        }
+        if head_has_unsaved_commits(&nested) {
+            results.push(FollowResult {
+                path: m.path.clone(),
+                outcome: FollowOutcome::Failed(
+                    "it has commits of its own that are on no branch, so it was left where it is"
+                        .into(),
+                ),
+            });
+            continue;
+        }
+
         let stashed = if nested_is_dirty(repo_path, &m.path) {
             // Untracked files are included: a checkout that has to write one fails the
             // same way a modified file does.
@@ -361,6 +450,12 @@ pub fn follow_recorded_pins(
             ],
         );
 
+        // `git submodule update` always leaves the checkout detached. Put it back
+        // on its branch when that branch can catch up to it.
+        if updated.is_ok() {
+            attach_submodule(repo_path, &m.path);
+        }
+
         let outcome = match updated {
             Ok(_) if stashed => FollowOutcome::StashedAndUpdated,
             Ok(_) => FollowOutcome::Updated,
@@ -389,8 +484,9 @@ pub fn follow_and_report(
     repo: &git2::Repository,
     repo_path: &str,
     operation: &str,
+    pins_before: &HashMap<String, git2::Oid>,
 ) -> Vec<SubmoduleFollowed> {
-    follow_recorded_pins(repo, repo_path)
+    follow_recorded_pins(repo, repo_path, pins_before)
         .unwrap_or_default()
         .into_iter()
         .map(|r| {
@@ -529,7 +625,7 @@ mod tests {
             "expected a stranded submodule to fix"
         );
 
-        let results = follow_recorded_pins(&repo, &parent).unwrap();
+        let results = follow_recorded_pins(&repo, &parent, &HashMap::new()).unwrap();
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].path, "sub");
@@ -553,7 +649,7 @@ mod tests {
         std::fs::write(Path::new(&sub).join("f.txt"), "MY WORK").unwrap();
 
         let repo = git2::Repository::open(&parent).unwrap();
-        let results = follow_recorded_pins(&repo, &parent).unwrap();
+        let results = follow_recorded_pins(&repo, &parent, &HashMap::new()).unwrap();
 
         assert_eq!(results[0].outcome, FollowOutcome::StashedAndUpdated);
         // The pulled version won the working tree...
@@ -618,6 +714,7 @@ mod tests {
         // Warm the submodule/index cache the way the running app does -- status
         // runs constantly, so the handle has always read the pre-pull index.
         let _ = moved_submodules(&repo);
+        let pins_before = recorded_pins(&repo);
 
         run_git(
             Some(&clone),
@@ -631,7 +728,7 @@ mod tests {
         )
         .unwrap();
 
-        let results = follow_recorded_pins(&repo, &clone).unwrap();
+        let results = follow_recorded_pins(&repo, &clone, &pins_before).unwrap();
 
         assert_eq!(
             results.len(),
@@ -667,7 +764,7 @@ mod tests {
         .unwrap();
 
         let repo = git2::Repository::open(&parent).unwrap();
-        let reported = follow_and_report(&repo, &parent, "pull");
+        let reported = follow_and_report(&repo, &parent, "pull", &HashMap::new());
 
         assert_eq!(reported.len(), 1, "the stranded submodule must be reported");
         assert_eq!(reported[0].path, "sub");
@@ -688,7 +785,7 @@ mod tests {
         strand_the_checkout(&parent);
 
         let repo = git2::Repository::open(&parent).unwrap();
-        let reported = follow_and_report(&repo, &parent, "pull");
+        let reported = follow_and_report(&repo, &parent, "pull", &HashMap::new());
 
         assert_eq!(reported.len(), 1);
         assert_eq!(reported[0].failed, None);
@@ -701,7 +798,105 @@ mod tests {
         let repo = git2::Repository::open(&parent).unwrap();
 
         // Nothing moved, so there is nothing to report and no work to do.
-        assert!(follow_recorded_pins(&repo, &parent).unwrap().is_empty());
+        assert!(follow_recorded_pins(&repo, &parent, &HashMap::new())
+            .unwrap()
+            .is_empty());
+    }
+
+    fn branch_of(repo_path: &str) -> String {
+        run_git(Some(repo_path), &["symbolic-ref", "-q", "--short", "HEAD"])
+            .map(|o| o.stdout.trim().to_string())
+            .unwrap_or_default()
+    }
+
+    /// Commits made inside a submodule are the user's work, not a stale pin. A
+    /// pull that never touched the pin used to snap the folder back to it anyway
+    /// -- off its branch, with the new commit reachable only from the reflog.
+    #[test]
+    fn a_submodule_the_user_moved_ahead_is_not_snapped_back() {
+        let (_dir, parent) = parent_with_submodule();
+        let sub = format!("{parent}/sub");
+        let branch = branch_of(&sub);
+        std::fs::write(Path::new(&sub).join("f.txt"), "mine").unwrap();
+        run_git(Some(&sub), &["add", "."]).unwrap();
+        commit(&sub, "mine");
+        let mine = head_of(&sub);
+
+        let repo = git2::Repository::open(&parent).unwrap();
+        let pins_before = recorded_pins(&repo);
+        let results = follow_recorded_pins(&repo, &parent, &pins_before).unwrap();
+
+        assert!(results.is_empty(), "nothing moved the pin: {results:?}");
+        assert_eq!(head_of(&sub), mine);
+        assert_eq!(branch_of(&sub), branch, "still on its branch");
+    }
+
+    /// When the pin really does move, a commit the user made on a detached
+    /// checkout is put on its branch before the folder moves, so it survives.
+    #[test]
+    fn a_detached_commit_is_kept_on_its_branch_when_the_pin_moves() {
+        let (_dir, parent) = parent_with_submodule();
+        let sub = format!("{parent}/sub");
+        let branch = branch_of(&sub);
+        let repo = git2::Repository::open(&parent).unwrap();
+        let pins_before = recorded_pins(&repo);
+        let v1 = head_of(&sub);
+
+        // Someone else's commit, which the parent is about to pin.
+        run_git(Some(&sub), &["checkout", "-q", "-b", "theirs"]).unwrap();
+        std::fs::write(Path::new(&sub).join("t.txt"), "theirs").unwrap();
+        run_git(Some(&sub), &["add", "."]).unwrap();
+        commit(&sub, "theirs");
+        let theirs = head_of(&sub);
+
+        // The user's commit, made on a bare checkout the way `submodule update` leaves it.
+        run_git(Some(&sub), &["checkout", "-q", "--detach", &v1]).unwrap();
+        std::fs::write(Path::new(&sub).join("m.txt"), "mine").unwrap();
+        run_git(Some(&sub), &["add", "."]).unwrap();
+        commit(&sub, "mine");
+        let mine = head_of(&sub);
+
+        run_git(
+            Some(&parent),
+            &[
+                "update-index",
+                "--cacheinfo",
+                &format!("160000,{theirs},sub"),
+            ],
+        )
+        .unwrap();
+
+        let results = follow_recorded_pins(&repo, &parent, &pins_before).unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].outcome, FollowOutcome::Updated);
+        assert_eq!(head_of(&sub), theirs);
+        let kept = run_git(Some(&sub), &["rev-parse", &branch])
+            .unwrap()
+            .stdout
+            .trim()
+            .to_string();
+        assert_eq!(
+            kept, mine,
+            "the user's commit must be on {branch}, not only in the reflog"
+        );
+    }
+
+    /// After following, the folder lands on its branch rather than on a bare
+    /// commit, so opening it shows a branch that Pull and Push work from.
+    #[test]
+    fn a_followed_submodule_ends_up_on_its_branch() {
+        let (_dir, parent) = parent_with_submodule();
+        bump_pin(&parent);
+        let sub = format!("{parent}/sub");
+        let branch = branch_of(&sub);
+        strand_the_checkout(&parent);
+        assert_eq!(branch_of(&sub), "", "precondition: detached");
+
+        let repo = git2::Repository::open(&parent).unwrap();
+        follow_recorded_pins(&repo, &parent, &recorded_pins(&repo)).unwrap();
+
+        assert_eq!(branch_of(&sub), branch);
     }
 
     #[test]

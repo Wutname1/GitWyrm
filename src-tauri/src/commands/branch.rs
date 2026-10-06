@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use git2::{build::CheckoutBuilder, BranchType, Oid, ResetType};
 use tauri::State;
 
@@ -246,8 +248,12 @@ fn switch_to(repo: &git2::Repository, name: &str) -> Result<(), AppError> {
 ///
 /// Only call this once the switch has actually landed -- never on a path that
 /// is unwinding a failed switch.
-fn follow_switched_pins(repo: &git2::Repository, repo_path: &str) -> Vec<SubmoduleFollowed> {
-    submodule::follow_and_report(repo, repo_path, "switching branches")
+fn follow_switched_pins(
+    repo: &git2::Repository,
+    repo_path: &str,
+    pins_before: &HashMap<String, Oid>,
+) -> Vec<SubmoduleFollowed> {
+    submodule::follow_and_report(repo, repo_path, "switching branches", pins_before)
 }
 
 #[tauri::command]
@@ -262,6 +268,7 @@ pub async fn checkout_branch(
     tauri::async_runtime::spawn_blocking(move || {
         let repo_path = open.path.to_string_lossy().into_owned();
         let mut repo = open.repo.lock().unwrap();
+        let pins_before = submodule::recorded_pins(&repo);
 
         // Picking a remote branch lands on a local tracking branch, not detached HEAD.
         let name = resolve_switch_target(&repo, &name)?;
@@ -282,7 +289,7 @@ pub async fn checkout_branch(
 
         if !refs::any_changes_present(&repo)? {
             switch_to(&repo, &name)?;
-            let submodules = follow_switched_pins(&repo, &repo_path);
+            let submodules = follow_switched_pins(&repo, &repo_path, &pins_before);
             return Ok(CheckoutReport {
                 outcome: CheckoutOutcome::Clean,
                 submodules,
@@ -303,7 +310,7 @@ pub async fn checkout_branch(
               .into(),
           )
                 })?;
-                let submodules = follow_switched_pins(&repo, &repo_path);
+                let submodules = follow_switched_pins(&repo, &repo_path, &pins_before);
                 Ok(CheckoutReport {
                     outcome: CheckoutOutcome::Clean,
                     submodules,
@@ -319,7 +326,7 @@ pub async fn checkout_branch(
             // reapply.
             BranchSwitchMode::AutoStash => {
                 if switch_to(&repo, &name).is_ok() {
-                    let submodules = follow_switched_pins(&repo, &repo_path);
+                    let submodules = follow_switched_pins(&repo, &repo_path, &pins_before);
                     return Ok(CheckoutReport {
                         outcome: CheckoutOutcome::Clean,
                         submodules,
@@ -376,7 +383,7 @@ pub async fn checkout_branch(
                 // stash -- the stash can carry the user's own submodule pointer move,
                 // and re-applying it after this would put their choice back on top
                 // rather than have it overwritten.
-                let submodules = follow_switched_pins(&repo, &repo_path);
+                let submodules = follow_switched_pins(&repo, &repo_path, &pins_before);
 
                 // A failed re-apply leaves the user on the new branch WITHOUT their
                 // changes. Report where the work went instead of propagating a raw error.
@@ -440,6 +447,7 @@ pub async fn create_branch(
         };
         repo.branch(name, &target, false)?;
         if checkout {
+            let pins_before = submodule::recorded_pins(&repo);
             let refname = format!("refs/heads/{name}");
             let object = repo.revparse_single(&refname)?;
             // Move HEAD first. `checkout_tree` rewrites the index and working
@@ -449,7 +457,7 @@ pub async fn create_branch(
             repo.checkout_tree(&object, None)?;
             // Branching from an older commit can pin a submodule elsewhere, and the
             // checkout moves only the parent's pointer.
-            follow_switched_pins(&repo, &repo_path);
+            follow_switched_pins(&repo, &repo_path, &pins_before);
         }
         Ok(())
     })
@@ -922,6 +930,7 @@ pub(crate) fn fast_forward_branch_to(
         let mut stashed = false;
 
         if is_head {
+            let pins_before = submodule::recorded_pins(&repo);
             // The branch is checked out, so the working tree must move with it.
             // Uncommitted work used to be refused here, which made the user do by
             // hand what git does for itself on pull: set the changes aside, move,
@@ -966,7 +975,7 @@ pub(crate) fn fast_forward_branch_to(
             // pointing the wrong way, at rolling the pin BACK. Same follow-up pull
             // and rebase already do, and best-effort for the same reason: the
             // fast-forward itself has already landed.
-            followed = submodule::follow_and_report(repo, repo_path, "fast-forward");
+            followed = submodule::follow_and_report(repo, repo_path, "fast-forward", &pins_before);
 
             // Put the set-aside work back. stash_APPLY, never pop: git2's pop
             // returns Ok and drops the entry even when the apply conflicted, which
@@ -1021,10 +1030,11 @@ pub async fn checkout_commit(
         }
 
         let oid = Oid::from_str(sha.trim()).map_err(AppError::Git)?;
+        let pins_before = submodule::recorded_pins(&repo);
         let object = repo.find_object(oid, None)?;
         repo.checkout_tree(&object, Some(CheckoutBuilder::new().safe()))?;
         repo.set_head_detached(oid)?;
-        follow_switched_pins(&repo, &repo_path);
+        follow_switched_pins(&repo, &repo_path, &pins_before);
         Ok(())
     })
     .await
@@ -1696,9 +1706,10 @@ mod tests {
     fn switching_branches_moves_the_submodule_checkout_too() {
         let f = parent_with_bumped_pin();
         let repo = git2::Repository::open(&f.parent).unwrap();
+        let pins_before = submodule::recorded_pins(&repo);
 
         switch_to(&repo, "ahead").expect("switch");
-        follow_switched_pins(&repo, &f.parent);
+        follow_switched_pins(&repo, &f.parent, &pins_before);
 
         assert_eq!(
             repo.head()
@@ -1719,12 +1730,13 @@ mod tests {
         let f = parent_with_bumped_pin();
         let repo = git2::Repository::open(&f.parent).unwrap();
         let oid = git2::Oid::from_str(&f.ahead_sha).unwrap();
+        let pins_before = submodule::recorded_pins(&repo);
 
         let object = repo.find_object(oid, None).unwrap();
         repo.checkout_tree(&object, Some(CheckoutBuilder::new().safe()))
             .unwrap();
         repo.set_head_detached(oid).unwrap();
-        follow_switched_pins(&repo, &f.parent);
+        follow_switched_pins(&repo, &f.parent, &pins_before);
 
         assert_pin_followed(&f);
     }

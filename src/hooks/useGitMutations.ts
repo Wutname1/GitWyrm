@@ -285,7 +285,17 @@ function describeStashedSubmodules(subs: PullResult['submodules']): string {
 
 function describePull(r: PullResult, host: string | null): string {
   const stashed = describeStashedSubmodules(r.submodules)
+  // A detached checkout (the usual state of a submodule) was put on a branch
+  // first. Say so, or the branch name appearing in the sidebar is unexplained.
+  const onBranch = r.attached ? `Switched to ${r.attached}. ` : ''
 
+  if (r.needs_choice) {
+    return `${onBranch}It has commits of its own and new ones on ${describeTarget(r, host)}. Choose how to combine them.`
+  }
+  return onBranch + describePullCounts(r, host, stashed)
+}
+
+function describePullCounts(r: PullResult, host: string | null, stashed: string): string {
   if (r.received === 0) {
     const base = r.branch
       ? `Nothing new to get - ${r.branch} already matches ${describeTarget(r, host)}`
@@ -340,6 +350,7 @@ export function useGitMutations(repoId: string | null) {
   const repoPath = useWorkspaceStore((s) => s.openRepos.find((r) => r.id === repoId)?.path ?? null)
   const resolveTagSettings = useWorkspaceStore((s) => s.resolveTagSettings)
   const promptPushTags = useUiStore((s) => s.promptPushTags)
+  const openRemoteSync = useUiStore((s) => s.openRemoteSync)
   const commitLanding = useUiStore((s) => s.commitLanding)
 
   /**
@@ -1338,6 +1349,12 @@ export function useGitMutations(repoId: string | null) {
       noteManualFetch(id)
       toast(describePull(result, hostOf(result.upstream)))
       warnStrandedSubmodules(result.submodules)
+      // The pull stopped after putting the checkout on its branch, because that
+      // branch has work on both sides. Hand the merge-or-rebase decision to the
+      // same sync dialog the toolbar opens for any branch in that state.
+      if (result.needs_choice && result.branch && result.upstream) {
+        openRemoteSync(result.upstream, result.branch)
+      }
     },
     onError,
     // A conflicting pull exits as an error but leaves a merge or rebase in

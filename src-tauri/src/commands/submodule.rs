@@ -2,7 +2,7 @@ use tauri::State;
 
 use crate::error::AppError;
 use crate::git::shell::run_git;
-use crate::git::submodule::{all_submodules, moved_submodules};
+use crate::git::submodule::{all_submodules, attach_submodule, moved_submodules};
 use crate::git::types::{SubmoduleMove, SubmoduleStatus};
 use crate::state::RepoManager;
 
@@ -147,6 +147,8 @@ pub async fn update_submodule(
         }
         args.extend_from_slice(&["--", &path]);
         run_git(Some(&repo_path), &args)?;
+        // `submodule update` leaves the checkout on no branch; put it back on one.
+        attach_submodule(&repo_path, &path);
         Ok(())
     })
     .await
@@ -175,6 +177,9 @@ pub async fn bump_submodule(
             Some(&repo_path),
             &["submodule", "update", "--remote", "--init", "--", &path],
         )?;
+        // Lands on the newest commit of the branch it follows, so that branch can
+        // simply catch up to it instead of the folder sitting on a bare commit.
+        attach_submodule(&repo_path, &path);
         // Stage the moved pointer; the bump is not useful until it is committed.
         run_git(Some(&repo_path), &["add", "--", &path])?;
         Ok(())
@@ -198,6 +203,13 @@ pub async fn init_all_submodules(
             Some(&repo_path),
             &["submodule", "update", "--init", "--recursive"],
         )?;
+        let paths: Vec<String> = {
+            let repo = open.repo.lock().unwrap();
+            all_submodules(&repo).into_iter().map(|s| s.path).collect()
+        };
+        for path in paths {
+            attach_submodule(&repo_path, &path);
+        }
         Ok(())
     })
     .await

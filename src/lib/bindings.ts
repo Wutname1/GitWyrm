@@ -4566,7 +4566,17 @@ ahead_after: number;
  * Submodules whose pinned version the pull changed, and what was done about
  * each. Empty when the repo has no submodules or none of them moved.
  */
-submodules: SubmoduleFollowed[] }
+submodules: SubmoduleFollowed[]; 
+/**
+ * The checkout was on no branch, so it was put on this one before pulling.
+ * The usual case is a submodule opened in its own tab.
+ */
+attached: string | null; 
+/**
+ * Nothing was pulled: the branch it was put on has commits of its own and
+ * new ones on the remote, and how to combine them is the user's choice.
+ */
+needs_choice: boolean }
 /**
  * Outcome of a push. Measured from the branch's ahead/behind against its
  * upstream before and after, so the report reflects what actually moved rather

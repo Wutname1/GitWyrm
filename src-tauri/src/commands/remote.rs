@@ -12,7 +12,8 @@ use tauri::{AppHandle, Emitter, State};
 use crate::error::AppError;
 use crate::git::refs;
 use crate::git::shell::Attended;
-use crate::git::submodule::follow_and_report;
+use crate::git::head_attach::{attach_head, AttachMode, AttachOutcome};
+use crate::git::submodule::{follow_and_report, recorded_pins};
 use crate::git::types::{
     PullResult, PushResult, RebaseResult, RemoteBranchInfo, RemoteInfo, RemoteTagInfo, UnpushedTag,
 };
@@ -811,7 +812,37 @@ pub async fn git_pull(
     let path = open.path.to_string_lossy().into_owned();
     tauri::async_runtime::spawn_blocking(move || {
         let _timing = crate::perf::CommandTiming::start("git_pull", "git.pull");
+        let pins_before = recorded_pins(&open.repo.lock().unwrap());
+
+        // A detached checkout -- what `git submodule update` leaves in every
+        // submodule -- has no branch to pull into, and git refuses outright. Put it
+        // on the branch its commit belongs to first; that branch then catches up
+        // like any other.
+        let attached = {
+            let repo = open.repo.lock().unwrap();
+            match attach_head(&repo, &path, None, AttachMode::MayMoveForward) {
+                AttachOutcome::AlreadyOnBranch => None,
+                AttachOutcome::Attached { branch, .. } => Some(branch),
+                AttachOutcome::NotAttached { reason } => return Err(AppError::Other(reason)),
+            }
+        };
+
         let before = { tracking_state(&open.repo.lock().unwrap()) };
+
+        // Attaching can land on a branch with commits of its own AND new ones on
+        // the remote. Combining those is a choice the user makes in the sync
+        // dialog, so stop here and hand it back rather than letting git pick.
+        if attached.is_some() && before.ahead > 0 && before.behind > 0 {
+            return Ok(PullResult {
+                branch: before.branch,
+                upstream: before.upstream,
+                received: 0,
+                ahead_after: before.ahead,
+                submodules: Vec::new(),
+                attached,
+                needs_choice: true,
+            });
+        }
 
         // `--autostash` is what keeps a pull from ever failing just because the
         // working tree is dirty. Without it git refuses the whole operation with
@@ -838,7 +869,7 @@ pub async fn git_pull(
         // pulled, setting aside any edits inside it first.
         let submodules = {
             let repo = open.repo.lock().unwrap();
-            follow_and_report(&repo, &path, "pull")
+            follow_and_report(&repo, &path, "pull", &pins_before)
         };
 
         let after = { tracking_state(&open.repo.lock().unwrap()) };
@@ -852,6 +883,8 @@ pub async fn git_pull(
             received,
             ahead_after: after.ahead,
             submodules,
+            attached,
+            needs_choice: false,
         })
     })
     .await
@@ -1211,6 +1244,8 @@ pub async fn git_pull_branch(
         // This updates a branch that is not checked out, so the working tree --
         // and every submodule checkout in it -- is untouched by design.
         submodules: Vec::new(),
+        attached: None,
+        needs_choice: false,
       });
     }
 
@@ -1233,6 +1268,8 @@ pub async fn git_pull_branch(
       received: before.behind.saturating_sub(after.behind),
       ahead_after: after.ahead,
       submodules: Vec::new(),
+      attached: None,
+      needs_choice: false,
     })
   })
   .await
@@ -1819,9 +1856,11 @@ pub async fn git_rebase(
             args.push(b);
         }
 
+        let pins_before = recorded_pins(&open.repo.lock().unwrap());
         rebase_outcome(
             run_streaming(&app, &repo_id, Some(&path), "rebase", &args),
             &open,
+            &pins_before,
         )
     })
     .await
@@ -1834,6 +1873,7 @@ pub async fn git_rebase(
 fn rebase_outcome(
     run: Result<String, AppError>,
     open: &crate::state::OpenRepo,
+    pins_before: &std::collections::HashMap<String, git2::Oid>,
 ) -> Result<RebaseResult, AppError> {
     match run {
         Ok(_) => {
@@ -1843,7 +1883,7 @@ fn rebase_outcome(
             let submodules = {
                 let repo = open.repo.lock().unwrap();
                 let path = open.path.to_string_lossy().into_owned();
-                follow_and_report(&repo, &path, "rebase")
+                follow_and_report(&repo, &path, "rebase", pins_before)
             };
             Ok(RebaseResult {
                 conflicts: Vec::new(),
@@ -1892,9 +1932,11 @@ pub async fn rebase_continue(
             }
         }
         let args = ["-c", "core.editor=true", "rebase", "--continue"];
+        let pins_before = recorded_pins(&open.repo.lock().unwrap());
         rebase_outcome(
             run_streaming(&app, &repo_id, Some(&path), "rebase", &args),
             &open,
+            &pins_before,
         )
     })
     .await
