@@ -22,7 +22,12 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { WindowControls } from "@/components/domain/WindowControls";
+import { titleBarInsetStyle } from "@/lib/platform";
 import { RepositoryTabs } from "@/components/domain/RepositoryTabs";
+import {
+  UpdateAllContextItems,
+  UpdateAllDropdownItems,
+} from "@/components/domain/UpdateAllActions";
 import {
   onTitleBarDoubleClick,
   onTitleBarMouseDown,
@@ -498,6 +503,9 @@ function RecentRepositories({ compact = false }: { compact?: boolean }) {
               />
             ))}
           </div>
+
+          <DropdownMenuSeparator />
+          <UpdateAllDropdownItems />
         </DropdownMenuContent>
       </DropdownMenu>
     </Tooltip>
@@ -587,6 +595,7 @@ export function TabBar() {
           data-dim-on-drag
           onMouseDownCapture={onTitleBarMouseDown}
           onDoubleClick={onTitleBarDoubleClick}
+          style={titleBarInsetStyle()}
           className="flex h-9 flex-none items-stretch border-b border-border bg-background pl-2.5"
         >
           <div data-tauri-drag-region className="mr-4 flex items-center">
@@ -614,6 +623,7 @@ export function TabBar() {
       data-dim-on-drag
       onMouseDownCapture={onTitleBarMouseDown}
       onDoubleClick={onTitleBarDoubleClick}
+      style={titleBarInsetStyle()}
       className="flex h-9 flex-none items-stretch gap-0.5 border-b border-border bg-background pl-2.5"
     >
       <div
@@ -671,32 +681,44 @@ export function VerticalTabRail() {
       )}
       style={{ width: verticalTabWidth }}
     >
-      <div
-        className={cn(
-          "flex h-[42px] flex-none items-center border-b border-border",
-          iconRail ? "justify-center px-1" : "justify-between px-2.5 pl-3",
-        )}
-      >
-        <span
-          className={cn(
-            "min-w-0 truncate font-wordmark text-2xs font-semibold text-sub",
-            iconRail ? "font-mono tracking-normal" : "tracking-[.085em]",
-          )}
-          aria-label={`${openRepos.length} repositories open`}
-        >
-          {iconRail
-            ? openRepos.length
-            : compact
-              ? `${openRepos.length} REPOS`
-              : `REPOSITORIES · ${openRepos.length}`}
-        </span>
-        {!compact && (
-          <div className="flex items-center gap-1.5">
-            <RecentRepositories compact />
-            <OpenRepositoryButton compact />
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div
+            className={cn(
+              "flex h-[42px] flex-none items-center border-b border-border",
+              iconRail ? "justify-center px-1" : "justify-between px-2.5 pl-3",
+            )}
+          >
+            <span
+              className={cn(
+                "min-w-0 truncate font-wordmark text-2xs font-semibold text-sub",
+                iconRail ? "font-mono tracking-normal" : "tracking-[.085em]",
+              )}
+              aria-label={`${openRepos.length} repositories open`}
+            >
+              {iconRail
+                ? openRepos.length
+                : compact
+                  ? `${openRepos.length} REPOS`
+                  : `REPOSITORIES · ${openRepos.length}`}
+            </span>
+            {!compact && (
+              <div className="flex items-center gap-1.5">
+                <RecentRepositories compact />
+                <OpenRepositoryButton compact />
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="w-64">
+          <UpdateAllContextItems
+            group={{
+              name: "open projects",
+              paths: openRepos.map((repo) => repo.path),
+            }}
+          />
+        </ContextMenuContent>
+      </ContextMenu>
       <RepositoryTabs orientation="vertical" />
       <div
         className={cn(

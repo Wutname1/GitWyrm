@@ -8,6 +8,8 @@ export function BehaviorSettings() {
   const setRestoreTabs = useWorkspaceStore((s) => s.setRestoreTabs)
   const autoFetch = useWorkspaceStore((s) => s.autoFetch)
   const setAutoFetch = useWorkspaceStore((s) => s.setAutoFetch)
+  const updateAllOnStart = useWorkspaceStore((s) => s.updateAllOnStart)
+  const setUpdateAllOnStart = useWorkspaceStore((s) => s.setUpdateAllOnStart)
   const showTips = useWorkspaceStore((s) => s.showTips)
   const setShowTips = useWorkspaceStore((s) => s.setShowTips)
   const discardResetsSubmodules = useWorkspaceStore((s) => s.discardResetsSubmodules)
@@ -62,6 +64,21 @@ export function BehaviorSettings() {
               className="size-3.5 accent-[var(--gw-accent)]"
             />
             Check automatically
+          </label>
+        </SettingRow>
+        <SettingRow
+          label="Get the latest for all projects"
+          searchId="update-all-on-start"
+          hint="When GitWyrm opens, bring every project in your code folders up to date. Branches with their own new work are left alone."
+        >
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
+            <input
+              type="checkbox"
+              checked={updateAllOnStart}
+              onChange={(e) => setUpdateAllOnStart(e.target.checked)}
+              className="size-3.5 accent-[var(--gw-accent)]"
+            />
+            Every time GitWyrm opens
           </label>
         </SettingRow>
       </SettingsGroup>

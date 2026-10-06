@@ -95,6 +95,10 @@ pub struct FileChange {
     pub status: StatusCode,
     pub additions: u32,
     pub deletions: u32,
+    /// False when the line counts were not worked out because too many files
+    /// changed at once. `additions`/`deletions` are then 0, which must not be
+    /// shown as "+0 -0" -- that reads as "nothing changed".
+    pub lines_counted: bool,
     pub conflicted: bool,
     /// Set when this path is a submodule whose pinned commit moved. Ordinary file
     /// actions (stash, discard-by-checkout) can't touch it; the UI must offer
@@ -532,6 +536,12 @@ pub struct PullResult {
     /// Submodules whose pinned version the pull changed, and what was done about
     /// each. Empty when the repo has no submodules or none of them moved.
     pub submodules: Vec<SubmoduleFollowed>,
+    /// The checkout was on no branch, so it was put on this one before pulling.
+    /// The usual case is a submodule opened in its own tab.
+    pub attached: Option<String>,
+    /// Nothing was pulled: the branch it was put on has commits of its own and
+    /// new ones on the remote, and how to combine them is the user's choice.
+    pub needs_choice: bool,
 }
 
 /// Outcome of a rebase. A clean rebase returns no conflicts; a paused rebase

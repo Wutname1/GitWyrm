@@ -77,6 +77,7 @@ export function RemoteBranchMenuItems({
   const branches = useBranches(repoId)
   const openRemoteSync = useUiStore((s) => s.openRemoteSync)
   const deleteRemoteBranchPrompt = useUiStore((s) => s.deleteRemoteBranchPrompt)
+  const resetToBranchPrompt = useUiStore((s) => s.resetToBranchPrompt)
 
   const fullName = `${remote.name}/${branch}`
   const head = branches.data?.local.find((b) => b.is_head)
@@ -191,8 +192,8 @@ export function RemoteBranchMenuItems({
           local branch of the same name does NOT rule these out -- that is the
           usual case for "origin/main moved ahead of my main". Both stay live
           whenever the remote has commits we don't. */}
-      {/* All three open the Sync window on the matching option, so the choice
-          between them is made once, in one place, with the outcome drawn. */}
+      {/* Blend and Stack open the Sync window on the matching option, so the
+          choice between them is made once, with the outcome drawn. */}
       <ContextMenuItem
         disabled={isSameCommit || opInProgress}
         onSelect={() => openSync(fullName, 'blend')}
@@ -223,7 +224,10 @@ export function RemoteBranchMenuItems({
         <ContextMenuItem
           variant="destructive"
           disabled={opInProgress || resetting}
-          onSelect={() => openSync(fullName, 'reset')}
+          // The choice is already made, so this goes straight to its confirm.
+          // Routing it through the Sync window put a second decision in front
+          // of the user, on a screen that did not open on the option picked.
+          onSelect={() => resetToBranchPrompt(fullName)}
         >
           <RotateCcw />
           <div className="flex flex-col">

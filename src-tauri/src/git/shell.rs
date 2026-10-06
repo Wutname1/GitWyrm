@@ -120,6 +120,13 @@ pub enum Attended {
 /// the stored sign-in.
 pub fn credential_args(attended: Attended) -> Vec<String> {
     let mut args = vec!["-c".into(), "credential.helper=".into()];
+    // Hands the helper the repository path as well as the host, so a refusal of
+    // the connected account is remembered for that one repository instead of
+    // for every repository on the host (GITWYRM-FRONTEND-1E). The helper strips
+    // the path again before asking Credential Manager, so the user's saved
+    // sign-ins are still looked up by host as before.
+    args.push("-c".into());
+    args.push("credential.useHttpPath=true".into());
     args.push("-c".into());
     // When the current executable cannot be located the helper could not be
     // spawned anyway; Credential Manager alone is the behaviour before the
@@ -237,6 +244,7 @@ pub fn describe_credential_helpers(repo_path: Option<&str>) -> Vec<String> {
     }
 }
 
+#[derive(Debug)]
 pub struct GitOutput {
     pub stdout: String,
     /// Git's diagnostics from a SUCCESSFUL run. Callers take `.stdout` and drop
@@ -333,6 +341,129 @@ fn run_git_with(
     let out = GitOutput { stdout, stderr };
     log_stderr(args, &out);
     Ok(out)
+}
+
+/// Why [`run_git_stoppable`] did not produce output.
+#[derive(Debug)]
+pub enum StoppableError {
+    /// git ran and failed; carries the same message [`run_git`] would.
+    Failed(AppError),
+    /// The caller asked it to stop, and the process was ended.
+    Cancelled,
+    /// It ran longer than allowed, and the process was ended.
+    TimedOut,
+}
+
+/// Like [`run_git`], but can be ended early: when `cancel` is set, or after
+/// `timeout`. For long network runs over many repositories, where one server
+/// that never answers must not hold up everything else, and "Stop" has to
+/// mean stop rather than "after the current downloads finish".
+pub fn run_git_stoppable(
+    repo_path: Option<&str>,
+    args: &[&str],
+    unattended: bool,
+    cancel: Option<&std::sync::atomic::AtomicBool>,
+    timeout: std::time::Duration,
+) -> Result<GitOutput, StoppableError> {
+    use std::io::Read;
+    use std::sync::atomic::Ordering;
+    use std::time::{Duration, Instant};
+
+    let mut cmd = Command::new(git_program_name());
+    if let Some(path) = repo_path {
+        cmd.arg("-C").arg(path);
+    }
+    cmd.args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    crate::process_env::scrub_bundled_env(&mut cmd);
+    prepare_git_env(&mut cmd);
+    if unattended {
+        apply_background_env(&mut cmd);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let mut child = cmd.spawn().map_err(|e| {
+        StoppableError::Failed(if e.kind() == std::io::ErrorKind::NotFound {
+            AppError::Other("git executable not found on PATH".into())
+        } else {
+            AppError::Io(e)
+        })
+    })?;
+
+    // Drained on their own threads: a fetch that lists hundreds of new
+    // branches fills the pipe buffer, and git then blocks writing to it while
+    // we wait for it to exit.
+    let drain = |pipe: Option<Box<dyn Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut pipe) = pipe {
+                let _ = pipe.read_to_end(&mut buf);
+            }
+            String::from_utf8_lossy(&buf).into_owned()
+        })
+    };
+    let stdout = drain(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
+    let stderr = drain(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
+
+    let started = Instant::now();
+    let stopped = loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break None,
+            Ok(None) => {}
+            Err(e) => break Some(StoppableError::Failed(AppError::Io(e))),
+        }
+        if cancel.is_some_and(|c| c.load(Ordering::SeqCst)) {
+            break Some(StoppableError::Cancelled);
+        }
+        if started.elapsed() > timeout {
+            break Some(StoppableError::TimedOut);
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    };
+
+    if let Some(reason) = stopped {
+        kill_tree(&mut child);
+        let _ = child.wait();
+        return Err(reason);
+    }
+
+    let status = child.wait().map_err(|e| StoppableError::Failed(AppError::Io(e)))?;
+    let stdout = stdout.join().unwrap_or_default();
+    let stderr = stderr.join().unwrap_or_default();
+    if !status.success() {
+        let msg = if stderr.trim().is_empty() { &stdout } else { &stderr };
+        return Err(StoppableError::Failed(AppError::Other(format!(
+            "git {} failed: {}",
+            args.first().unwrap_or(&""),
+            msg.trim()
+        ))));
+    }
+    let out = GitOutput { stdout, stderr };
+    log_stderr(args, &out);
+    Ok(out)
+}
+
+/// End a git process and everything it started. A fetch runs its transport
+/// (`git-remote-https`, ssh, a credential helper) as child processes, and
+/// ending only git would leave those holding the connection open.
+fn kill_tree(child: &mut std::process::Child) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let _ = Command::new("taskkill")
+            .args(["/T", "/F", "/PID", &child.id().to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+    }
+    let _ = child.kill();
 }
 
 pub fn git_available() -> bool {
@@ -445,9 +576,17 @@ mod credential_trace_tests {
                 "{args:?}"
             );
             assert_eq!(
-                args.len(),
-                4,
+                args.iter()
+                    .filter(|a| a.starts_with("credential.helper="))
+                    .count(),
+                2,
                 "exactly one helper after the reset: {args:?}"
+            );
+            // Without the path the helper can only remember a refusal for the
+            // whole host, which switched the connected account off everywhere.
+            assert!(
+                args.contains(&"credential.useHttpPath=true".to_string()),
+                "{args:?}"
             );
 
             // The path is quoted because a default Windows install sits under
@@ -510,5 +649,42 @@ mod credential_trace_tests {
     #[test]
     fn background_suppression_uses_the_helpers_own_variable() {
         assert_eq!(GCM_NON_INTERACTIVE, ("GCM_INTERACTIVE", "never"));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::AtomicBool;
+    use std::time::{Duration, Instant};
+
+    use super::*;
+
+    /// A git run that would take 30 seconds. The alias runs through git's
+    /// shell, so the sleep is a grandchild process, the case a plain kill
+    /// would leave behind.
+    const SLOW: &[&str] = &["-c", "alias.nap=!sleep 30", "nap"];
+
+    #[test]
+    fn stop_ends_a_running_git_at_once() {
+        let cancel = AtomicBool::new(true);
+        let started = Instant::now();
+        let result = run_git_stoppable(None, SLOW, true, Some(&cancel), Duration::from_secs(60));
+        assert!(matches!(result, Err(StoppableError::Cancelled)), "{result:?}");
+        assert!(started.elapsed() < Duration::from_secs(10), "stop must not wait for git");
+    }
+
+    #[test]
+    fn a_run_past_its_time_limit_is_ended() {
+        let started = Instant::now();
+        let result = run_git_stoppable(None, SLOW, true, None, Duration::from_millis(300));
+        assert!(matches!(result, Err(StoppableError::TimedOut)), "{result:?}");
+        assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    #[test]
+    fn a_normal_run_returns_its_output() {
+        let out = run_git_stoppable(None, &["--version"], true, None, Duration::from_secs(60))
+            .expect("git --version");
+        assert!(out.stdout.starts_with("git version"));
     }
 }

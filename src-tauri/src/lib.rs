@@ -32,6 +32,7 @@ pub use ai::agent::copilot_cli as agent_copilot_cli;
 pub use commands::staging::discard_everything;
 pub use error::AppError;
 pub use git::graph as git_graph;
+pub use git::head_attach as git_head_attach;
 /// Exposed alongside [`discard_everything`], which now takes a progress sink:
 /// the integration test cannot call it without being able to build one.
 pub use git::progress as git_progress;
@@ -77,6 +78,11 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::external::open_solution_in_visual_studio,
             commands::external::open_in_terminal,
             commands::external::open_in_opencode,
+            commands::mehen::mehen_overview,
+            commands::mehen::mehen_push_note,
+            commands::mehen::open_in_mehen,
+            commands::mehen::mehen_refresh_if_stale,
+            commands::mehen::mehen_repo_changed,
             commands::opencode::opencode_available,
             commands::openspec::openspec_recheck_cli,
             commands::agent_providers::agent_providers_list,
@@ -226,7 +232,12 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::remote::git_pull,
             commands::remote::git_push,
             commands::remote::git_push_branch,
+            commands::remote::git_push_branch_force,
             commands::remote::git_pull_branch,
+            commands::update_all::pull_branches,
+            commands::update_all::update_all_start,
+            commands::update_all::update_all_cancel,
+            commands::update_all::update_all_state,
             commands::remote::set_branch_upstream,
             commands::remote::git_push_force,
             commands::remote::git_rebase,
@@ -299,6 +310,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::github::github_merge_pr,
             commands::github::github_close_pr,
             commands::github::github_close_issue,
+            commands::github::host_release_for_tag,
+            commands::github::host_delete_release,
             commands::github::github_ssh_key_pairings,
             commands::airun::ai_run_start_demo,
             commands::airun::ai_run_answer_gate,
@@ -441,6 +454,125 @@ const SENTRY_DSN: &str = "https://543d8fb8597dad94c5d0bef310ad046f@o451176023090
 /// - `Full` adds performance traces on top.
 ///
 /// Mirrors the frontend `initSentry`, which makes the same split.
+/// Collapse a log message to the shape of the failure, for issue grouping.
+///
+/// Sentry groups on the fingerprint we hand it, so this decides what counts as
+/// "the same bug". Two competing failure modes to stay between:
+///
+///   - Too coarse and everything lands in one issue, which is the bug this
+///     exists to fix (one `log::error!` site for the whole app).
+///   - Too fine and one bug fragments into an issue per repo path, per url, per
+///     sha -- a queue nobody can read, and resolving any one of them means
+///     nothing.
+///
+/// So: drop the parts that vary between two reports of the SAME failure, keep
+/// the wording that distinguishes different failures. `could not rmdir '<path>'`
+/// and `cannot locate local branch '<name>'` stay distinct; the same rmdir
+/// against two different directories does not.
+fn fingerprint_key(message: &str) -> String {
+    let mut out = String::with_capacity(message.len());
+    let mut chars = message.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            // Quoted spans are almost always the variable subject (a path, a
+            // branch, a url, a model name). Keep the quotes so the shape of the
+            // sentence survives.
+            '\'' | '"' => {
+                out.push('\'');
+                for q in chars.by_ref() {
+                    if q == '\'' || q == '"' {
+                        break;
+                    }
+                }
+                out.push('\'');
+            }
+            // Any run of digits: line numbers, ports, status codes, counts. A 400
+            // and a 500 from the same endpoint are the same call site failing, and
+            // the status is preserved in the event body either way.
+            d if d.is_ascii_digit() => {
+                while chars.peek().is_some_and(|n| n.is_ascii_digit()) {
+                    chars.next();
+                }
+                out.push('#');
+            }
+            _ => out.push(c),
+        }
+    }
+    // Windows and posix paths reach here unquoted often enough to matter.
+    let collapsed: String = out
+        .split_whitespace()
+        .map(|word| {
+            if word.contains('/') || word.contains('\\') {
+                "<path>"
+            } else {
+                word
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    collapsed.to_lowercase()
+}
+
+/// Where the updater plugin's own log records come from. `log::error!` with no
+/// explicit target uses the module path, so every record the plugin writes is
+/// under this prefix (`tauri_plugin_updater::updater` in 2.12).
+const UPDATER_LOG_TARGET: &str = "tauri_plugin_updater";
+
+/// Whether a log record is the updater plugin saying the network would not
+/// carry its request.
+///
+/// The plugin logs `failed to check for updates: error sending request for url
+/// (...latest.json)` at `error` itself, before handing the same error back to
+/// us. Our own copy of that error is already classed as expected (error.rs), but
+/// the plugin's line reaches SentryLogger directly, so every offline launch and
+/// every two-hourly check on a flaky connection filed a Sentry issue
+/// (GITWYRM-BACKEND-E). reqwest words every connect, DNS and timeout failure in
+/// the send phase as "error sending request for url"; an HTTP error status or a
+/// bad manifest is worded differently and still reports.
+fn is_updater_network_failure(record: &log::Record<'_>) -> bool {
+    // Target first, so no other record pays for formatting its message.
+    record.target().starts_with(UPDATER_LOG_TARGET)
+        && record
+            .args()
+            .to_string()
+            .to_lowercase()
+            .contains("error sending request for url")
+}
+
+/// How each log record reaches Sentry: the SDK's default split (errors become
+/// events, warn/info breadcrumbs), except that the updater plugin's network
+/// failures are kept as breadcrumbs instead of events. They still give context
+/// to a real error that follows, and they still reach the log file.
+fn sentry_mapping(record: &log::Record<'_>) -> Vec<sentry_log::RecordMapping> {
+    use sentry_log::{LogFilter, RecordMapping};
+
+    let mut filter = sentry_log::default_filter(record.metadata());
+    let downgrade = filter.contains(LogFilter::Exception) && is_updater_network_failure(record);
+    if downgrade {
+        filter.remove(LogFilter::Exception);
+        filter.insert(LogFilter::Breadcrumb);
+    }
+
+    let mut items = Vec::new();
+    if filter.contains(LogFilter::Breadcrumb) {
+        let mut crumb = sentry_log::breadcrumb_from_record(record);
+        if downgrade {
+            crumb.level = sentry::Level::Warning;
+        }
+        items.push(RecordMapping::Breadcrumb(crumb));
+    }
+    if filter.contains(LogFilter::Event) {
+        items.push(RecordMapping::Event(Box::new(sentry_log::event_from_record(record))));
+    }
+    if filter.contains(LogFilter::Exception) {
+        items.push(RecordMapping::Event(Box::new(sentry_log::exception_from_record(record))));
+    }
+    if filter.contains(LogFilter::Log) {
+        items.push(RecordMapping::Log(sentry_log::log_from_record(record)));
+    }
+    items
+}
+
 fn init_sentry() -> Option<sentry::ClientInitGuard> {
     if cfg!(debug_assertions) {
         return None;
@@ -469,6 +601,53 @@ fn init_sentry() -> Option<sentry::ClientInitGuard> {
         // becomes a Sentry event via SentryLogger, and those messages embed repo
         // paths, author emails, and provider error bodies. Scrub on the way out.
         .before_send(|mut event: sentry::protocol::Event| {
+            // Group by WHAT failed, not by where it was logged.
+            //
+            // Every AppError in the app funnels through one Serialize impl
+            // (error.rs), which means one `log::error!` call site, and
+            // SentryLogger events carry no fingerprint of their own -- so Sentry
+            // fell back to the log origin and filed the entire application into a
+            // SINGLE issue. GITWYRM-BACKEND-2 held 555 events spanning git index
+            // corruption, Copilot RPC failures, Anthropic 400s, "no remote to push
+            // to", rebase conflicts and a locked directory, all under whichever
+            // title happened to arrive last.
+            //
+            // That is worse than noisy, it is actively misleading: resolving the
+            // issue for one of those bugs silences all the others, and the issue
+            // reopens on an unrelated failure. Both happened (see the triage notes
+            // on GITWYRM-BACKEND-2/6).
+            //
+            // Fingerprint on the NORMALIZED message so the variable parts -- paths,
+            // urls, shas, quoted names, numbers -- do not fragment one bug into
+            // hundreds of issues, which is the opposite failure and just as bad.
+            //
+            // A PANIC carries its text in the exception value, not in
+            // `event.message`, so it used to reach here with nothing to
+            // fingerprint on and fell back to Sentry's default - which groups by
+            // a symbolicated frame. On Windows those frames are frequently
+            // wrong: a tao event-loop panic arrived titled `git_odb_object_data`,
+            // with libgit2 symbols interleaved through what is plainly a Win32
+            // message loop (SendMessageW / CallWindowProcW / DefSubclassProc).
+            // The symbolicator had picked the nearest exported symbol from the
+            // wrong module, and the issue title pointed at git for a windowing
+            // bug (GITWYRM-BACKEND-8).
+            //
+            // The exception TYPE and VALUE are the honest identity of a panic, so
+            // use them when there is no message.
+            let identity = event
+                .message
+                .as_deref()
+                .map(str::to_owned)
+                .or_else(|| {
+                    event.exception.iter().next().map(|e| {
+                        let value = e.value.as_deref().unwrap_or("");
+                        format!("{} {}", e.ty, value)
+                    })
+                });
+            if let Some(identity) = identity {
+                event.fingerprint =
+                    std::borrow::Cow::Owned(vec![std::borrow::Cow::Owned(fingerprint_key(&identity))]);
+            }
             if let Some(message) = event.message.take() {
                 event.message = Some(scrub::scrub_text(&message));
             }
@@ -510,25 +689,27 @@ fn init_sentry() -> Option<sentry::ClientInitGuard> {
     // investigation turned out to be unreachable: `SentryLogger` maps info! to a
     // breadcrumb, breadcrumbs only ride along on an error event from the same
     // process, and the user's bug report is submitted by the FRONTEND SDK -- so
-    // the backend's diagnostics never travelled with it. Two gates were off at
-    // once: the `logs` cargo feature, and this option. With either missing,
-    // `Client::capture_log` returns early and the record is dropped, not queued.
+    // the backend's diagnostics never travelled with it.
     //
     // Gated on `reports_diagnostics` (Full), not on error reporting: logs are a
     // per-record stream far chattier than events, and someone who opted into
-    // "report errors" did not ask to ship their activity. `before_send_log`
-    // scrubs on the way out, exactly as `before_send` does for events -- a log
-    // line embeds repo paths and provider error bodies just as readily.
-    let options = if level.reports_diagnostics() {
-        options
-            .enable_logs(true)
-            .before_send_log(|mut log: sentry::protocol::Log| {
-                log.body = scrub::scrub_text(&log.body);
-                Some(log)
-            })
-    } else {
-        options
-    };
+    // "report errors" did not ask to ship their activity.
+    //
+    // The gate lives in `before_send_log`, never in `enable_logs`. The SDK
+    // defaults `enable_logs` to true, and 0.49.3 deprecated it and stopped
+    // honoring it for manually captured logs, so leaving it unset at the lower
+    // level shipped every log line - unscrubbed, because the scrubber was only
+    // installed at Full. `before_send_log` runs on every log whatever the
+    // version, so it both drops them below Full and scrubs them at Full, exactly
+    // as `before_send` does for events.
+    let ship_logs = level.reports_diagnostics();
+    let options = options.before_send_log(move |mut log: sentry::protocol::Log| {
+        if !ship_logs {
+            return None;
+        }
+        log.body = scrub::scrub_text(&log.body);
+        Some(log)
+    });
 
     Some(sentry::init((SENTRY_DSN, options)))
 }
@@ -766,7 +947,7 @@ pub fn run() {
                 Err(e) => eprintln!("could not open the log file: {e}"),
             }
             let (_plugin, max_level, logger) = builder.split(app.handle())?;
-            let bridged = sentry_log::SentryLogger::with_dest(logger);
+            let bridged = sentry_log::SentryLogger::with_dest(logger).mapper(sentry_mapping);
             tauri_plugin_log::attach_logger(max_level, Box::new(bridged))?;
 
             let info = commands::app::build_info();
@@ -795,6 +976,8 @@ pub fn run() {
             // sit outside the install directory so an app update leaves them alone;
             // see git::toolset. Absent in dev and before the first download, where
             // the system tools are used instead.
+            #[cfg(windows)]
+            git::toolset_fetch::finish_staged_install();
             let bundle_root = git::toolset::toolset_dir().filter(|dir| dir.is_dir());
             git::bundled::set_bundle_root(bundle_root);
 
@@ -822,11 +1005,22 @@ pub fn run() {
             // to Interrupted, and this sweep would then never see them.
             commands::agent_result::recover_orphaned_executions_on_startup(app.handle());
 
+            // Delete update-cover copies that earlier updates left in the temp
+            // folder. Delayed so the copy covering this very launch's update has
+            // closed and can go too; on its own thread so a crowded temp folder
+            // costs startup nothing.
+            #[cfg(windows)]
+            std::thread::spawn(|| {
+                std::thread::sleep(std::time::Duration::from_secs(30));
+                commands::updates::sweep_stale_update_helpers();
+            });
+
             // Stash any folder Explorer passed us. The webview does not exist yet, so
             // this waits in a slot for the frontend to collect once it is ready.
             commands::app::set_pending_launch_path(commands::app::repo_path_from_args(
                 std::env::args(),
             ));
+            commands::mehen::watch_status_file(app.handle().clone());
             Ok(())
         })
         .manage(crate::airun::SessionRegistry::new())
@@ -835,9 +1029,169 @@ pub fn run() {
         .manage(agentdesk::ExecutionRegistry::new())
         .manage(std::sync::Arc::new(agentdesk::SessionLocks::new()))
         .manage(RepoManager::default())
+        .manage(commands::update_all::UpdateAllJobs::default())
         .manage(WatcherRegistry::default())
         .manage(commands::updates::PendingUpdate::default())
         .invoke_handler(builder.invoke_handler())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod sentry_mapping_tests {
+    use super::sentry_mapping;
+    use sentry_log::RecordMapping;
+
+    /// (events, breadcrumbs) produced for one log record.
+    fn outcome(level: log::Level, target: &str, message: &str) -> (usize, usize) {
+        let items = sentry_mapping(
+            &log::Record::builder()
+                .level(level)
+                .target(target)
+                .args(format_args!("{message}"))
+                .build(),
+        );
+        let mut events = 0;
+        let mut crumbs = 0;
+        for item in items {
+            match item {
+                RecordMapping::Event(_) => events += 1,
+                RecordMapping::Breadcrumb(_) => crumbs += 1,
+                _ => {}
+            }
+        }
+        (events, crumbs)
+    }
+
+    /// Verbatim shape of GITWYRM-BACKEND-E: the plugin's own line for an update
+    /// check that never reached the server.
+    #[test]
+    fn an_offline_update_check_is_a_breadcrumb_not_an_event() {
+        let got = outcome(
+            log::Level::Error,
+            "tauri_plugin_updater::updater",
+            "failed to check for updates: error sending request for url (https://github.com/o/r/releases/latest/download/latest.json)",
+        );
+        assert_eq!(got, (0, 1));
+    }
+
+    /// Anything else the plugin logs at error still reports.
+    #[test]
+    fn other_updater_errors_still_report() {
+        let got = outcome(
+            log::Level::Error,
+            "tauri_plugin_updater::updater",
+            "update endpoint did not respond with a successful status code",
+        );
+        assert_eq!(got, (1, 0));
+    }
+
+    /// The same words from our own code are not the plugin's: error.rs decides
+    /// those, and this mapping leaves every other error an event.
+    #[test]
+    fn the_same_words_elsewhere_are_untouched() {
+        let got = outcome(
+            log::Level::Error,
+            "gitwyrm_lib::error",
+            "Command failed: error sending request for url (https://api.github.com/)",
+        );
+        assert_eq!(got, (1, 0));
+    }
+
+    #[test]
+    fn warnings_and_debug_keep_the_default_split() {
+        assert_eq!(outcome(log::Level::Warn, "gitwyrm_lib", "x"), (0, 1));
+        assert_eq!(outcome(log::Level::Debug, "gitwyrm_lib", "x"), (0, 0));
+    }
+}
+
+#[cfg(test)]
+mod fingerprint_tests {
+    use super::fingerprint_key;
+
+    /// The bug this fingerprint exists to fix: every AppError logs from one call
+    /// site, so without a fingerprint Sentry filed unrelated failures into a
+    /// single issue (GITWYRM-BACKEND-2 held 555 of them). These must not group.
+    #[test]
+    fn unrelated_failures_group_separately() {
+        let distinct = [
+            "Command failed: git error: cannot locate local branch 'origin/development'; class=Reference (4); code=NotFound (-3)",
+            "Command failed: git error: could not rmdir 'C:/Code/EmailService/': The process cannot access the file because it is being used by another process.",
+            "Command failed: git error: invalid data in index - incorrect header signature; class=Index (10)",
+            "Command failed: This repository has no remote to push to.",
+            "Command failed: working tree has changes; commit or stash before merging",
+            "Command failed: resolve all conflicts before continuing the rebase",
+        ];
+        for (i, a) in distinct.iter().enumerate() {
+            for b in distinct.iter().skip(i + 1) {
+                assert_ne!(
+                    fingerprint_key(a),
+                    fingerprint_key(b),
+                    "these must not share an issue:\n  {a}\n  {b}"
+                );
+            }
+        }
+    }
+
+    /// The opposite failure, and just as bad: one bug fragmenting into an issue
+    /// per path/branch/sha produces a queue nobody can read.
+    #[test]
+    fn same_failure_groups_despite_varying_subject() {
+        assert_eq!(
+            fingerprint_key("could not rmdir 'C:/Code/EmailService/'"),
+            fingerprint_key("could not rmdir 'D:/other/repo/'")
+        );
+        assert_eq!(
+            fingerprint_key("cannot locate local branch 'origin/development'"),
+            fingerprint_key("cannot locate local branch 'origin/main'")
+        );
+    }
+
+    /// Status codes and other numbers vary per occurrence of one call site
+    /// failing; the real value stays in the event body.
+    #[test]
+    fn numbers_do_not_fragment_a_group() {
+        assert_eq!(
+            fingerprint_key("AI request failed (400 Bad Request)"),
+            fingerprint_key("AI request failed (503 Bad Request)")
+        );
+    }
+
+    /// A panic's identity is its type + value, NOT a symbolicated frame.
+    ///
+    /// Windows symbolication is frequently wrong for third-party frames - a tao
+    /// event-loop panic arrived labelled `git_odb_object_data` with libgit2
+    /// symbols interleaved through a Win32 message loop (GITWYRM-BACKEND-8). Two
+    /// panics with the same message must group together however their stacks are
+    /// (mis)labelled.
+    #[test]
+    fn a_panic_groups_by_its_message_not_its_frames() {
+        assert_eq!(
+            fingerprint_key("panic cannot move state from Destroyed"),
+            fingerprint_key("panic cannot move state from Destroyed")
+        );
+        // Different panics stay apart.
+        assert_ne!(
+            fingerprint_key("panic cannot move state from Destroyed"),
+            fingerprint_key("panic called `Option::unwrap()` on a `None` value")
+        );
+    }
+
+    /// Unquoted paths appear often enough in git and OS errors to matter.
+    #[test]
+    fn unquoted_paths_collapse() {
+        assert_eq!(
+            fingerprint_key(r"failed to open C:\Code\one\.git"),
+            fingerprint_key(r"failed to open D:\src\two\.git")
+        );
+    }
+
+    /// Differing wording must survive normalization, or distinct bugs merge.
+    #[test]
+    fn wording_still_distinguishes() {
+        assert_ne!(
+            fingerprint_key("git push failed: repository not found"),
+            fingerprint_key("git fetch failed: repository not found")
+        );
+    }
 }

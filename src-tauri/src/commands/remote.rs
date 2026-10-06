@@ -12,7 +12,8 @@ use tauri::{AppHandle, Emitter, State};
 use crate::error::AppError;
 use crate::git::refs;
 use crate::git::shell::Attended;
-use crate::git::submodule::follow_and_report;
+use crate::git::head_attach::{attach_head, AttachMode, AttachOutcome};
+use crate::git::submodule::{follow_and_report, recorded_pins};
 use crate::git::types::{
     PullResult, PushResult, RebaseResult, RemoteBranchInfo, RemoteInfo, RemoteTagInfo, UnpushedTag,
 };
@@ -277,6 +278,139 @@ fn humanize_credential_failure(detail: &str, stderr_lines: &[String]) -> Option<
     })
 }
 
+/// Say why an SSH remote could not be reached.
+///
+/// Every SSH transport failure ends with the same line, `fatal: Could not read
+/// from remote repository.`, and `failure_detail` rightly picks that `fatal:`
+/// line over the untagged one ssh printed above it. But the ssh line is the
+/// only part that says what went wrong: a key the host refused, a host this
+/// computer has never confirmed, or a network that never answered. Without it,
+/// one machine's background fetch of a single repository filed the identical
+/// bare sentence 158 times in three days (GITWYRM-BACKEND-C), with nothing in
+/// any of them to say which of those it was - and the user saw the same line.
+///
+/// The three known causes are the user's setup, not a fault, so they are put in
+/// the same words the rest of the app uses for a refused sign-in and an
+/// unreachable network. Anything else keeps the generic line, still reported,
+/// with ssh's own reason appended so the next report names the cause.
+fn humanize_ssh_failure(detail: &str, stderr_lines: &[String]) -> Option<String> {
+    if !detail
+        .to_lowercase()
+        .contains("could not read from remote repository")
+    {
+        return None;
+    }
+
+    let lowered: Vec<String> = stderr_lines.iter().map(|l| l.to_lowercase()).collect();
+    let said = |needles: &[&str]| lowered.iter().any(|l| needles.iter().any(|n| l.contains(n)));
+    let host = ssh_host(stderr_lines);
+    let host = host.as_deref().unwrap_or("the server");
+
+    // The host refused every key offered: none set up, the wrong one, or one
+    // with a passphrase ssh could not ask for because nobody is at a terminal.
+    if said(&[
+        "permission denied (publickey",
+        "permission denied, please try again",
+        "too many authentication failures",
+        "no supported authentication methods",
+    ]) {
+        return Some(format!(
+            "Sign-in needed for {host}: it did not accept the SSH key on this computer. Check your keys in Settings > Security, then try again."
+        ));
+    }
+
+    // The first connection to a host asks to confirm who it is, and with no
+    // terminal there is nobody to answer. Testing the host in Settings adds a new
+    // host safely, and still refuses one whose identity has changed.
+    if said(&[
+        "host key verification failed",
+        "remote host identification has changed",
+        "host key is known for",
+    ]) {
+        return Some(format!(
+            "Sign-in needed for {host}: this computer has not confirmed who that server is yet. Test the connection in Settings > Security, then try again."
+        ));
+    }
+
+    if said(&[
+        "could not resolve hostname",
+        "connection timed out",
+        "operation timed out",
+        "connection refused",
+        "network is unreachable",
+        "no route to host",
+        "connection closed by",
+        "connection reset",
+        "kex_exchange_identification",
+    ]) {
+        return Some(format!(
+            "Failed to connect to {host}. Check your internet or VPN connection, then try again."
+        ));
+    }
+
+    // Unknown cause: keep the generic line (and keep reporting it), but carry
+    // whatever ssh said first, so the report explains itself.
+    let reason = stderr_lines.iter().map(|l| l.trim()).find(|l| {
+        let low = l.to_lowercase();
+        !low.is_empty()
+            && !low.contains('%')
+            && !low.contains("could not read from remote repository")
+            && !low.starts_with("please make sure you have the correct access rights")
+            && !low.starts_with("and the repository exists")
+    })?;
+    Some(format!("{detail} ({reason})"))
+}
+
+/// The host an ssh error names, when it names one.
+///
+/// ssh words it three ways: `git@github.com: Permission denied (publickey).`,
+/// `ssh: connect to host github.com port 22: ...`, and `ssh: Could not resolve
+/// hostname github.com: ...`.
+fn ssh_host(stderr_lines: &[String]) -> Option<String> {
+    for line in stderr_lines {
+        let line = line.trim();
+        // ASCII-only lowering keeps byte offsets identical, so an index found in
+        // `low` is always a valid slice point in `line`.
+        let low = line.to_ascii_lowercase();
+        let found = if let Some(at) = low.find("connect to host ") {
+            line[at + "connect to host ".len()..].split_whitespace().next()
+        } else if let Some(at) = low.find("resolve hostname ") {
+            line[at + "resolve hostname ".len()..]
+                .split(|c: char| c == ':' || c.is_whitespace())
+                .next()
+        } else if let Some(at) = low.find("host key is known for ") {
+            line[at + "host key is known for ".len()..].split_whitespace().next()
+        } else if low.contains("permission denied") {
+            line.split_once(": ")
+                .map(|(who, _)| who)
+                .and_then(|who| who.rsplit_once('@'))
+                .map(|(_, host)| host)
+        } else {
+            None
+        };
+        if let Some(host) = found.map(|h| h.trim_end_matches(['.', ':'])) {
+            if !host.is_empty() {
+                return Some(host.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Say so when git's own install is broken, usually because it is mid-update.
+///
+/// Git for Windows starts through a small launcher in `bin\git.exe` that runs
+/// the real program under `mingw64`. When that program is missing the launcher
+/// would start itself, and refuses with `BUG (fork bomb): <path>`. Seen in a
+/// two-minute burst on one machine (GITWYRM-BACKEND-J, with K and M beside it)
+/// while the system gitconfig had also vanished: Git was being reinstalled
+/// under the running app.
+fn humanize_git_install_failure(detail: &str) -> Option<String> {
+    detail.to_lowercase().contains("bug (fork bomb)").then(|| {
+        "Git could not start one of its own programs. This happens while Git is being installed or updated - wait for that to finish, then try again.".to_string()
+    })
+}
+
 fn run_streaming(
     app: &AppHandle,
     repo_id: &str,
@@ -405,7 +539,34 @@ fn run_streaming_with(
 
     if !output.status.success() {
         let detail = failure_detail(&stderr_lines, &stdout);
-        let detail = humanize_credential_failure(&detail, &stderr_lines).unwrap_or(detail);
+        // A detail that is still one of git's example commands means the cause
+        // line was not recognised: either an advisory whose opening sentence is
+        // missing from UNTAGGED_CAUSES, or one this build never saw because the
+        // output was localized or truncated. Reported as a bare `git pull
+        // <remote> <branch>` six times on 0.12.0, which already carried the
+        // no-upstream fix, so the shape that escapes is NOT the one we know and
+        // could not be reproduced locally. Log the whole stderr when it happens;
+        // the next occurrence then says which line to add.
+        if detail.starts_with("git ") && detail.contains('<') {
+            log::warn!(
+                "unrecognised git advisory for {operation}; reported \"{detail}\" from stderr: {:?}",
+                stderr_lines
+            );
+        }
+        let detail = humanize_credential_failure(&detail, &stderr_lines)
+            .or_else(|| humanize_ssh_failure(&detail, &stderr_lines))
+            .or_else(|| humanize_git_install_failure(&detail))
+            .unwrap_or(detail);
+        // git exited without printing anything. The exit code is then the only
+        // clue (GITWYRM-BACKEND-M reported a bare "git fetch failed:").
+        let detail = if detail.is_empty() {
+            match output.status.code() {
+                Some(code) => format!("git stopped without saying why (exit code {code})"),
+                None => "git stopped without saying why".to_string(),
+            }
+        } else {
+            detail
+        };
         return Err(AppError::Other(format!("git {operation} failed: {detail}")));
     }
     Ok(stdout)
@@ -444,11 +605,32 @@ pub async fn git_fetch(
             "fetch",
             &["fetch", "--all", "--prune", "--progress"],
             attended,
-        )?;
+        )
+        .map_err(|e| quiet_when_unattended(e, attended))?;
         Ok(())
     })
     .await
     .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// Keep a background fetch's failure out of Sentry unless it is a real fault.
+///
+/// The sweep fetches every open repository on a timer. A remote that refuses
+/// the key, a network that drops, or a Git install being updated underneath
+/// the app fails the same way on every pass: one machine filed the same SSH
+/// failure 258 times (GITWYRM-BACKEND-C). None of it is ours to fix, and the
+/// user did not ask for the fetch, so it is shown beside the Fetch button and
+/// logged as a warning instead. Damaged repository data still reports.
+fn quiet_when_unattended(e: AppError, attended: Attended) -> AppError {
+    match e {
+        AppError::Other(message)
+            if attended == Attended::Background
+                && !crate::error::looks_like_corruption(&message) =>
+        {
+            AppError::Unattended(message)
+        }
+        other => other,
+    }
 }
 
 /// The remote-tracking ref a failed fetch/pull could not lock, if that is what
@@ -498,6 +680,127 @@ fn run_with_stale_ref_retry(
     }
 }
 
+/// Why [`fetch_all_at`] could not bring a repository's remotes up to date.
+#[derive(Debug)]
+pub(crate) struct FetchFailure {
+    /// Plain-language reason, safe to show as is.
+    pub message: String,
+    /// The server wanted a sign-in that did not happen. Kept apart from other
+    /// failures so the caller can offer a retry that is allowed to prompt.
+    pub needs_sign_in: bool,
+    /// The caller asked to stop, and the fetch was ended part way. Not a
+    /// failure: nothing was changed and the repository was simply not checked.
+    pub stopped: bool,
+}
+
+/// Longest a single fetch in a multi-repository run may take. Generous for a
+/// big download, but a server that never answers (or a sign-in prompt with
+/// nobody to answer it) must not hold the whole run open.
+const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
+/// Fetch every remote of the repository at `path`, without streaming progress.
+///
+/// For work that runs over many repositories at once, most of them not open,
+/// where per-line progress would flood the webview and has no tab to land in.
+/// `Attended::Background` never opens a login window. Shares the stale
+/// tracking-ref recovery and the failure wording with the streaming path.
+///
+/// Setting `cancel` ends a fetch in progress, and every fetch is ended after
+/// [`FETCH_TIMEOUT`].
+pub(crate) fn fetch_all_at(
+    path: &str,
+    attended: Attended,
+    cancel: Option<&std::sync::atomic::AtomicBool>,
+) -> Result<(), FetchFailure> {
+    use crate::git::shell::StoppableError;
+
+    let run = || {
+        let cred = crate::git::shell::credential_args(attended);
+        let mut args: Vec<&str> = cred.iter().map(String::as_str).collect();
+        args.extend_from_slice(&["fetch", "--all", "--prune"]);
+        crate::git::shell::run_git_stoppable(
+            Some(path),
+            &args,
+            attended == Attended::Background,
+            cancel,
+            FETCH_TIMEOUT,
+        )
+    };
+
+    let result = match run() {
+        Err(StoppableError::Failed(e)) => match stale_remote_ref(&e.to_string()) {
+            Some(stale) => {
+                log::warn!("update-all fetch blocked by stale tracking ref {stale}; clearing it");
+                match crate::git::shell::run_git(Some(path), &["update-ref", "-d", &stale]) {
+                    Ok(_) => run(),
+                    Err(e) => Err(StoppableError::Failed(e)),
+                }
+            }
+            None => Err(StoppableError::Failed(e)),
+        },
+        other => other,
+    };
+
+    let e = match result {
+        Ok(_) => return Ok(()),
+        Err(StoppableError::Cancelled) => {
+            return Err(FetchFailure {
+                message: "Stopped before it finished.".into(),
+                needs_sign_in: false,
+                stopped: true,
+            })
+        }
+        Err(StoppableError::TimedOut) => {
+            log::warn!("update-all fetch of {path} timed out");
+            return Err(FetchFailure {
+                message: "The server took too long to answer, so this project was skipped.".into(),
+                needs_sign_in: false,
+                stopped: false,
+            });
+        }
+        Err(StoppableError::Failed(e)) => e,
+    };
+
+    Err({
+        let raw = e.to_string();
+        // run_git reports `git <first arg> failed: <stderr>`, and the first
+        // argument here is a `-c` override, so keep only what git printed.
+        let stderr = raw.split_once("failed: ").map(|(_, r)| r).unwrap_or(&raw);
+        let lines: Vec<String> = stderr
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(str::to_string)
+            .collect();
+        let detail = failure_detail(&lines, "");
+        let low = stderr.to_lowercase();
+        let needs_sign_in = low.contains("could not read username")
+            || low.contains("could not read password")
+            || low.contains("terminal prompts disabled")
+            || low.contains("authentication failed")
+            || low.contains("permission denied (publickey)");
+        let message = humanize_credential_failure(&detail, &lines)
+            .or_else(|| humanize_ssh_failure(&detail, &lines))
+            .or_else(|| humanize_git_install_failure(&detail))
+            .unwrap_or_else(|| {
+            if needs_sign_in {
+                "The server wants you to sign in before it will send anything.".to_string()
+            } else if low.contains("dubious ownership") {
+                "Git will not work in this folder because a different Windows account owns it. This often happens with projects on a second drive.".to_string()
+            } else if low.contains("could not resolve host") || low.contains("unable to access") {
+                "Could not reach the server. Check your internet or VPN connection.".to_string()
+            } else {
+                detail
+            }
+        });
+        FetchFailure {
+            message,
+            needs_sign_in,
+            stopped: false,
+        }
+    })
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn git_pull(
@@ -509,7 +812,37 @@ pub async fn git_pull(
     let path = open.path.to_string_lossy().into_owned();
     tauri::async_runtime::spawn_blocking(move || {
         let _timing = crate::perf::CommandTiming::start("git_pull", "git.pull");
+        let pins_before = recorded_pins(&open.repo.lock().unwrap());
+
+        // A detached checkout -- what `git submodule update` leaves in every
+        // submodule -- has no branch to pull into, and git refuses outright. Put it
+        // on the branch its commit belongs to first; that branch then catches up
+        // like any other.
+        let attached = {
+            let repo = open.repo.lock().unwrap();
+            match attach_head(&repo, &path, None, AttachMode::MayMoveForward) {
+                AttachOutcome::AlreadyOnBranch => None,
+                AttachOutcome::Attached { branch, .. } => Some(branch),
+                AttachOutcome::NotAttached { reason } => return Err(AppError::Other(reason)),
+            }
+        };
+
         let before = { tracking_state(&open.repo.lock().unwrap()) };
+
+        // Attaching can land on a branch with commits of its own AND new ones on
+        // the remote. Combining those is a choice the user makes in the sync
+        // dialog, so stop here and hand it back rather than letting git pick.
+        if attached.is_some() && before.ahead > 0 && before.behind > 0 {
+            return Ok(PullResult {
+                branch: before.branch,
+                upstream: before.upstream,
+                received: 0,
+                ahead_after: before.ahead,
+                submodules: Vec::new(),
+                attached,
+                needs_choice: true,
+            });
+        }
 
         // `--autostash` is what keeps a pull from ever failing just because the
         // working tree is dirty. Without it git refuses the whole operation with
@@ -536,7 +869,7 @@ pub async fn git_pull(
         // pulled, setting aside any edits inside it first.
         let submodules = {
             let repo = open.repo.lock().unwrap();
-            follow_and_report(&repo, &path, "pull")
+            follow_and_report(&repo, &path, "pull", &pins_before)
         };
 
         let after = { tracking_state(&open.repo.lock().unwrap()) };
@@ -550,6 +883,8 @@ pub async fn git_pull(
             received,
             ahead_after: after.ahead,
             submodules,
+            attached,
+            needs_choice: false,
         })
     })
     .await
@@ -671,6 +1006,30 @@ pub async fn git_push_branch(
     repo_id: String,
     branch: String,
 ) -> Result<PushResult, AppError> {
+    push_named_branch(app, manager, repo_id, branch, false).await
+}
+
+/// Force-push a named local branch with `--force-with-lease`, which need not be
+/// the one checked out. For a branch rebased or rewound away from its upstream;
+/// the lease still refuses to overwrite remote commits that were never fetched.
+#[tauri::command]
+#[specta::specta]
+pub async fn git_push_branch_force(
+    app: AppHandle,
+    manager: State<'_, RepoManager>,
+    repo_id: String,
+    branch: String,
+) -> Result<PushResult, AppError> {
+    push_named_branch(app, manager, repo_id, branch, true).await
+}
+
+async fn push_named_branch(
+    app: AppHandle,
+    manager: State<'_, RepoManager>,
+    repo_id: String,
+    branch: String,
+    force: bool,
+) -> Result<PushResult, AppError> {
     let open = manager.get(&repo_id)?;
     let path = open.path.to_string_lossy().into_owned();
     tauri::async_runtime::spawn_blocking(move || {
@@ -697,6 +1056,9 @@ pub async fn git_push_branch(
         // happens to be checked out.
         let refspec = format!("refs/heads/{branch}");
         let mut args: Vec<&str> = vec!["push", "--progress"];
+        if force {
+            args.push("--force-with-lease");
+        }
         // Link on a first publish, and also when the upstream ref went missing:
         // the config still names it, but the tracking ref needs recreating.
         if publish.is_some() {
@@ -798,6 +1160,27 @@ pub async fn set_branch_upstream(
             Some(r) => r,
             None => default_remote(&repo)?,
         };
+        // Callers disagree about the shape of `branch`, so accept both rather
+        // than refuse one of them.
+        //
+        // This command's contract is a LOCAL name plus a remote, and it builds
+        // the qualified form itself. A caller that sends `origin/development`
+        // with remote `origin` used to produce `origin/origin/development` --
+        // which fails as "doesn't exist" -- or, where the prefix named no
+        // remote, reached the local lookup below and came back as libgit2's
+        // "cannot locate local branch", reading as a fault rather than a
+        // mistaken argument (GITWYRM-BACKEND-2/6, 4 machines).
+        //
+        // Stripping is safe precisely because it is verified: only a prefix git
+        // itself knows as this remote is removed, so a local branch legitimately
+        // named `feature/x` is never touched.
+        let branch = match branch.trim().split_once('/') {
+            Some((prefix, rest)) if prefix == remote && !rest.is_empty() => {
+                log::warn!("link received remote-qualified branch name '{branch}'");
+                rest.to_string()
+            }
+            _ => branch.trim().to_string(),
+        };
         let upstream = format!("{remote}/{branch}");
         // The remote-tracking ref must exist, else the link would point nowhere
         // and push/pull would fail later with a much worse message.
@@ -861,6 +1244,8 @@ pub async fn git_pull_branch(
         // This updates a branch that is not checked out, so the working tree --
         // and every submodule checkout in it -- is untouched by design.
         submodules: Vec::new(),
+        attached: None,
+        needs_choice: false,
       });
     }
 
@@ -883,6 +1268,8 @@ pub async fn git_pull_branch(
       received: before.behind.saturating_sub(after.behind),
       ahead_after: after.ahead,
       submodules: Vec::new(),
+      attached: None,
+      needs_choice: false,
     })
   })
   .await
@@ -1142,8 +1529,32 @@ pub async fn delete_remote_branch(
             &["push", "--progress", "--delete", &remote, &refspec],
         )?;
 
-        // The push succeeded, so the branch is gone from the server. Dropping the
-        // tracking ref is bookkeeping: report success even if it is already absent.
+        // A zero exit is not proof the branch is gone. git's own refusals do exit
+        // non-zero, but a push routed through a wrapper, proxy or credential
+        // helper that swallows the child's status reports success having deleted
+        // nothing -- and the user is told three branches went away while they are
+        // all still on the server. Ask the remote directly instead of believing
+        // the exit code. Same rule the spec archive follows: verify the thing
+        // actually happened.
+        let still_there = run_streaming(
+            &app,
+            &repo_id,
+            Some(&path),
+            "ls-remote",
+            &["ls-remote", "--heads", &remote, &refspec],
+        )
+        .map(|out| !out.trim().is_empty());
+        // Only a definite "still listed" is a failure. If the check itself could
+        // not run, the push's own result stands rather than turning a working
+        // delete into a scary message.
+        if still_there.unwrap_or(false) {
+            return Err(AppError::Other(format!(
+                "{name} is still on {remote}. The delete reported success but the branch is still there."
+            )));
+        }
+
+        // Confirmed gone from the server. Dropping the tracking ref is
+        // bookkeeping: report success even if it is already absent.
         let repo = open.repo.lock().unwrap();
         if let Ok(mut branch) = repo.find_branch(&format!("{remote}/{name}"), BranchType::Remote) {
             let _ = branch.delete();
@@ -1445,9 +1856,11 @@ pub async fn git_rebase(
             args.push(b);
         }
 
+        let pins_before = recorded_pins(&open.repo.lock().unwrap());
         rebase_outcome(
             run_streaming(&app, &repo_id, Some(&path), "rebase", &args),
             &open,
+            &pins_before,
         )
     })
     .await
@@ -1460,6 +1873,7 @@ pub async fn git_rebase(
 fn rebase_outcome(
     run: Result<String, AppError>,
     open: &crate::state::OpenRepo,
+    pins_before: &std::collections::HashMap<String, git2::Oid>,
 ) -> Result<RebaseResult, AppError> {
     match run {
         Ok(_) => {
@@ -1469,7 +1883,7 @@ fn rebase_outcome(
             let submodules = {
                 let repo = open.repo.lock().unwrap();
                 let path = open.path.to_string_lossy().into_owned();
-                follow_and_report(&repo, &path, "rebase")
+                follow_and_report(&repo, &path, "rebase", pins_before)
             };
             Ok(RebaseResult {
                 conflicts: Vec::new(),
@@ -1518,9 +1932,11 @@ pub async fn rebase_continue(
             }
         }
         let args = ["-c", "core.editor=true", "rebase", "--continue"];
+        let pins_before = recorded_pins(&open.repo.lock().unwrap());
         rebase_outcome(
             run_streaming(&app, &repo_id, Some(&path), "rebase", &args),
             &open,
+            &pins_before,
         )
     })
     .await
@@ -1564,6 +1980,13 @@ pub async fn git_clone(
         // Without it, a pasted `--upload-pack=...` clone URL runs an arbitrary command.
         if url.starts_with('-') {
             return Err(AppError::Other("that clone address isn't valid".into()));
+        }
+        // git refuses a destination that already has files, but only after the
+        // network round trip, and in its own words ("destination path ... already
+        // exists and is not an empty directory", GITWYRM-BACKEND-B). Check first
+        // and say it the way creating a worktree already does.
+        if clone_destination_is_taken(std::path::Path::new(&destination)) {
+            return Err(AppError::Other(CLONE_DESTINATION_TAKEN.into()));
         }
         run_streaming(
             &app,
@@ -2075,5 +2498,193 @@ mod credential_message_tests {
             !got.to_lowercase().contains("authentication failed"),
             "{got}"
         );
+    }
+}
+
+/// What the user is told when a clone is pointed at a folder that already has
+/// files in it.
+pub(crate) const CLONE_DESTINATION_TAKEN: &str =
+    "That folder already has files in it. Pick an empty folder or a new folder name.";
+
+/// Whether git would refuse to clone into `destination`: it exists and is
+/// either a file or a folder with anything in it. An empty folder is fine, the
+/// same as git itself allows.
+fn clone_destination_is_taken(destination: &std::path::Path) -> bool {
+    if !destination.exists() {
+        return false;
+    }
+    match std::fs::read_dir(destination) {
+        Ok(mut entries) => entries.next().is_some(),
+        // A file, or a folder we cannot list: git would refuse it too.
+        Err(_) => true,
+    }
+}
+
+#[cfg(test)]
+mod clone_destination_tests {
+    use super::clone_destination_is_taken;
+
+    #[test]
+    fn only_a_folder_with_files_is_taken() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        assert!(!clone_destination_is_taken(&dir.path().join("new")), "missing is free");
+
+        let empty = dir.path().join("empty");
+        std::fs::create_dir(&empty).expect("empty dir");
+        assert!(!clone_destination_is_taken(&empty), "empty is free");
+
+        let full = dir.path().join("full");
+        std::fs::create_dir(&full).expect("full dir");
+        std::fs::write(full.join("readme.md"), "x").expect("file");
+        assert!(clone_destination_is_taken(&full), "a folder with files is taken");
+
+        let file = dir.path().join("a-file");
+        std::fs::write(&file, "x").expect("file");
+        assert!(clone_destination_is_taken(&file), "a file is taken");
+    }
+}
+
+#[cfg(test)]
+mod ssh_message_tests {
+    use super::{failure_detail, humanize_ssh_failure};
+
+    fn lines(raw: &[&str]) -> Vec<String> {
+        raw.iter().map(|l| (*l).to_string()).collect()
+    }
+
+    /// What the whole pipeline produces for one stderr: pick the detail, then
+    /// translate it, exactly as run_streaming_with does.
+    fn message_for(stderr: &[&str]) -> String {
+        let stderr = lines(stderr);
+        let detail = failure_detail(&stderr, "");
+        let detail = humanize_ssh_failure(&detail, &stderr).unwrap_or(detail);
+        format!("git fetch failed: {detail}")
+    }
+
+    /// The shape behind GITWYRM-BACKEND-C/F/G: ssh says why, git says only that
+    /// it could not read, and the `fatal:` line wins the ranking.
+    #[test]
+    fn a_refused_key_names_the_host_and_is_a_refusal() {
+        let got = message_for(&[
+            "git@github.com: Permission denied (publickey).",
+            "fatal: Could not read from remote repository.",
+            "Please make sure you have the correct access rights",
+            "and the repository exists.",
+        ]);
+        assert!(got.contains("github.com"), "{got}");
+        assert!(got.contains("Settings > Security"), "{got}");
+        assert!(!got.contains("Could not read from remote"), "{got}");
+        assert!(crate::error::is_expected_for_tests(&got), "{got}");
+    }
+
+    #[test]
+    fn an_unconfirmed_host_is_a_refusal() {
+        let got = message_for(&[
+            "Host key verification failed.",
+            "fatal: Could not read from remote repository.",
+        ]);
+        assert!(got.contains("Settings > Security"), "{got}");
+        assert!(got.contains("the server"), "falls back without a host: {got}");
+        assert!(crate::error::is_expected_for_tests(&got), "{got}");
+
+        let got = message_for(&[
+            "No ED25519 host key is known for gitlab.example.com and you have requested strict checking.",
+            "Host key verification failed.",
+            "fatal: Could not read from remote repository.",
+        ]);
+        assert!(got.contains("gitlab.example.com"), "{got}");
+    }
+
+    #[test]
+    fn an_unreachable_host_is_a_refusal() {
+        for (stderr, host) in [
+            (
+                "ssh: connect to host github.com port 22: Connection timed out",
+                "github.com",
+            ),
+            (
+                "ssh: Could not resolve hostname git.corp.example: No such host is known. ",
+                "git.corp.example",
+            ),
+            (
+                "ssh: connect to host bitbucket.org port 22: Connection refused",
+                "bitbucket.org",
+            ),
+        ] {
+            let got = message_for(&[stderr, "fatal: Could not read from remote repository."]);
+            assert!(got.contains(host), "{got}");
+            assert!(got.contains("internet or VPN"), "{got}");
+            assert!(crate::error::is_expected_for_tests(&got), "{got}");
+        }
+    }
+
+    /// An unknown cause keeps reporting, but now says what ssh said.
+    #[test]
+    fn an_unknown_cause_still_reports_with_the_reason_attached() {
+        let got = message_for(&[
+            "CreateProcessW failed error:2",
+            "fatal: Could not read from remote repository.",
+            "Please make sure you have the correct access rights",
+            "and the repository exists.",
+        ]);
+        assert!(got.contains("Could not read from remote repository"), "{got}");
+        assert!(got.contains("CreateProcessW failed error:2"), "{got}");
+        assert!(!got.contains("Please make sure"), "{got}");
+        assert!(!crate::error::is_expected_for_tests(&got), "{got}");
+    }
+
+    /// Nothing but git's own lines: nothing to add, so the message is unchanged.
+    #[test]
+    fn the_bare_line_is_left_alone_when_ssh_said_nothing() {
+        let got = message_for(&["fatal: Could not read from remote repository."]);
+        assert_eq!(got, "git fetch failed: fatal: Could not read from remote repository.");
+    }
+
+    /// Other failures are not this translator's business.
+    #[test]
+    fn unrelated_failures_pass_through() {
+        assert!(humanize_ssh_failure("fatal: repository 'x' not found", &[]).is_none());
+        assert!(humanize_ssh_failure("! [rejected] main -> main (fetch first)", &[]).is_none());
+    }
+}
+
+#[cfg(test)]
+mod background_fetch_tests {
+    use super::*;
+
+    /// GITWYRM-BACKEND-J verbatim: Git for Windows' launcher with its real
+    /// program missing, mid-update.
+    #[test]
+    fn a_git_install_mid_update_is_explained_and_not_reported() {
+        let detail = failure_detail(&[r"BUG (fork bomb): C:\Program Files\Git\bin\git.exe".to_string()], "");
+        let message = humanize_git_install_failure(&detail).expect("should be translated");
+        assert!(!message.contains("fork bomb"), "{message}");
+        assert!(crate::error::is_expected_for_tests(&message), "{message}");
+        assert!(humanize_git_install_failure("fatal: Could not read from remote repository.").is_none());
+    }
+
+    /// The sweep's failures are the user's network, sign-in or git install:
+    /// shown and logged, not filed. The same failure from a fetch the user
+    /// asked for keeps its normal classification.
+    #[test]
+    fn background_failures_are_quiet_but_corruption_still_reports() {
+        for message in [
+            "git fetch failed: fatal: Could not read from remote repository. (Connection closed)",
+            "git fetch failed: fatal: remote helper 'https' aborted session",
+            "git fetch failed: git stopped without saying why (exit code 128)",
+        ] {
+            let quiet = quiet_when_unattended(AppError::Other(message.into()), Attended::Background);
+            assert!(matches!(quiet, AppError::Unattended(_)), "{message}");
+            assert_eq!(quiet.to_string(), message, "the UI still gets the same words");
+
+            let asked = quiet_when_unattended(AppError::Other(message.into()), Attended::User);
+            assert!(matches!(asked, AppError::Other(_)), "{message}");
+        }
+
+        let corrupt = quiet_when_unattended(
+            AppError::Other("git fetch failed: fatal: bad object refs/remotes/origin/main".into()),
+            Attended::Background,
+        );
+        assert!(matches!(corrupt, AppError::Other(_)));
     }
 }

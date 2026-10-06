@@ -93,8 +93,8 @@ function itemMarkdown(detail: IssueDetail | PrDetail, kindLabel: string): string
  * Issue and pull request bodies. Thin wrapper over the shared renderer so this
  * view keeps its own empty-state wording.
  */
-function MarkdownBody({ text }: { text: string }) {
-  return <Markdown text={text} empty="No description was written." />
+function MarkdownBody({ text, baseUrl }: { text: string; baseUrl?: string }) {
+  return <Markdown text={text} empty="No description was written." baseUrl={baseUrl} />
 }
 
 function CommentThread({
@@ -102,11 +102,14 @@ function CommentThread({
   replyPlaceholder,
   onReply,
   replying,
+  baseUrl,
 }: {
   comments: GithubComment[]
   replyPlaceholder: string
   onReply: (body: string) => void
   replying: boolean
+  /** The thread's page, so relative links in comments resolve to its host. */
+  baseUrl?: string
 }) {
   const [draft, setDraft] = useState('')
   return (
@@ -139,7 +142,7 @@ function CommentThread({
                 />
               </div>
               <div className="mt-1">
-                <MarkdownBody text={c.body} />
+                <MarkdownBody text={c.body} baseUrl={baseUrl} />
               </div>
             </div>
           </div>
@@ -500,13 +503,14 @@ export function GithubView() {
                       />
                     </div>
                     <div className="px-4 py-3.5">
-                      <MarkdownBody text={detail.body} />
+                      <MarkdownBody text={detail.body} baseUrl={detail.html_url} />
                     </div>
                   </section>
 
                   <CommentThread
                     key={`${item.kind}-${item.number}`}
                     comments={detail.comments}
+                    baseUrl={detail.html_url}
                     replyPlaceholder={isPr ? 'Write a reply…' : 'Ask for more details…'}
                     replying={m.comment.isPending}
                     onReply={(body) =>

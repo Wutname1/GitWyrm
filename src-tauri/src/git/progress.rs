@@ -104,6 +104,26 @@ impl LocalProgress {
         self.emit(message.to_string(), 0, 0);
     }
 
+    /// Tell the UI this operation is over, however it ended.
+    ///
+    /// The frontend clears its progress toast only on an update where
+    /// `completed >= total`, and libgit2 does not always send one: a checkout
+    /// with nothing left to rewrite never reports a size (and `report` drops a
+    /// zero size), and an operation that fails part way stops reporting at
+    /// all. After `begin` had put the toast up, either one left "Discarding
+    /// changes..." on screen for good (GITWYRM-FRONTEND-1A); a merge refused
+    /// over local changes did the same with "Merging...".
+    pub fn finish(&self) {
+        self.emit("Finished".to_string(), 1, 1);
+    }
+
+    /// Calls [`LocalProgress::finish`] when the returned guard is dropped, so
+    /// every exit from the operation - success, an early `?`, or a panic -
+    /// clears the toast.
+    pub fn finish_on_drop(&self) -> FinishOnDrop<'_> {
+        FinishOnDrop(self)
+    }
+
     /// Whether enough time has passed since the last emit. Always true for the
     /// first call, so an operation reports immediately rather than after the
     /// first interval.
@@ -129,9 +149,41 @@ impl LocalProgress {
     }
 }
 
+/// See [`LocalProgress::finish_on_drop`].
+pub struct FinishOnDrop<'a>(&'a LocalProgress);
+
+impl Drop for FinishOnDrop<'_> {
+    fn drop(&mut self) {
+        self.0.finish();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The operation's last word must read as complete to the frontend, which
+    /// dismisses its toast on `completed >= total` with a non-zero total -
+    /// including when the operation bailed out before reporting any size.
+    #[test]
+    fn finishing_always_sends_a_completed_update() {
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = {
+            let seen = seen.clone();
+            Arc::new(move |u: ProgressUpdate<'_>| {
+                seen.lock().unwrap().push((u.completed, u.total));
+            })
+        };
+        let p = LocalProgress::new(Some(sink), "repo", "discard");
+        {
+            let _finish = p.finish_on_drop();
+            p.begin("Finding changes to discard");
+            // An early return: no sized update ever arrives.
+        }
+        let seen = seen.lock().unwrap();
+        let &(completed, total) = seen.last().expect("an update was sent");
+        assert!(total > 0 && completed >= total, "last update reads as done");
+    }
 
     /// Without a sink the reporter is inert -- the operation still runs. This is
     /// the path every existing test takes.

@@ -182,6 +182,72 @@ async openInOpencode(repoId: string, handoff: string) : Promise<Result<null, str
 }
 },
 /**
+ * What Mehen last found in every repository it checks, read in one go so
+ * every tab can show its own count. Nothing when Mehen has never written its
+ * summary (or is not installed).
+ */
+async mehenOverview() : Promise<Result<MehenOverview | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("mehen_overview") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * A note to show before and after pushing, when the push changes dependency
+ * files and Mehen found packages with fixable security problems in this repository.
+ * Nothing otherwise: the note never blocks a push and stays quiet by default.
+ */
+async mehenPushNote(repoId: string) : Promise<Result<MehenPushNote | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("mehen_push_note", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Show this repository in Mehen. A Mehen that is already running brings its
+ * window forward and switches to the repository instead of starting again.
+ */
+async openInMehen(repoId: string, fix: boolean) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("open_in_mehen", { repoId, fix }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Keeps Mehen's answer fresh without anyone opening Mehen: when its last full
+ * check is more than 12 hours old, run one in the background. Called when
+ * GitWyrm starts and whenever its window comes back into focus. Returns
+ * whether a check was started.
+ */
+async mehenRefreshIfStale() : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("mehen_refresh_if_stale") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Checks just this repository in Mehen when the commit it is on moved (a
+ * pull, a merge, a branch switch) and the move changed its dependency files.
+ * The first call for a repository only remembers where it is. Repositories
+ * Mehen does not check are left alone. Returns whether a check was started.
+ */
+async mehenRepoChanged(repoId: string) : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("mehen_repo_changed", { repoId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Whether opencode can be launched. Drives the Desk button's enabled state, so
  * the button is never offered when clicking it could only fail.
  * 
@@ -632,8 +698,8 @@ async checkForUpdate() : Promise<Result<string | null, string>> {
  * **This does not return on success.** The updater's Windows install path ends
  * in `std::process::exit(0)` after handing the installer to ShellExecute, so
  * the process is gone before this function's caller resumes. Anything that must
- * happen before the app dies belongs in the `on_before_exit` hook below, not
- * after the await in the frontend.
+ * happen before the app dies belongs in the `on_before_exit` hook, not after
+ * the await in the frontend.
  * 
  * Progress is reported on `UPDATE_PROGRESS_EVENT` as the download runs, and the
  * event's absence afterwards is what tells the frontend the install phase has
@@ -2083,6 +2149,19 @@ async gitPushBranch(repoId: string, branch: string) : Promise<Result<PushResult,
 }
 },
 /**
+ * Force-push a named local branch with `--force-with-lease`, which need not be
+ * the one checked out. For a branch rebased or rewound away from its upstream;
+ * the lease still refuses to overwrite remote commits that were never fetched.
+ */
+async gitPushBranchForce(repoId: string, branch: string) : Promise<Result<PushResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("git_push_branch_force", { repoId, branch }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Bring a branch up to date with its upstream without checking it out.
  * 
  * A branch that is only behind fast-forwards cleanly. One that has also moved
@@ -2093,6 +2172,61 @@ async gitPushBranch(repoId: string, branch: string) : Promise<Result<PushResult,
 async gitPullBranch(repoId: string, branch: string) : Promise<Result<PullResult, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("git_pull_branch", { repoId, branch }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Update several branches of one open repository with a single fetch.
+ * 
+ * `branches` of `None` means every branch that tracks a remote. The user is
+ * looking at this repository, so the checked-out branch may have its changes
+ * set aside and put back, the same as a plain pull.
+ */
+async pullBranches(repoId: string, branches: string[] | null) : Promise<Result<RepoUpdate, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("pull_branches", { repoId, branches }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Start updating every repository the request names, in the background.
+ * 
+ * Returns at once with the job number. Progress arrives as
+ * `update-all-progress` events and the final report as `update-all-finished`;
+ * [`update_all_state`] answers the same questions for a window that was not
+ * listening. Only one job runs at a time.
+ */
+async updateAllStart(request: UpdateAllRequest) : Promise<Result<number, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_all_start", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Ask the running job to stop. Fetches in progress are ended at once, and
+ * every repository not finished is reported as not checked.
+ */
+async updateAllCancel() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_all_cancel") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * The running job's progress and the last finished report, for a view that
+ * mounts after the events it would have heard.
+ */
+async updateAllState() : Promise<Result<UpdateAllState, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_all_state") };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -2895,6 +3029,32 @@ async githubClosePr(repoId: string | null, owner: string, repo: string, number: 
 async githubCloseIssue(repoId: string | null, owner: string, repo: string, number: number) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("github_close_issue", { repoId, owner, repo, number }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * The release on the repository's host for `tag`, drafts included.
+ * 
+ * None when the repository is not on a host GitWyrm integrates with, when that
+ * host is not connected, or when no release uses the tag. The tag-delete
+ * dialogs ask this to decide whether to offer deleting the release as well.
+ */
+async hostReleaseForTag(repoId: string, tag: string) : Promise<Result<HostRelease | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("host_release_for_tag", { repoId, tag }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Deletes a release found by `host_release_for_tag`. The tag is untouched.
+ */
+async hostDeleteRelease(repoId: string, releaseId: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("host_delete_release", { repoId, releaseId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -4673,6 +4833,46 @@ export type BranchSwitchMode =
  * Refuse to switch while the working tree is dirty.
  */
 "refuse"
+export type BranchUpdate = { name: string; kind: BranchUpdateKind; 
+/**
+ * Commits it received, or for a branch left alone, how many were waiting.
+ */
+commits: number; message: string | null }
+/**
+ * What happened to one branch.
+ */
+export type BranchUpdateKind = 
+/**
+ * Moved forward to match the server.
+ */
+"updated" | 
+/**
+ * Checked out with uncommitted changes, and setting them aside was not
+ * allowed for this repository. Left where it was.
+ */
+"changes_in_the_way" | 
+/**
+ * Moved forward, but the changes set aside for it did not go back cleanly.
+ * They are kept in a stash and the working tree needs attention.
+ */
+"changes_clashed" | 
+/**
+ * Has its own commits as well as new ones on the server. Combining them is
+ * a merge or rebase, which is never done in bulk.
+ */
+"both_changed" | 
+/**
+ * Checked out in another worktree, which would have to move with it.
+ */
+"open_elsewhere" | 
+/**
+ * Its copy on the server was deleted.
+ */
+"server_copy_gone" | 
+/**
+ * Something else went wrong; see the message.
+ */
+"failed"
 export type BuildInfo = { version: string; build_date: string; git_hash: string; debug: boolean; arch: string }
 /**
  * What building/refreshing a result record found.
@@ -5676,7 +5876,13 @@ export type FileChange = { path: string;
  * the name the file has now, so the UI can show "old -> new" and every file
  * action (stage, diff, open) targets the name that currently exists.
  */
-old_path: string | null; status: StatusCode; additions: number; deletions: number; conflicted: boolean; 
+old_path: string | null; status: StatusCode; additions: number; deletions: number; 
+/**
+ * False when the line counts were not worked out because too many files
+ * changed at once. `additions`/`deletions` are then 0, which must not be
+ * shown as "+0 -0" -- that reads as "nothing changed".
+ */
+lines_counted: boolean; conflicted: boolean; 
 /**
  * Set when this path is a submodule whose pinned commit moved. Ordinary file
  * actions (stash, discard-by-checkout) can't touch it; the UI must offer
@@ -5735,7 +5941,25 @@ export type GateAnswer = "allowOnce" | "findAnotherWay" | "stopRun"
  * Only side effects beyond in-repo edits and the project's own checks appear
  * here. Editing source and running tests is the job, not a gate.
  */
-export type GateRequest = { kind: "addDependency"; name: string } | { kind: "runInstall"; command: string } | { kind: "networkAccess"; target: string } | { kind: "deleteFiles"; paths: string[] } | { kind: "outsideRepo"; path: string } | 
+export type GateRequest = 
+/**
+ * **Not produced by a real run today.** `classify` below is the only
+ * production path from a provider's summary to a gate, and it answers
+ * `Publish` or `Unclassified` and nothing else -- so this and the three
+ * variants under it are reachable from tests and the scripted fixture
+ * only.
+ * 
+ * Kept rather than deleted, because each names a consequence worth its
+ * own card the day a classifier can recognise it, and the card's wording
+ * is already written and tested. But nothing should read this list as a
+ * description of what a person will actually be asked: an unrecognised
+ * command reaches them as `Unclassified`, which still gates the run and
+ * still shows the raw summary.
+ * 
+ * Recorded here rather than left to be rediscovered: a reader counting
+ * six kinds of approval would reasonably assume six kinds happen.
+ */
+{ kind: "addDependency"; name: string } | { kind: "runInstall"; command: string } | { kind: "networkAccess"; target: string } | { kind: "deleteFiles"; paths: string[] } | { kind: "outsideRepo"; path: string } | 
 /**
  * Sending work off this machine -- a push, a pull-request action, a
  * posted comment or review, a merge.
@@ -5917,6 +6141,23 @@ connected_as: string | null;
  * in again -- was never named.
  */
 auth_error: string | null; capabilities: HostCapabilities }
+/**
+ * A release published (or drafted) on the host for one tag.
+ */
+export type HostRelease = { 
+/**
+ * The host's id for the release, as text: GitHub's are 64-bit numbers,
+ * which the generated bindings cannot carry as a number.
+ */
+id: string; 
+/**
+ * The release title, falling back to the tag when it has none.
+ */
+name: string; 
+/**
+ * Not yet published, so nobody but the project's maintainers can see it.
+ */
+draft: boolean; prerelease: boolean; html_url: string }
 /**
  * A `@@ -old_start,old_lines +new_start,new_lines @@` hunk boundary.
  */
@@ -6130,6 +6371,104 @@ modified_ms: number;
  */
 active: boolean }
 export type LogPage = { commits: CommitEntry[]; has_more: boolean }
+/**
+ * Packages by the most urgent thing about them, as Mehen counts them: a
+ * security problem only when it has a fix (at its worst severity; `low`
+ * includes unrated ones), otherwise the newest update available. Add up the
+ * levels at or above the one wanted.
+ */
+export type MehenAttention = { critical: number; high: number; moderate: number; low: number; major: number; minor: number; patch: number }
+/**
+ * One package Mehen flags, at the level it counts at.
+ */
+export type MehenFlagged = { name: string; ecosystem: string; 
+/**
+ * `critical`, `high`, `moderate`, `low`, `major`, `minor` or `patch`.
+ */
+level: string; version: string | null; 
+/**
+ * The smallest fix for a security problem, otherwise the newest version
+ * the repository can use.
+ */
+target: string | null; 
+/**
+ * The worst advisory's summary, for a security problem.
+ */
+summary?: string | null }
+/**
+ * What Mehen's last check found, for every repository it checks.
+ */
+export type MehenOverview = { 
+/**
+ * Whether Mehen can be opened from GitWyrm on this computer.
+ */
+can_open: boolean; 
+/**
+ * When Mehen last checked every project, seconds since epoch.
+ */
+full_check_at: number | null; repos: MehenRepoStatus[] }
+export type MehenProblem = { name: string; ecosystem: string; version: string | null; 
+/**
+ * The smallest version that fixes it.
+ */
+fixed_in: string; 
+/**
+ * `CRITICAL`, `HIGH`, `MODERATE` or `LOW`.
+ */
+severity: string | null; summary: string; url: string }
+/**
+ * A heads-up for a push that changes dependency files in a repository where
+ * Mehen found packages with security problems.
+ */
+export type MehenPushNote = { 
+/**
+ * Packages with a known security problem and a fix available.
+ */
+fixable: number; checked_at: number | null; 
+/**
+ * Mehen checked the repository after every one of these dependency
+ * changes was made, so its numbers include them.
+ */
+seen_by_mehen: boolean; 
+/**
+ * Dependency files the outgoing commits change; a few at most.
+ */
+files: string[]; can_open: boolean }
+/**
+ * What Mehen's last check found in one repository.
+ * 
+ * Only security problems that have a fix are passed on. A problem nobody can
+ * fix yet is not something to act on, so GitWyrm does not raise it.
+ */
+export type MehenRepoStatus = { 
+/**
+ * The repository's folder as Mehen spells it.
+ */
+path: string; 
+/**
+ * When Mehen last checked this repository, seconds since epoch.
+ */
+checked_at: number | null; 
+/**
+ * Packages with a known security problem and a fixed version to move to.
+ */
+fixable: number; 
+/**
+ * Packages with a newer version available.
+ */
+outdated: number; 
+/**
+ * Every package that needs something, counted once at its most urgent level.
+ */
+attention: MehenAttention; 
+/**
+ * The packages behind `attention`, most urgent first.
+ */
+flagged: MehenFlagged[]; 
+/**
+ * Fixable problems, the most serious first; a few at most.
+ */
+problems: MehenProblem[] }
 /**
  * What a merge of a given ref into HEAD would do, without performing it.
  */
@@ -6693,7 +7032,17 @@ ahead_after: number;
  * Submodules whose pinned version the pull changed, and what was done about
  * each. Empty when the repo has no submodules or none of them moved.
  */
-submodules: SubmoduleFollowed[] }
+submodules: SubmoduleFollowed[]; 
+/**
+ * The checkout was on no branch, so it was put on this one before pulling.
+ * The usual case is a submodule opened in its own tab.
+ */
+attached: string | null; 
+/**
+ * Nothing was pulled: the branch it was put on has commits of its own and
+ * new ones on the remote, and how to combine them is the user's choice.
+ */
+needs_choice: boolean }
 /**
  * Outcome of a push. Measured from the branch's ahead/behind against its
  * upstream before and after, so the report reflects what actually moved rather
@@ -7048,6 +7397,40 @@ issues: number | null;
  * counts are from whatever was already on disk.
  */
 fetched: boolean }
+export type RepoUpdate = { name: string; path: string; level: RepoUpdateLevel; 
+/**
+ * A problem with the repository as a whole (could not fetch, mid-merge).
+ */
+message: string | null; 
+/**
+ * The fetch failed for want of a sign-in. A retry that may prompt can fix it.
+ */
+needs_sign_in: boolean; 
+/**
+ * The checked-out branch was skipped because of uncommitted changes. A
+ * retry that is allowed to set them aside can fix it.
+ */
+changes_in_the_way: boolean; 
+/**
+ * Total commits received across every branch that moved.
+ */
+commits_received: number; 
+/**
+ * Branches worth mentioning: moved, or left alone for a reason.
+ */
+branches: BranchUpdate[]; 
+/**
+ * Branches that already matched the server.
+ */
+up_to_date: number; 
+/**
+ * Never started because the job was stopped first.
+ */
+skipped: boolean }
+/**
+ * The worst thing that happened in one repository, used to order results.
+ */
+export type RepoUpdateLevel = "error" | "warning" | "updated" | "unchanged"
 export type RepositoryStarter = "blank" | "node" | "rust" | "csharp" | "all_in_one"
 export type RequestRevisionOutcome = { kind: "requested"; record: ResultRecord } | { kind: "resultNotFound" } | { kind: "sessionNotFound" } | { kind: "sessionDamaged"; reason: string } | { kind: "sessionUnavailable"; detail: string } | { kind: "writeFailed"; detail: string }
 /**
@@ -7462,6 +7845,11 @@ export type RunStep =
  * The run ended.
  */
 { kind: "ended"; state: RunState; detail: string }
+export type RunningRepo = { path: string; step: UpdateStep; 
+/**
+ * Seconds since the epoch, so the view can show how long it has taken.
+ */
+started_at: number }
 /**
  * What a scaffold call produced.
  */
@@ -7917,6 +8305,11 @@ restore_tabs?: boolean;
  */
 auto_fetch?: boolean; 
 /**
+ * Get the latest for every project in the code folders each time the app
+ * opens. Off by default: it reaches every server the user has a project on.
+ */
+update_all_on_start?: boolean; 
+/**
  * Fall back to the GitHub CLI when an organization blocks GitWyrm's own
  * sign-in. On by default: the alternative is an empty pull request panel
  * the user has no way to fix from inside the app.
@@ -8025,6 +8418,26 @@ show_tab_pr_count?: boolean;
  * the same reason as `show_tab_pr_count`.
  */
 show_tab_issue_count?: boolean; 
+/**
+ * Show packages with a known security problem that Mehen can fix: in the
+ * status bar, on repository tabs, and when pushing package changes.
+ */
+mehen_show_status?: boolean; 
+/**
+ * What the badge on each repository tab counts: `off`, a security
+ * severity (`critical`, `high`, `moderate`, `security` for any), or that
+ * plus updates (`major`, `minor`, `all`). None means `security`.
+ */
+mehen_tab_level?: string | null; 
+/**
+ * Let GitWyrm start Mehen's windowless checks: a full one when the last is
+ * over 12 hours old, and one repository after a pull changes its packages.
+ */
+mehen_keep_fresh?: boolean; 
+/**
+ * A one-time note when Mehen finds a new fix for an open repository.
+ */
+mehen_new_fix_notes?: boolean; 
 /**
  * Open tab groups. These disappear when their last repository is closed.
  */
@@ -9150,6 +9563,44 @@ export type UnpushedTag = { name: string; target_sha: string;
  * ref, so pushing the tag alone will succeed.
  */
 commit_on_remote: boolean }
+export type UpdateAllProgress = { job: number; total: number; done: number; 
+/**
+ * Every repository in this run, in the order they are worked on.
+ */
+queued: string[]; 
+/**
+ * The repositories being worked on right now.
+ */
+running: RunningRepo[]; 
+/**
+ * Results so far, in the order they finished.
+ */
+finished: RepoUpdate[]; branches_updated: number; commits_received: number; errors: number; warnings: number; stopping: boolean }
+export type UpdateAllReport = { job: number; 
+/**
+ * Seconds since the epoch.
+ */
+started_at: number; finished_at: number; cancelled: boolean; repos: RepoUpdate[] }
+export type UpdateAllRequest = { 
+/**
+ * Code folders; every repository directly inside each one is included.
+ */
+folders: string[]; 
+/**
+ * Individual repositories to include as well (open tabs, or a retry list).
+ */
+paths: string[]; 
+/**
+ * Repositories whose checked-out branch may have its uncommitted changes
+ * set aside and put back while it moves.
+ */
+allow_set_aside: string[]; 
+/**
+ * Let git show a sign-in window. Runs one repository at a time so windows
+ * never stack up.
+ */
+sign_in: boolean }
+export type UpdateAllState = { running: UpdateAllProgress | null; last: UpdateAllReport | null }
 export type UpdateChannel = "stable" | "beta"
 /**
  * What GitWyrm knows about whether a tool could be newer.
@@ -9196,6 +9647,18 @@ export type UpdateSessionOutcome = { kind: "updated"; session: AgentSession } | 
  * session is not known to be gone, and a retry may well succeed.
  */
 { kind: "unavailable"; detail: string }
+/**
+ * Which part of the work a repository is on.
+ */
+export type UpdateStep = 
+/**
+ * Asking its servers what is new.
+ */
+"fetching" | 
+/**
+ * Moving its branches forward.
+ */
+"updating"
 /**
  * architecture.md section 12: "Every field is optional and carries
  * `source: measured | provider_reported | estimated`."

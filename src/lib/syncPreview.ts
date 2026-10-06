@@ -53,6 +53,51 @@ export function modesFor(d: Divergence): PreviewMode[] {
   return []
 }
 
+/** What the sync window knows about the two refs, for choosing its options. */
+export interface PairShape {
+  /** A branch and its own upstream, or any other two refs. */
+  kind: 'tracking' | 'branches'
+  /** The receiving branch is the checked-out one, so it can be reset. */
+  canReset: boolean
+  /** The side commits come FROM is a remote copy, which cannot be moved here. */
+  sourceIsRemote: boolean
+}
+
+/**
+ * The options the sync window offers.
+ *
+ * A tracking pair gets exactly what the divergence implies. Two other refs
+ * need care, because the tracking vocabulary does the wrong thing there:
+ *
+ * - `replace` is a force-push to the checked-out branch's OWN upstream. For a
+ *   pair like `origin/master` into a `master` that tracks something else, that
+ *   overwrites a server branch that is not even on screen. Never offered.
+ * - `send` catches the source up, which cannot happen when the source is a
+ *   remote copy. Dropped for those.
+ * - `reset` (make the receiving branch match) is offered whenever the
+ *   receiving branch is checked out and has commits to throw away -- including
+ *   when only our side moved, which is the plain "discard my commit and match
+ *   the server" case and previously had no option at all.
+ */
+export function shownModes(d: Divergence, pair: PairShape): PreviewMode[] {
+  const modes = modesFor(d)
+  if (pair.kind === 'tracking') return modes
+  const shown = modes.filter((m) => m !== 'replace' && !(m === 'send' && pair.sourceIsRemote))
+  if (pair.canReset && d.ours > 0) shown.push('reset')
+  return shown
+}
+
+/**
+ * Which option starts selected: the one a menu asked for when it is on offer,
+ * otherwise the safe default. Never a destructive option unless asked for, or
+ * unless it is the only one there is.
+ */
+export function initialMode(shown: PreviewMode[], requested: PreviewMode | null): PreviewMode | null {
+  if (requested && shown.includes(requested)) return requested
+  const safe = shown.filter((m) => m !== 'replace' && m !== 'reset')
+  return safe.at(-1) ?? shown[0] ?? null
+}
+
 /**
  * Every string the modal shows for a mode, resolved against real counts.
  *
@@ -60,7 +105,26 @@ export function modesFor(d: Divergence): PreviewMode[] {
  * in one place -- the copy is the part that decides whether someone understands
  * they are about to delete work.
  */
-export function modeCopy(mode: PreviewMode, d: Divergence): ModeCopy {
+/**
+ * `names` turns the copy from cloud language into branch language.
+ *
+ * The same preview drives two different operations. Dropping a branch on its
+ * own upstream syncs with the cloud; dropping one local branch on another moves
+ * a branch locally and never touches a remote. Reusing the cloud wording for the
+ * second read as nonsense: the button offered to "Send 22 changes up" and the
+ * result then said "Caught v1 up to main", describing opposite things
+ * (GITWYRM-FRONTEND-13).
+ *
+ * Pass the two branch names for a local pair; leave it out for the cloud.
+ */
+export interface PairNames {
+  /** The branch commits come FROM. */
+  source: string
+  /** The branch that moves to match. */
+  target: string
+}
+
+export function modeCopy(mode: PreviewMode, d: Divergence, names?: PairNames): ModeCopy {
   const ours = plural(d.ours, 'change')
   const theirs = plural(d.theirs, 'change')
 
@@ -84,7 +148,7 @@ export function modeCopy(mode: PreviewMode, d: Divergence): ModeCopy {
         mode,
         label: 'Reset',
         sub: `${d.ours} lost`,
-        action: 'Reset to match',
+        action: names ? `Make ${names.target} match ${names.source}` : 'Reset to match',
         caption: `Your ${ours} are thrown away.`,
         pill: { tone: 'bad', text: `${d.ours} lost` },
         note: {
@@ -124,6 +188,18 @@ export function modeCopy(mode: PreviewMode, d: Divergence): ModeCopy {
         danger: false,
       }
     case 'get':
+      // Local pair: the branch dropped ON is the one that moves, so name it.
+      if (names)
+        return {
+          mode,
+          label: 'Catch up',
+          sub: 'clean',
+          action: `Catch ${names.target} up`,
+          caption: `${names.target} moves forward ${theirs} to match ${names.source}.`,
+          pill: { tone: 'good', text: 'nothing lost' },
+          note: { tone: 'plain', text: `Nothing is rewritten. ${names.target} simply moves up to where ${names.source} already is.` },
+          danger: false,
+        }
       return {
         mode,
         label: 'Get',
@@ -135,6 +211,19 @@ export function modeCopy(mode: PreviewMode, d: Divergence): ModeCopy {
         danger: false,
       }
     case 'send':
+      // Local pair: the DRAGGED branch catches up to the one it was dropped on,
+      // so this direction moves `source`. Nothing is sent anywhere.
+      if (names)
+        return {
+          mode,
+          label: 'Catch up',
+          sub: 'clean',
+          action: `Catch ${names.source} up`,
+          caption: `${names.source} moves forward ${ours} to match ${names.target}.`,
+          pill: { tone: 'good', text: 'nothing lost' },
+          note: { tone: 'plain', text: `Nothing is rewritten. ${names.source} simply moves up to where ${names.target} already is.` },
+          danger: false,
+        }
       return {
         mode,
         label: 'Send up',

@@ -131,3 +131,319 @@ describe('another program holding the index', () => {
     expect(classifyError(new Error(RAW)).severity).toBe('warning')
   })
 })
+
+describe('an operation refused because the working tree is dirty', () => {
+  // Every site raises the same opening and varies the tail with the operation.
+  const RAWS = [
+    'working tree has changes; commit or stash before merging',
+    'working tree has changes; commit or stash before switching branches',
+    'working tree has changes; commit or stash before cherry-picking',
+    'working tree has changes; commit or stash before rewriting history',
+  ]
+
+  it('is a warning for every operation, so a deliberate refusal is never a crash report', () => {
+    for (const raw of RAWS) {
+      expect(classifyError(new Error(raw)).severity).toBe('warning')
+    }
+  })
+
+  it('says what to do instead of repeating the backend sentence', () => {
+    const { message } = classifyError(new Error(RAWS[0]))
+    expect(message).toBe(
+      'You have changes that this would overwrite. Commit or stash them first, then try again.',
+    )
+    expect(message).not.toMatch(/working tree/i)
+  })
+})
+
+describe('a remote delete that reported success but changed nothing', () => {
+  const RAW =
+    'feature-x is still on origin. The delete reported success but the branch is still there.'
+
+  it('tells the user the branch survived, without git jargon', () => {
+    const { message } = classifyError(new Error(RAW))
+    expect(message).toMatch(/still has that branch/i)
+    expect(message).not.toMatch(/refs\//)
+  })
+
+  it('is a warning: the host accepted it, so there is nothing local to fix', () => {
+    expect(classifyError(new Error(RAW)).severity).toBe('warning')
+  })
+})
+
+describe('a pull with nothing linked to pull from', () => {
+  // Verbatim from GITWYRM-BACKEND-7.
+  const RAW =
+    'mutation failed [error]: git pull failed: There is no tracking information for the current branch.'
+
+  it('explains the branch is unlinked instead of echoing git', () => {
+    const { message } = classifyError(new Error(RAW))
+    expect(message).toMatch(/isn't linked to a cloud copy/i)
+    expect(message).not.toMatch(/tracking information/i)
+  })
+
+  it('is a warning, matching how the backend already classifies it', () => {
+    expect(classifyError(new Error(RAW)).severity).toBe('warning')
+  })
+
+  it('treats a diverged pull the same way', () => {
+    const raw =
+      'git pull failed: You have divergent branches and need to specify how to reconcile them.'
+    const { severity, message } = classifyError(new Error(raw))
+    expect(severity).toBe('warning')
+    expect(message).toMatch(/merge or rebase/i)
+  })
+})
+
+describe('a cloud copy the host will not admit exists', () => {
+  // Verbatim from GITWYRM-BACKEND-2.
+  const RAW =
+    "Command failed: git push failed: fatal: repository 'https://github.com/owner/repo.git/' not found"
+
+  it('names every reason it could be, since the host will not say which', () => {
+    const { message } = classifyError(new Error(RAW))
+    expect(message).toMatch(/renamed or deleted/i)
+    expect(message).not.toMatch(/fatal:/i)
+  })
+
+  it('is a warning: nothing local can fix a repo the host denies', () => {
+    expect(classifyError(new Error(RAW)).severity).toBe('warning')
+  })
+
+  it('covers the API wording for the same condition', () => {
+    const raw = 'GitHub could not find that. It may be private, renamed, or your token may not cover it.'
+    expect(classifyError(new Error(raw)).severity).toBe('warning')
+  })
+
+  it('covers the fetch path wording, which the backend classified but this did not', () => {
+    // Verbatim from GITWYRM-BACKEND-2, which filed 114 crash reports because
+    // this sentence is built separately in commands/remote.rs and matched none
+    // of the needles above.
+    const raw =
+      'Command failed: git clone failed: Could not find https://github.com/owner/repo with your sign-in. It may have been moved or renamed, or your account may not have access to it.'
+    const { severity, message } = classifyError(new Error(raw))
+    expect(severity).toBe('warning')
+    expect(message).toMatch(/renamed or deleted/i)
+  })
+
+  it('does not reach a genuine object lookup failure', () => {
+    // "could not find" alone would swallow these, which are real faults that
+    // must keep reporting.
+    for (const raw of [
+      'git error: could not find commit 4f2b1a9; class=Odb (9); code=NotFound (-3)',
+      'could not find object in database',
+    ]) {
+      expect(classifyError(new Error(raw)).severity).toBe('error')
+    }
+  })
+})
+
+describe('picking lines whose diff has already moved on', () => {
+  // Verbatim from GITWYRM-BACKEND-6. The backend classified this as expected in
+  // 1a3cac4, but no rule here matched it, so the frontend kept filing crashes.
+  const RAW = 'mutation failed [error]: no changes found for this file'
+
+  it('is a refusal, not a fault', () => {
+    expect(classifyError(new Error(RAW)).severity).toBe('info')
+  })
+
+  it('tells the user what to do instead of repeating the backend wording', () => {
+    const { message } = classifyError(new Error(RAW))
+    expect(message).toMatch(/already moved on/i)
+    expect(message).not.toMatch(/mutation failed/i)
+  })
+
+  it('does not reach a genuine diff failure that merely mentions changes', () => {
+    const raw = 'git error: failed to load changes for this file; class=Diff (20)'
+    expect(classifyError(new Error(raw)).severity).toBe('error')
+  })
+})
+
+describe('an index that is mid-conflict or damaged', () => {
+  it('treats a half-resolved merge as the conflict doing its job', () => {
+    const raw =
+      'git error: cannot create a tree from a not fully merged index.; class=Index (10); code=Unmerged (-10)'
+    const { severity, message } = classifyError(new Error(raw))
+    expect(severity).toBe('warning')
+    expect(message).toMatch(/conflicts still need resolving/i)
+  })
+
+  it('keeps a corrupt index at error severity, so it never stops reporting', () => {
+    const raws = [
+      'git error: invalid data in index - incorrect header signature; class=Index (10)',
+      'git fetch failed: fatal: index file corrupt',
+    ]
+    for (const raw of raws) {
+      expect(classifyError(new Error(raw)).severity).toBe('error')
+    }
+  })
+
+  it('reassures that commits survive a damaged index', () => {
+    const { message } = classifyError(
+      new Error('git error: invalid data in index - incorrect header signature; class=Index (10)')
+    )
+    expect(message).toMatch(/commits are safe/i)
+    expect(message).not.toMatch(/header signature/i)
+  })
+})
+
+describe('a remote that has no credentials yet', () => {
+  // Verbatim from GITWYRM-BACKEND-4.
+  const RAW =
+    'Command failed: git fetch failed: Sign-in needed for https://github.com. Connect the account, then try again.'
+
+  it('is a warning, not a crash: nothing is broken yet', () => {
+    expect(classifyError(new Error(RAW)).severity).toBe('warning')
+  })
+
+  it('wins over the generic auth rule, which would call it an error', () => {
+    const { severity, message } = classifyError(new Error(RAW))
+    expect(severity).not.toBe('error')
+    expect(message).toMatch(/connect your account/i)
+  })
+
+  it('leaves a genuinely rejected credential as an error', () => {
+    const raw = 'git error: authentication failed for https://github.com'
+    expect(classifyError(new Error(raw)).severity).toBe('error')
+  })
+})
+
+describe('a host that was never connected', () => {
+  // Verbatim from GITWYRM-BACKEND-4.
+  const RAW = 'Command failed: not signed in to GitHub; connect GitHub first'
+
+  it('is a warning: connecting an account is setup, not a fault', () => {
+    expect(classifyError(new Error(RAW)).severity).toBe('warning')
+  })
+
+  it('points at Settings instead of repeating the backend sentence', () => {
+    const { message } = classifyError(new Error(RAW))
+    expect(message).toMatch(/not connected yet/i)
+    expect(message).toMatch(/Integrations/)
+  })
+
+  it('carries a button to the Integrations page', () => {
+    expect(classifyError(new Error(RAW)).fix?.section).toBe('integrations')
+  })
+
+  it('covers every host the helper phrases, not just GitHub', () => {
+    for (const host of ['GitLab', 'Bitbucket', 'Azure DevOps']) {
+      const raw = `not signed in to ${host}; connect ${host} first`
+      expect(classifyError(new Error(raw)).severity).toBe('warning')
+    }
+  })
+
+  it('still reports a real authentication failure as an error', () => {
+    expect(classifyError(new Error('git error: authentication failed')).severity).toBe('error')
+  })
+})
+
+describe('a cloud branch name given to a local-only command', () => {
+  // reject_remote_qualified's wording, from GITWYRM-BACKEND-2/6.
+  const RAW = "'origin/development' is a branch on the remote. To link the local copy, use 'development'."
+
+  it('is a warning: the guard refusing is not a fault', () => {
+    expect(classifyError(new Error(RAW)).severity).toBe('warning')
+  })
+
+  it('explains which copy to use without git wording', () => {
+    const { message } = classifyError(new Error(RAW))
+    expect(message).toMatch(/cloud copy/i)
+    expect(message).not.toMatch(/refs\/|libgit2/i)
+  })
+
+  it('still reports the raw libgit2 failure it replaced', () => {
+    const raw = "git error: cannot locate local branch 'origin/development'; class=Reference (4)"
+    expect(classifyError(new Error(raw)).severity).toBe('error')
+  })
+})
+
+describe('a push the server refused after accepting it', () => {
+  // Verbatim from a HearthShelf-Mobile push, 2026-09-22.
+  const WORKFLOW =
+    'git push failed: ! [remote rejected] main -> main (refusing to allow an OAuth App to create or update workflow `.github/workflows/release.yml` without `workflow` scope)'
+
+  it('does not tell the user the cloud is ahead when it is not', () => {
+    expect(classifyError(new Error(WORKFLOW)).message).not.toMatch(/cloud has changes/i)
+  })
+
+  it('names the missing workflow permission and how to grant it', () => {
+    const { severity, message } = classifyError(new Error(WORKFLOW))
+    expect(severity).toBe('warning')
+    expect(message).toMatch(/\.github\/workflows\/release\.yml/)
+    expect(message).toMatch(/not affected/i)
+    expect(message).toMatch(/reconnect github/i)
+  })
+
+  it('takes the user to the GitHub account row to reconnect', () => {
+    expect(classifyError(new Error(WORKFLOW)).fix).toEqual({
+      label: 'Reconnect GitHub',
+      section: 'integrations',
+      settingId: 'github-connection',
+    })
+  })
+
+  it('offers no settings button for a refusal settings cannot fix', () => {
+    const raw = 'git push failed: ! [remote rejected] main -> main (pre-receive hook declined)'
+    expect(classifyError(new Error(raw)).fix).toBeUndefined()
+  })
+
+  it('passes on the server reason for other refusals', () => {
+    const raw = 'git push failed: ! [remote rejected] main -> main (pre-receive hook declined)'
+    const { severity, message } = classifyError(new Error(raw))
+    expect(severity).toBe('warning')
+    expect(message).toBe('The cloud refused this push. Its reason: pre-receive hook declined')
+  })
+
+  it('still reads a real non-fast-forward as the cloud being ahead', () => {
+    const raw = 'git push failed: ! [rejected]        main -> main (fetch first)'
+    expect(classifyError(new Error(raw)).message).toMatch(/cloud has changes/i)
+  })
+})
+
+/**
+ * SSH failures, in the backend's words (commands/remote.rs,
+ * humanize_ssh_failure). Before these, git's bare "Could not read from remote
+ * repository" reached the user unexplained and was filed as a crash every time
+ * a background fetch hit it (GITWYRM-BACKEND-C/F/G).
+ */
+describe('an SSH remote that would not let us in', () => {
+  it('points a refused key at Security, not at connecting an account', () => {
+    const raw =
+      "git push failed: Sign-in needed for github.com: it did not accept the SSH key on this computer. Check your keys in Settings > Security, then try again."
+    const { severity, message, fix } = classifyError(new Error(raw))
+    expect(severity).toBe('warning')
+    expect(message).toMatch(/SSH key/)
+    expect(fix?.section).toBe('security')
+  })
+
+  it('sends an unconfirmed host to the connection test', () => {
+    const raw =
+      'git fetch failed: Sign-in needed for github.com: this computer has not confirmed who that server is yet. Test the connection in Settings > Security, then try again.'
+    const { severity, fix } = classifyError(new Error(raw))
+    expect(severity).toBe('warning')
+    expect(fix?.section).toBe('security')
+  })
+
+  it('leaves an HTTPS sign-in pointing at Integrations', () => {
+    const raw =
+      'git fetch failed: Sign-in needed for https://github.com. Connect the account, then try again.'
+    expect(classifyError(new Error(raw)).fix?.section).toBe('integrations')
+  })
+})
+
+/** The backend has always classed these as expected; the frontend now agrees. */
+describe('a server that could not be reached', () => {
+  it.each([
+    'git push failed: Failed to connect to github.com. Check your internet or VPN connection, then try again.',
+    "git fetch failed: fatal: unable to access 'https://github.com/o/r.git/': Could not resolve host: github.com",
+  ])('is a warning, not a crash: %s', (raw) => {
+    const { severity, message } = classifyError(new Error(raw))
+    expect(severity).toBe('warning')
+    expect(message).toMatch(/internet or VPN/)
+  })
+
+  it('still reports other network-shaped failures as errors', () => {
+    expect(classifyError(new Error('network fetch failed: request failed')).severity).toBe('error')
+  })
+})

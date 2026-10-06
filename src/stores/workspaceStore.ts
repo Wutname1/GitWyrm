@@ -38,6 +38,7 @@ import {
 import { useUiStore } from "@/stores/uiStore";
 import type { ThemeId, ThemeMode } from "@/lib/themes";
 import { DEFAULT_FONT_ID } from "@/lib/fonts";
+import { DEFAULT_MEHEN_TAB_LEVEL, parseMehenTabLevel, type MehenTabLevel } from "@/lib/mehen";
 
 export interface RecentRepo {
   name: string;
@@ -806,6 +807,8 @@ interface WorkspaceState {
   restoreTabs: boolean;
   /** Fetch open repositories in the background to keep remote state current (persisted). */
   autoFetch: boolean;
+  /** Get the latest for every project in the code folders when the app opens (persisted). */
+  updateAllOnStart: boolean;
   /**
    * Use the GitHub CLI when an organization blocks GitWyrm's own sign-in
    * (persisted). On by default; off means those repositories show nothing.
@@ -882,6 +885,14 @@ interface WorkspaceState {
   showTabPrCount: boolean;
   /** Show the open issue count on repository tabs (persisted, off by default). */
   showTabIssueCount: boolean;
+  /** Show packages with a security fix waiting, from Mehen (persisted, on by default). */
+  mehenShowStatus: boolean;
+  /** What the Mehen badge on repository tabs counts (persisted, all security fixes by default). */
+  mehenTabLevel: MehenTabLevel;
+  /** Let GitWyrm start Mehen's background checks (persisted, on by default). */
+  mehenKeepFresh: boolean;
+  /** Note once when Mehen finds a new fix for an open repository (persisted, on by default). */
+  mehenNewFixNotes: boolean;
   /** Groups that currently wrap open repository tabs (persisted while open). */
   tabGroups: TabGroup[];
   /** Shared order of loose repository tabs and complete groups (persisted). */
@@ -1014,6 +1025,7 @@ interface WorkspaceState {
   setWorktreeBranchDeleteOnRemote: (on: boolean) => void;
   setRestoreTabs: (enabled: boolean) => void;
   setAutoFetch: (enabled: boolean) => void;
+  setUpdateAllOnStart: (enabled: boolean) => void;
   setGhCliFallback: (enabled: boolean) => void;
   setShowTips: (enabled: boolean) => void;
   setTelemetryLevel: (level: TelemetryLevel) => void;
@@ -1023,6 +1035,10 @@ interface WorkspaceState {
   setHorizontalTabRow: (enabled: boolean) => void;
   setShowTabPrCount: (enabled: boolean) => void;
   setShowTabIssueCount: (enabled: boolean) => void;
+  setMehenShowStatus: (enabled: boolean) => void;
+  setMehenTabLevel: (level: MehenTabLevel) => void;
+  setMehenKeepFresh: (enabled: boolean) => void;
+  setMehenNewFixNotes: (enabled: boolean) => void;
   /** Set the whole-app zoom factor (clamped to the supported range). */
   setUiScale: (scale: number) => void;
   /** Set the UI font by id (see lib/fonts.ts). */
@@ -1228,6 +1244,7 @@ function toSettings(s: WorkspaceState): Settings {
     restore_tabs: s.restoreTabs,
     show_tips: s.showTips,
     auto_fetch: s.autoFetch,
+    update_all_on_start: s.updateAllOnStart,
     gh_cli_fallback: s.ghCliFallback,
     telemetry_level: s.telemetryLevel,
     onboarding_seen: s.onboardingSeen,
@@ -1247,6 +1264,10 @@ function toSettings(s: WorkspaceState): Settings {
     horizontal_tab_row: s.horizontalTabRow,
     show_tab_pr_count: s.showTabPrCount,
     show_tab_issue_count: s.showTabIssueCount,
+    mehen_show_status: s.mehenShowStatus,
+    mehen_tab_level: s.mehenTabLevel,
+    mehen_keep_fresh: s.mehenKeepFresh,
+    mehen_new_fix_notes: s.mehenNewFixNotes,
     tab_groups: s.tabGroups.map((group) => ({
       id: group.id,
       name: group.name,
@@ -1569,6 +1590,7 @@ export const SETTINGS_DEFAULTS = {
   worktreeBranchDeleteOnRemote: false,
   restoreTabs: true,
   autoFetch: true,
+  updateAllOnStart: false,
   ghCliFallback: true,
   showTips: true,
   // Deliberately outside the per-screen "behavior" group below: a privacy
@@ -1616,6 +1638,10 @@ export const SETTINGS_DEFAULTS = {
   conflictViewMode: "hunks",
   showTabPrCount: true,
   showTabIssueCount: true,
+  mehenShowStatus: true,
+  mehenTabLevel: DEFAULT_MEHEN_TAB_LEVEL,
+  mehenKeepFresh: true,
+  mehenNewFixNotes: true,
 } satisfies Partial<WorkspaceState>;
 
 /** A resettable preference key. */
@@ -1641,6 +1667,7 @@ export const SETTINGS_GROUPS = {
   behavior: [
     "restoreTabs",
     "autoFetch",
+    "updateAllOnStart",
     "ghCliFallback",
     "showTips",
     "discardResetsSubmodules",
@@ -1673,7 +1700,7 @@ export const SETTINGS_GROUPS = {
   ],
   // Only the tab badges. Resetting this screen must not sign the user out of
   // GitHub -- disconnecting is a deliberate act with its own button.
-  integrations: ["showTabPrCount", "showTabIssueCount"],
+  integrations: ["showTabPrCount", "showTabIssueCount", "mehenShowStatus", "mehenTabLevel", "mehenKeepFresh", "mehenNewFixNotes"],
 } satisfies Record<string, SettingsKey[]>;
 
 export type SettingsGroup = keyof typeof SETTINGS_GROUPS;
@@ -1734,6 +1761,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   worktreeBranchDeleteOnRemote: false,
   restoreTabs: true,
   autoFetch: true,
+  updateAllOnStart: false,
   ghCliFallback: true,
   showTips: true,
   telemetryLevel: null,
@@ -1758,6 +1786,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   horizontalTabRow: false,
   showTabPrCount: true,
   showTabIssueCount: true,
+  mehenShowStatus: true,
+  mehenTabLevel: DEFAULT_MEHEN_TAB_LEVEL,
+  mehenKeepFresh: true,
+  mehenNewFixNotes: true,
   tabGroups: [],
   tabOrder: [],
   tabSort: "manual",
@@ -2289,6 +2321,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set({ autoFetch: enabled });
     schedulePersist();
   },
+  setUpdateAllOnStart: (enabled) => {
+    set({ updateAllOnStart: enabled });
+    schedulePersist();
+  },
   setGhCliFallback: (enabled) => {
     set({ ghCliFallback: enabled });
     schedulePersist();
@@ -2325,6 +2361,22 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   setShowTabIssueCount: (enabled) => {
     set({ showTabIssueCount: enabled });
+    schedulePersist();
+  },
+  setMehenShowStatus: (enabled) => {
+    set({ mehenShowStatus: enabled });
+    schedulePersist();
+  },
+  setMehenTabLevel: (level) => {
+    set({ mehenTabLevel: level });
+    schedulePersist();
+  },
+  setMehenKeepFresh: (enabled) => {
+    set({ mehenKeepFresh: enabled });
+    schedulePersist();
+  },
+  setMehenNewFixNotes: (enabled) => {
+    set({ mehenNewFixNotes: enabled });
     schedulePersist();
   },
   setUiScale: (scale) => {
@@ -3192,6 +3244,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
           settings.worktree_branch_delete_on_remote === true,
         restoreTabs: settings.restore_tabs ?? true,
         autoFetch: settings.auto_fetch ?? true,
+        updateAllOnStart: settings.update_all_on_start === true,
         ghCliFallback: settings.gh_cli_fallback ?? true,
         // Absent means on: a settings file written before this flag existed
         // belongs to someone who has been seeing the tips all along, so hiding
@@ -3232,6 +3285,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         horizontalTabRow: settings.horizontal_tab_row ?? false,
         showTabPrCount: settings.show_tab_pr_count ?? false,
         showTabIssueCount: settings.show_tab_issue_count ?? false,
+        mehenShowStatus: settings.mehen_show_status ?? true,
+        mehenTabLevel: parseMehenTabLevel(settings.mehen_tab_level),
+        mehenKeepFresh: settings.mehen_keep_fresh ?? true,
+        mehenNewFixNotes: settings.mehen_new_fix_notes ?? true,
         tabGroups,
         tabOrder: deserializeTabOrder(settings.tab_order, tabGroups),
         tabSort: normalizeTabSort(settings.tab_sort),

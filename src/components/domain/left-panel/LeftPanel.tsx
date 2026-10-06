@@ -16,11 +16,14 @@ import {
   useGithubSlug,
   useHostingProviders,
   useRepoHostProvider,
+  useTagRelease,
 } from '@/hooks/useGithub'
 import { useStartAgentSession } from '@/hooks/useStartAgentSession'
 import { useAiCatalog } from '@/hooks/useAi'
 import { useAiSelection } from '@/hooks/useAiSelection'
 import { issueSourceInput, pullRequestSourceInput } from '@/lib/agentDeskSources'
+import type { HostRelease } from '@/lib/bindings'
+import { cn } from '@/lib/utils'
 import { matchExplanation } from '@/lib/commitPr'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo, useWorkspaceStore } from '@/stores/workspaceStore'
@@ -51,6 +54,7 @@ import { SpecsSection } from './SpecsSection'
 import { useOpenspecChanges, useOpenspecStatus } from '@/hooks/useOpenspec'
 import { openSpecDesk } from '@/lib/specDesk'
 import { SubmodulesSection } from './SubmodulesSection'
+import { MehenSection } from './MehenSection'
 import { WorktreesSection } from './WorktreesSection'
 
 export function LeftPanel() {
@@ -186,9 +190,12 @@ export function LeftPanel() {
   /** Opt-in to also removing the tag from the remote when deleting it here. */
   const [deleteTagFromRemote, setDeleteTagFromRemote] = useState(false)
   /** The delete that replaced the confirm dialog; `error` is null while working. */
+  /** Opt-in to also deleting the tag's release on the host. Starts ticked. */
+  const [deleteTagRelease, setDeleteTagRelease] = useState(true)
   const [deleteRun, setDeleteRun] = useState<{
     name: string
     alsoRemote: boolean
+    withRelease: boolean
     error: string | null
     friendly?: string
   } | null>(null)
@@ -258,6 +265,13 @@ export function LeftPanel() {
   // an unknown status shouldn't invite an action that would just fail.
   const tagOnRemote =
     toDelete?.kind === 'tag' && tagSync.hasRemote && tagSync.stateOf(toDelete.name) === 'synced'
+
+  // The release that uses the tag being removed from the host, if any. Looked
+  // up as soon as either dialog opens, so ticking the box shows it instantly.
+  const releaseTag = tagOnRemote && toDelete ? toDelete.name : toRemoveFromRemote
+  const releaseLookup = useTagRelease(repo?.id ?? null, releaseTag, githubConnected)
+  const tagRelease = releaseTag != null ? (releaseLookup.data ?? null) : null
+  const releaseChecking = releaseTag != null && releaseLookup.isFetching
 
   const sections: SidebarSectionData[] = [
     {
@@ -582,7 +596,10 @@ export function LeftPanel() {
             {tagSync.hasRemote && tagSync.stateOf(item.name) === 'synced' && (
               <ContextMenuItem
                 variant="destructive"
-                onSelect={() => setToRemoveFromRemote(item.name)}
+                onSelect={() => {
+                  setDeleteTagRelease(true)
+                  setToRemoveFromRemote(item.name)
+                }}
               >
                 <CloudOff />
                 Remove from {tagSync.hostLabel}
@@ -593,6 +610,7 @@ export function LeftPanel() {
               onSelect={() => {
                 // Start from the remembered choice each time the dialog opens.
                 setDeleteTagFromRemote(tagDeleteOnRemote)
+                setDeleteTagRelease(true)
                 setToDelete({ kind: 'tag', name: item.name })
               }}
             >
@@ -704,6 +722,8 @@ export function LeftPanel() {
           getHoverAction={getHoverAction}
         />
       ))}
+
+      <MehenSection />
 
       <ConfirmDialog
         open={branchToDelete !== null}
@@ -870,33 +890,56 @@ export function LeftPanel() {
         }
         extra={
           tagOnRemote ? (
-            <label className="flex cursor-pointer items-start gap-2 text-xs text-sub">
-              <input
-                type="checkbox"
-                checked={deleteTagFromRemote}
-                onChange={(e) => rememberDeleteFromRemote(e.target.checked)}
-                className="mt-0.5 size-3.5 accent-[var(--gw-accent)]"
-              />
-              <span>
-                Also remove it from {tagSync.hostLabel}
-                <span className="block text-2xs text-muted-foreground">
-                  Anyone else using this project will lose it too.
+            <div className="flex flex-col gap-2">
+              <label className="flex cursor-pointer items-start gap-2 text-xs text-sub">
+                <input
+                  type="checkbox"
+                  checked={deleteTagFromRemote}
+                  onChange={(e) => rememberDeleteFromRemote(e.target.checked)}
+                  className="mt-0.5 size-3.5 accent-[var(--gw-accent)]"
+                />
+                <span>
+                  Also remove it from {tagSync.hostLabel}
+                  <span className="block text-2xs text-muted-foreground">
+                    Anyone else using this project will lose it too.
+                  </span>
                 </span>
-              </span>
-            </label>
+              </label>
+              {deleteTagFromRemote && (
+                <ReleaseOption
+                  className="ml-5"
+                  release={tagRelease}
+                  checking={releaseChecking}
+                  failed={releaseLookup.isError}
+                  hostLabel={tagSync.hostLabel}
+                  checked={deleteTagRelease}
+                  onChange={setDeleteTagRelease}
+                />
+              )}
+            </div>
           ) : undefined
         }
         confirmLabel={
           tagOnRemote && deleteTagFromRemote ? 'Delete everywhere' : 'Delete tag'
         }
+        // Wait for the release check before allowing a delete from the host, or
+        // a fast click would skip the release and leave it orphaned. Cancel
+        // stays live, so a slow host never traps the user here.
+        canConfirm={!(tagOnRemote && deleteTagFromRemote && releaseChecking)}
         onConfirm={() => {
           if (!toDelete) return
           const alsoRemote = tagOnRemote && deleteTagFromRemote
+          const releaseId = alsoRemote && deleteTagRelease ? tagRelease?.id : undefined
           // Hand off to the progress modal so the wait (and any failure) has
           // somewhere to live; the confirm dialog closes on its own.
-          setDeleteRun({ name: toDelete.name, alsoRemote, error: null })
+          setDeleteRun({
+            name: toDelete.name,
+            alsoRemote,
+            withRelease: releaseId != null,
+            error: null,
+          })
           m.deleteTag.mutate(
-            { name: toDelete.name, alsoRemote, quiet: true },
+            { name: toDelete.name, alsoRemote, releaseId, quiet: true },
             {
               onSuccess: () => setDeleteRun(null),
               onError: (reason) => {
@@ -920,8 +963,10 @@ export function LeftPanel() {
         subtext={
           deleteRun?.error != null
             ? deleteRun.friendly
-            : deleteRun?.alsoRemote
-              ? `Removing it from ${tagSync.hostLabel} too.`
+            : deleteRun?.withRelease
+              ? `Removing it and its release from ${tagSync.hostLabel} too.`
+              : deleteRun?.alsoRemote
+                ? `Removing it from ${tagSync.hostLabel} too.`
               : 'This only takes a moment.'
         }
         error={deleteRun?.error ?? null}
@@ -944,18 +989,91 @@ export function LeftPanel() {
             stays.
           </>
         }
+        extra={
+          <ReleaseOption
+            release={tagRelease}
+            checking={releaseChecking}
+            failed={releaseLookup.isError}
+            hostLabel={tagSync.hostLabel}
+            checked={deleteTagRelease}
+            onChange={setDeleteTagRelease}
+          />
+        }
         confirmLabel="Remove it"
         pending={m.deleteRemoteTag.isPending}
         pendingLabel="Removing…"
         keepOpenOnConfirm
+        canConfirm={!releaseChecking}
         onConfirm={() =>
           toRemoveFromRemote &&
           m.deleteRemoteTag.mutate(
-            { name: toRemoveFromRemote },
+            {
+              name: toRemoveFromRemote,
+              releaseId: deleteTagRelease ? tagRelease?.id : undefined,
+            },
             { onSettled: () => setToRemoveFromRemote(null) }
           )
         }
       />
     </div>
+  )
+}
+
+/**
+ * The "also delete its release" choice under a tag delete. Renders nothing when
+ * the host has no release for the tag, so most tags never see it; says so while
+ * it is still looking, and when the lookup failed, so a missing box is never a
+ * silent guess.
+ */
+function ReleaseOption({
+  release,
+  checking,
+  failed,
+  hostLabel,
+  checked,
+  onChange,
+  className,
+}: {
+  release: HostRelease | null
+  checking: boolean
+  failed: boolean
+  hostLabel: string
+  checked: boolean
+  onChange: (next: boolean) => void
+  className?: string
+}) {
+  if (checking) {
+    return (
+      <p className={cn('text-2xs text-muted-foreground', className)}>
+        Checking {hostLabel} for a release that uses this tag…
+      </p>
+    )
+  }
+  if (failed) {
+    return (
+      <p className={cn('text-2xs text-muted-foreground', className)}>
+        Could not check {hostLabel} for a release. Any release for this tag will stay.
+      </p>
+    )
+  }
+  if (!release) return null
+  return (
+    <label className={cn('flex cursor-pointer items-start gap-2 text-xs text-sub', className)}>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="mt-0.5 size-3.5 accent-[var(--gw-accent)]"
+      />
+      <span>
+        Also delete its {release.draft ? 'draft release' : 'release'}{' '}
+        <span className="font-mono text-foreground">{release.name}</span>
+        <span className="block text-2xs text-muted-foreground">
+          {release.draft
+            ? 'Only people who can edit this project can see it.'
+            : `People will no longer be able to download it from ${hostLabel}.`}
+        </span>
+      </span>
+    </label>
   )
 }

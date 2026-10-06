@@ -236,11 +236,10 @@ pub async fn open_spec_desk(
     // restores a saved position for `AGENT_DESK_LABEL` itself on later opens,
     // so only the very first Agent Desk a user ever opens (with no legacy
     // Desk to inherit from) sees these numbers.
-    let window = WebviewWindowBuilder::new(&app, AGENT_DESK_LABEL, WebviewUrl::App(url.into()))
+    let builder = WebviewWindowBuilder::new(&app, AGENT_DESK_LABEL, WebviewUrl::App(url.into()))
         .title(format!("Agent Desk - {repo_name}"))
         .inner_size(940.0, 760.0)
         .min_inner_size(720.0, 560.0)
-        .decorations(false)
         .resizable(true)
         // Both of these match the main window's tauri.conf.json entry, and both
         // are load-bearing rather than cosmetic.
@@ -255,7 +254,20 @@ pub async fn open_spec_desk(
         // `resizable` is stated for the same reason: nothing here should depend
         // on a builder default that the main window never relies on.
         .disable_drag_drop_handler()
-        .background_color(tauri::window::Color(0x12, 0x12, 0x12, 0xff))
+        .background_color(tauri::window::Color(0x12, 0x12, 0x12, 0xff));
+
+    // Every other platform gets the Desk's own window buttons. A Mac window
+    // keeps its native ones, drawn over the top-left of the Desk's title bar.
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .decorations(true)
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true)
+        .traffic_light_position(tauri::LogicalPosition::new(16.0, 13.0));
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.decorations(false);
+
+    let window = builder
         .build()
         .map_err(|e| AppError::Other(format!("could not open the Agent Desk window: {e}")))?;
 

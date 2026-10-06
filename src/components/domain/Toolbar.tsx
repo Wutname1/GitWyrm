@@ -38,7 +38,10 @@ import { SyncBadge } from "@/components/domain/branch/SyncBadge";
 import { OpenInEditorButton } from "@/components/domain/OpenInEditorButton";
 import { OpenSpecDeskButton } from "@/components/domain/OpenSpecDeskButton";
 import { useBranches, useRemotes, useStashes } from "@/hooks/useGitQueries";
+import { useMehenPushNote } from "@/hooks/useMehen";
+import { pushNoteHint } from "@/lib/mehen";
 import { useGitMutations } from "@/hooks/useGitMutations";
+import { useAutoFetchFailure } from "@/hooks/useAutoFetch";
 import { useUiStore } from "@/stores/uiStore";
 import { useActiveRepo } from "@/stores/workspaceStore";
 
@@ -51,6 +54,8 @@ interface ToolbarButtonProps {
   pending?: boolean;
   /** Why the button is off, shown on hover in place of the usual tooltip. */
   reason?: string;
+  /** A heads-up shown under the label on hover. Never stops the click. */
+  hint?: string;
 }
 
 function ToolbarButton({
@@ -61,12 +66,24 @@ function ToolbarButton({
   disabled,
   pending,
   reason,
+  hint,
 }: ToolbarButtonProps) {
   return (
     <DisabledHint disabled={disabled} reason={reason}>
       <TooltipButton
         onClick={onClick}
-        tooltip={disabled && reason ? reason : label}
+        tooltip={
+          disabled && reason ? (
+            reason
+          ) : hint ? (
+            <span className="flex max-w-72 flex-col gap-0.5">
+              <span>{label}</span>
+              <span className="text-sub">{hint}</span>
+            </span>
+          ) : (
+            label
+          )
+        }
         // Keep the name describing what the button does. Without this the
         // name would fall back to the reason, leaving every disabled button
         // in the toolbar announced identically.
@@ -275,6 +292,8 @@ export function Toolbar() {
   const openModal = useUiStore((s) => s.openModal);
   const openRemoteSync = useUiStore((s) => s.openRemoteSync);
   const head = branches.data?.local.find((b) => b.is_head);
+  const pushNote = useMehenPushNote(repo?.id ?? null, head).data;
+  const autoFetchFailure = useAutoFetchFailure(repo?.id ?? null);
   const syncAction = m.fetch.isPending
     ? "fetch"
     : m.pull.isPending
@@ -324,6 +343,11 @@ export function Toolbar() {
         disabled={noRepo || syncPending}
         reason={noRepoReason}
         pending={m.fetch.isPending}
+        hint={
+          autoFetchFailure
+            ? `The last automatic fetch did not work: ${autoFetchFailure.replace(/^git fetch failed:\s*/, "")}`
+            : undefined
+        }
       />
       <ToolbarButton
         icon={<ArrowDown size={16} strokeWidth={1.9} />}
@@ -358,6 +382,7 @@ export function Toolbar() {
         disabled={noRepo || syncPending}
         reason={noRepoReason}
         pending={m.push.isPending}
+        hint={pushNote ? pushNoteHint(pushNote) : undefined}
       />
 
       {syncAction && (

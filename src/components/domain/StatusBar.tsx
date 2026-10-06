@@ -15,6 +15,7 @@ import {
 } from '@/stores/workspaceStore'
 import { Button } from '@/components/ui/button'
 import { ReportProblemModal } from '@/components/modals/ReportProblemModal'
+import { MehenSegment } from '@/components/domain/MehenStatus'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Slider } from '@/components/ui/slider'
 import { Tooltip, TooltipContent, TooltipHint, TooltipTrigger } from '@/components/ui/tooltip'
@@ -278,6 +279,7 @@ export function StatusBar() {
       <span className="text-muted-foreground">{total} changes</span>
       <AiRunSegment />
       <OpenspecSegment />
+      <MehenSegment />
       <div className="flex-1" />
       <UpdateButton />
       {inWorktree && current && (

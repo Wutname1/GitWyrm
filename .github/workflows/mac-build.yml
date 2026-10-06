@@ -1,0 +1,71 @@
+name: Mac Build
+
+# Builds the macOS app on demand, without tagging a release or touching the
+# updater, the CDN or the release page. Run it from the Actions tab ("Run
+# workflow") to get a .dmg for a tester, or to find out whether the code still
+# compiles on macOS before a tag depends on it.
+#
+# The result is a workflow artifact, not a release asset: open the finished run
+# and download "GitWyrm-macOS-arm64" or "GitWyrm-macOS-x64" from the bottom of
+# the page. A GitHub login with access to the repository is needed to download.
+#
+# The app is ad-hoc signed, not notarized, so the first launch needs
+# right-click > Open (or System Settings > Privacy & Security > Open Anyway).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS-arm64
+            os: macos-latest
+            rust_target: aarch64-apple-darwin
+          - name: macOS-x64
+            os: macos-15-intel
+            rust_target: x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.name }}
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # No tagName: tauri-action builds and signs the bundle but creates no
+      # release. TAURI_SIGNING_PRIVATE_KEY is still needed because
+      # createUpdaterArtifacts is on in tauri.conf.json.
+      - name: Build
+        uses: tauri-apps/tauri-action@v1
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          args: --target ${{ matrix.rust_target }} --config src-tauri/tauri.macos.conf.json
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: GitWyrm-${{ matrix.name }}
+          path: src-tauri/target/${{ matrix.rust_target }}/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+          retention-days: 14

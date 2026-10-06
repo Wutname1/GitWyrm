@@ -3,7 +3,8 @@ import type { BranchInfo } from '@/lib/bindings'
 import { PendingMenuItem } from '@/components/ui/pending-menu-item'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useBranchHost } from '@/hooks/useGitQueries'
-import { branchActions } from '@/lib/branchActions'
+import { branchActions, branchSync } from '@/lib/branchActions'
+import { useUiStore } from '@/stores/uiStore'
 
 interface BranchRemoteItemsProps {
   branch: BranchInfo
@@ -26,7 +27,12 @@ export function BranchRemoteItems({ branch, repoId, opInProgress }: BranchRemote
 
   const isPushing = m.pushBranch.isPending && m.pushBranch.variables === branch.name
   const isPulling = m.pullBranch.isPending && m.pullBranch.variables === branch.name
-  const busy = m.pushBranch.isPending || m.pullBranch.isPending
+  const busy = m.pushBranch.isPending || m.pullBranch.isPending || m.pushBranchForce.isPending
+  const openPushChoice = useUiStore((s) => s.openPushChoice)
+  // Behind its cloud copy (after a rebase, say): a plain push is refused, so ask
+  // whether to get those changes first or force push.
+  const pushOrAsk = () =>
+    branchSync(branch).behind > 0 ? openPushChoice(branch.name) : m.pushBranch.mutate(branch.name)
 
   return (
     <>
@@ -37,7 +43,7 @@ export function BranchRemoteItems({ branch, repoId, opInProgress }: BranchRemote
           pendingLabel="Sending…"
           pending={isPushing}
           disabled={opInProgress || busy}
-          onRun={() => m.pushBranch.mutate(branch.name)}
+          onRun={pushOrAsk}
         />
       )}
       {actions.pull.show && (

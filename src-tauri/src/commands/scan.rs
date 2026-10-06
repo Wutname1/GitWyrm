@@ -28,34 +28,45 @@ fn read_head_branch(git_dir: &Path) -> Option<String> {
 #[tauri::command]
 #[specta::specta]
 pub async fn scan_code_folder(folder: String) -> Result<Vec<ScannedRepo>, AppError> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let root = Path::new(&folder);
-        if !root.is_dir() {
-            return Err(AppError::Other(format!("not a directory: {folder}")));
-        }
+    tauri::async_runtime::spawn_blocking(move || scan_folder(Path::new(&folder)))
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))?
+}
 
-        let mut repos = Vec::new();
-        for entry in fs::read_dir(root)?.flatten() {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            let git_dir = path.join(".git");
-            if !git_dir.is_dir() {
-                continue;
-            }
-            let name = entry.file_name().to_string_lossy().into_owned();
-            repos.push(ScannedRepo {
-                head_branch: read_head_branch(&git_dir),
-                path: path.to_string_lossy().into_owned(),
-                name,
-            });
+/// The repositories directly inside `root`, one level deep by design.
+pub(crate) fn scan_folder(root: &Path) -> Result<Vec<ScannedRepo>, AppError> {
+    // A watched folder that was moved or deleted (GITWYRM-BACKEND-A). The list
+    // already shows it as unavailable; this is the sentence behind that.
+    if !root.exists() {
+        log::info!("scan: {} does not exist", root.display());
+        return Err(AppError::Other(crate::state::FOLDER_NOT_FOUND.into()));
+    }
+    if !root.is_dir() {
+        return Err(AppError::Other(format!(
+            "not a directory: {}",
+            root.display()
+        )));
+    }
+
+    let mut repos = Vec::new();
+    for entry in fs::read_dir(root)?.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
         }
-        repos.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-        Ok(repos)
-    })
-    .await
-    .map_err(|e| AppError::Other(e.to_string()))?
+        let git_dir = path.join(".git");
+        if !git_dir.is_dir() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        repos.push(ScannedRepo {
+            head_branch: read_head_branch(&git_dir),
+            path: path.to_string_lossy().into_owned(),
+            name,
+        });
+    }
+    repos.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(repos)
 }
 
 /// A local repository that already has the remote the user pasted.

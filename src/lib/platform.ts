@@ -28,6 +28,27 @@ export function isWindows(): boolean {
   return raw().toLowerCase().startsWith('win')
 }
 
+/** True on macOS. */
+export function isMac(): boolean {
+  return raw().toLowerCase().startsWith('mac')
+}
+
+/**
+ * Width to leave empty at the left of a title bar for the native close,
+ * minimize and zoom buttons. On a Mac the window keeps those buttons and draws
+ * them over the top-left of our own title bar, so the first thing in the bar
+ * has to start to their right. Zero everywhere else.
+ */
+export function trafficLightInset(): number {
+  return isMac() ? 80 : 0
+}
+
+/** Inline style that applies {@link trafficLightInset}; undefined when there is none. */
+export function titleBarInsetStyle(): { paddingLeft: number } | undefined {
+  const inset = trafficLightInset()
+  return inset > 0 ? { paddingLeft: inset } : undefined
+}
+
 /** True on Linux. */
 export function isLinux(): boolean {
   return raw().toLowerCase().startsWith('linux')

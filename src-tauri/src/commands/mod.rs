@@ -18,6 +18,7 @@ pub mod file;
 pub mod github;
 pub mod gitignore;
 pub mod log;
+pub mod mehen;
 pub mod merge;
 pub mod opencode;
 pub mod openspec;
@@ -37,6 +38,7 @@ pub mod stash;
 pub mod status;
 pub mod submodule;
 pub mod tutorial;
+pub mod update_all;
 pub mod updates;
 pub mod worktree;
 

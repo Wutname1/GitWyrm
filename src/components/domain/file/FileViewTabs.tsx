@@ -4,24 +4,27 @@ import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
 import { useNeverCommitted } from '@/hooks/useGitQueries'
 import type { DiffSource } from '@/lib/bindings'
+import { isMarkdownPath } from '@/lib/markdownFile'
 
-export type FileViewMode = 'diff' | 'raw' | 'history' | 'blame'
+export type FileViewMode = 'diff' | 'raw' | 'rendered' | 'history' | 'blame'
 
 /**
- * Switches between the four ways of looking at one file. Shared by the diff
+ * Switches between the ways of looking at one file. Shared by the diff
  * header and the raw / history / blame header so the control sits in the same
  * place and behaves the same way in all of them.
  *
  * Diff follows the commit you are looking at: from a past commit it shows that
  * commit's own change to the file, and with no commit in context -- the file
  * came from pending changes -- it falls back to the working tree. Raw follows
- * the same commit, showing the file whole rather than only what changed.
+ * the same commit, showing the file whole rather than only what changed, and
+ * Markdown files also get Rendered: that same version, laid out as a page.
  */
 export function FileViewTabs({ path, mode }: { path: string; mode: FileViewMode }) {
   const openDiff = useUiStore((s) => s.openDiff)
   const openFileHistory = useUiStore((s) => s.openFileHistory)
   const openBlame = useUiStore((s) => s.openBlame)
   const openRaw = useUiStore((s) => s.openRaw)
+  const openRendered = useUiStore((s) => s.openRendered)
   const sha = useUiStore((s) => s.fileTarget?.sha ?? null)
   const diffRequest = useUiStore((s) => s.diffRequest)
   const repo = useActiveRepo()
@@ -43,12 +46,16 @@ export function FileViewTabs({ path, mode }: { path: string; mode: FileViewMode 
     [
       ['diff', 'Diff', () => openDiff({ path, source })],
       ['raw', 'Raw', () => openRaw(path)],
+      ['rendered', 'Rendered', () => openRendered(path)],
       ['history', 'History', () => openFileHistory(path)],
       ['blame', 'Blame', () => openBlame(path)],
     ] as const
     // Raw reads the file itself, so unlike History and Blame it has something
     // to show for a file that has never been committed.
-  ).filter(([key]) => key === 'diff' || key === 'raw' || !neverCommitted)
+  ).filter(([key]) => {
+    if (key === 'rendered') return isMarkdownPath(path)
+    return key === 'diff' || key === 'raw' || !neverCommitted
+  })
 
   // A lone Diff tab is a label, not a choice.
   if (tabs.length < 2) return null

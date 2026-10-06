@@ -32,6 +32,108 @@ fn line_stats(diff: &git2::Diff) -> HashMap<String, (u32, u32)> {
     stats
 }
 
+/// Past this many files on one side (staged, or not staged), that side skips
+/// the two expensive extras: pairing deleted files with new ones as renames,
+/// and counting changed lines.
+///
+/// Both read file contents. Pairing compares every new file against every
+/// deleted one, and counting diffs every changed file, so a restructure that
+/// moved a thousand files turned one status refresh into seconds of work, run
+/// again on every stage click and every file save with the repository lock
+/// held throughout (GITWYRM-FRONTEND-1F). Measured on 1,000 moved files plus
+/// 300 edits in a debug build: 0.45s for the plain scan, +2.2s to pair the
+/// renames, +3.6s to count lines.
+///
+/// Past the limit a move reads as a delete plus an add, as it does in git once
+/// rename detection gives up, and the rows show no line counts.
+pub(crate) const MAX_FILES_FOR_DETAIL: usize = 500;
+
+/// How many files changed on each side of a rename-free status scan.
+#[derive(Default, Clone, Copy)]
+pub(crate) struct SideCounts {
+    pub staged: usize,
+    pub unstaged: usize,
+    staged_new: usize,
+    staged_deleted: usize,
+    unstaged_new: usize,
+    unstaged_deleted: usize,
+}
+
+impl SideCounts {
+    fn of(statuses: &git2::Statuses) -> Self {
+        let mut c = SideCounts::default();
+        for entry in statuses.iter() {
+            let st = entry.status();
+            c.staged += st.intersects(
+                Status::INDEX_NEW
+                    | Status::INDEX_MODIFIED
+                    | Status::INDEX_DELETED
+                    | Status::INDEX_RENAMED
+                    | Status::INDEX_TYPECHANGE,
+            ) as usize;
+            c.unstaged += st.intersects(
+                Status::WT_NEW
+                    | Status::WT_MODIFIED
+                    | Status::WT_DELETED
+                    | Status::WT_RENAMED
+                    | Status::WT_TYPECHANGE,
+            ) as usize;
+            c.staged_new += st.contains(Status::INDEX_NEW) as usize;
+            c.staged_deleted += st.contains(Status::INDEX_DELETED) as usize;
+            c.unstaged_new += st.contains(Status::WT_NEW) as usize;
+            c.unstaged_deleted += st.contains(Status::WT_DELETED) as usize;
+        }
+        c
+    }
+
+    /// Pair a side only when it could hold a rename (something new AND something
+    /// deleted) and is small enough to pair cheaply.
+    fn pair_staged(&self) -> bool {
+        self.staged_new > 0 && self.staged_deleted > 0 && self.staged <= MAX_FILES_FOR_DETAIL
+    }
+
+    fn pair_unstaged(&self) -> bool {
+        self.unstaged_new > 0 && self.unstaged_deleted > 0 && self.unstaged <= MAX_FILES_FOR_DETAIL
+    }
+}
+
+fn plain_status_options() -> StatusOptions {
+    let mut opts = StatusOptions::new();
+    opts.include_untracked(true).recurse_untracked_dirs(true);
+    opts
+}
+
+/// The working tree's status, with renames paired where that is affordable.
+///
+/// Scans once without rename detection, which only compares file stats, then
+/// scans again with detection for a side that could hold a rename and is under
+/// [`MAX_FILES_FOR_DETAIL`]. Most refreshes have no new-plus-deleted pair and
+/// stop after the first scan.
+///
+/// `refresh_index` writes refreshed stat data back to the index on the first
+/// scan; the second never needs to.
+pub(crate) fn status_with_renames(
+    repo: &git2::Repository,
+    refresh_index: bool,
+) -> Result<(git2::Statuses<'_>, SideCounts), git2::Error> {
+    let mut opts = plain_status_options();
+    opts.update_index(refresh_index);
+    let plain = repo.statuses(Some(&mut opts))?;
+    let counts = SideCounts::of(&plain);
+    if !counts.pair_staged() && !counts.pair_unstaged() {
+        return Ok((plain, counts));
+    }
+    drop(plain);
+    let mut opts = plain_status_options();
+    opts.renames_head_to_index(counts.pair_staged())
+        // Without this, a rename that is not yet staged is reported as a delete
+        // plus an add, so the same change looks different before and after
+        // staging. Detect it on both sides so the two agree.
+        .renames_index_to_workdir(counts.pair_unstaged())
+        .update_index(false);
+    Ok((repo.statuses(Some(&mut opts))?, counts))
+}
+
 /// Current and previous path for a status entry's delta.
 ///
 /// `StatusEntry::path()` returns the delta's *old* path, which for a rename is
@@ -174,32 +276,32 @@ fn head_sync(repo: &git2::Repository) -> Option<(u32, u32)> {
 /// counts. Split out from the command so it can run under a coalesced read.
 fn working_status(repo: &git2::Repository) -> Result<WorkingStatus, AppError> {
     {
-        let mut opts = StatusOptions::new();
-        opts.include_untracked(true)
-            .recurse_untracked_dirs(true)
-            .renames_head_to_index(true)
-            // Without this, a rename that is not yet staged is reported as a delete
-            // plus an add, so the same change looks different before and after
-            // staging. Detect it on both sides so the two agree.
-            .renames_index_to_workdir(true)
-            .update_index(true);
-        let statuses = repo.statuses(Some(&mut opts))?;
+        let (statuses, sides) = status_with_renames(repo, true)?;
+        let count_staged = sides.staged <= MAX_FILES_FOR_DETAIL;
+        let count_unstaged = sides.unstaged <= MAX_FILES_FOR_DETAIL;
 
         // Line counts: staged = HEAD tree -> index; unstaged = index -> workdir.
+        // Skipped for a side too large to count; see MAX_FILES_FOR_DETAIL.
         let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
         let mut diff_opts = DiffOptions::new();
         diff_opts
             .include_untracked(true)
             .show_untracked_content(true)
             .recurse_untracked_dirs(true);
-        let staged_stats = repo
-            .diff_tree_to_index(head_tree.as_ref(), None, None)
-            .map(|d| line_stats(&d))
-            .unwrap_or_default();
-        let unstaged_stats = repo
-            .diff_index_to_workdir(None, Some(&mut diff_opts))
-            .map(|d| line_stats(&d))
-            .unwrap_or_default();
+        let staged_stats = if count_staged {
+            repo.diff_tree_to_index(head_tree.as_ref(), None, None)
+                .map(|d| line_stats(&d))
+                .unwrap_or_default()
+        } else {
+            HashMap::new()
+        };
+        let unstaged_stats = if count_unstaged {
+            repo.diff_index_to_workdir(None, Some(&mut diff_opts))
+                .map(|d| line_stats(&d))
+                .unwrap_or_default()
+        } else {
+            HashMap::new()
+        };
 
         // Submodule pointer moves, keyed by path. A submodule shows up as a plain
         // WT_MODIFIED entry here; we tag those so the frontend can treat them
@@ -220,6 +322,7 @@ fn working_status(repo: &git2::Repository) -> Result<WorkingStatus, AppError> {
                     status: StatusCode::Conflicted,
                     additions: 0,
                     deletions: 0,
+                    lines_counted: true,
                     conflicted: true,
                     submodule: None,
                 });
@@ -252,6 +355,7 @@ fn working_status(repo: &git2::Repository) -> Result<WorkingStatus, AppError> {
                     status: code,
                     additions: a,
                     deletions: d,
+                    lines_counted: count_staged,
                     conflicted: false,
                     submodule: submodules.get(&new_path).cloned(),
                     path: new_path,
@@ -283,6 +387,7 @@ fn working_status(repo: &git2::Repository) -> Result<WorkingStatus, AppError> {
                     status: code,
                     additions: a,
                     deletions: d,
+                    lines_counted: count_unstaged,
                     conflicted: false,
                     submodule,
                 });
@@ -449,5 +554,84 @@ mod tests {
             "no upstream to compare"
         );
         assert_eq!(counts.uncommitted, 1, "file counting still works detached");
+    }
+
+    /// Commit `count` files with distinct contents under `dir/`.
+    fn commit_files(repo: &Repository, dir: &str, count: usize) {
+        let root = repo.workdir().expect("workdir").join(dir);
+        fs::create_dir_all(&root).expect("dir");
+        for i in 0..count {
+            let body: String = (0..20).map(|l| format!("file {i} line {l}\n")).collect();
+            fs::write(root.join(format!("f{i}.txt")), body).expect("write");
+        }
+        commit_all(repo, "files");
+    }
+
+    /// Move `count` committed files from `from/` to `to/` without staging.
+    fn move_files(repo: &Repository, from: &str, to: &str, count: usize) {
+        let root = repo.workdir().expect("workdir").to_path_buf();
+        fs::create_dir_all(root.join(to)).expect("dir");
+        for i in 0..count {
+            fs::rename(
+                root.join(from).join(format!("f{i}.txt")),
+                root.join(to).join(format!("f{i}.txt")),
+            )
+            .expect("move");
+        }
+    }
+
+    /// Under the limit a move is still one renamed row with its line counts.
+    #[test]
+    fn a_small_move_still_reads_as_a_rename() {
+        let (_dir, repo) = repo_with_commit();
+        commit_files(&repo, "old", 3);
+        move_files(&repo, "old", "new", 1);
+
+        let status = working_status(&repo).expect("status");
+        assert_eq!(status.unstaged.len(), 1, "one move is one row");
+        let row = &status.unstaged[0];
+        assert_eq!(row.status, StatusCode::Renamed);
+        assert_eq!(row.path, "new/f0.txt");
+        assert_eq!(row.old_path.as_deref(), Some("old/f0.txt"));
+        assert!(row.lines_counted);
+    }
+
+    /// Past the limit a side skips rename pairing and line counts, and says so,
+    /// while a small staged side keeps both (GITWYRM-FRONTEND-1F).
+    #[test]
+    fn a_large_restructure_skips_the_expensive_detail_per_side() {
+        let (dir, repo) = repo_with_commit();
+        let moved = MAX_FILES_FOR_DETAIL / 2 + 1;
+        commit_files(&repo, "old", moved);
+        move_files(&repo, "old", "new", moved);
+        fs::write(dir.path().join("base.txt"), "base\nedited\n").expect("edit");
+        let mut index = repo.index().expect("index");
+        index
+            .add_path(std::path::Path::new("base.txt"))
+            .expect("stage");
+        index.write().expect("write index");
+
+        let status = working_status(&repo).expect("status");
+
+        assert_eq!(
+            status.unstaged.len(),
+            moved * 2,
+            "each move reads as a delete plus an add"
+        );
+        assert!(status
+            .unstaged
+            .iter()
+            .all(|f| f.status != StatusCode::Renamed));
+        assert!(status
+            .unstaged
+            .iter()
+            .all(|f| !f.lines_counted && f.additions == 0));
+
+        assert_eq!(status.staged.len(), 1);
+        assert!(
+            status.staged[0].lines_counted,
+            "the small side is still counted"
+        );
+        assert_eq!(status.staged[0].additions, 1);
     }
 }

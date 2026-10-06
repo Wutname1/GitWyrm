@@ -154,6 +154,13 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     keywords: ['fetch', 'remote', 'background', 'automatic', 'refresh', 'ahead', 'behind'],
   },
   {
+    id: 'update-all-on-start',
+    section: 'behavior',
+    label: 'Get the latest for all projects',
+    hint: 'When GitWyrm opens, bring every project in your code folders up to date with its server.',
+    keywords: ['pull', 'all', 'everything', 'update', 'startup', 'latest', 'branches', 'repositories', 'projects'],
+  },
+  {
     id: 'show-tips',
     section: 'behavior',
     label: 'Tips',
@@ -262,6 +269,41 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     label: 'Issues on tabs',
     hint: 'Show the number of open issues on each repository tab.',
     keywords: ['issue', 'issues', 'count', 'badge', 'tab', 'number', 'github'],
+  },
+  {
+    id: 'mehen-status',
+    section: 'integrations',
+    label: 'Mehen',
+    hint: 'Mehen checks your packages for known security problems. See when it last checked, or open it.',
+    keywords: ['mehen', 'packages', 'dependencies', 'security', 'vulnerabilities', 'npm', 'cargo', 'nuget'],
+  },
+  {
+    id: 'mehen-show-status',
+    section: 'integrations',
+    label: 'Status bar',
+    hint: 'Show what Mehen flags in the status bar, and mention security fixes when you push package changes.',
+    keywords: ['mehen', 'unsafe', 'vulnerable', 'security', 'dependencies', 'packages', 'status bar', 'push'],
+  },
+  {
+    id: 'mehen-tab-level',
+    section: 'integrations',
+    label: 'What Mehen flags',
+    hint: 'Choose what the tab badge, status bar and sidebar count: security fixes by severity, or updates too.',
+    keywords: ['mehen', 'unsafe', 'vulnerable', 'badge', 'tab', 'count', 'shield', 'critical', 'high', 'medium', 'severity', 'outdated', 'updates', 'major', 'minor'],
+  },
+  {
+    id: 'mehen-keep-fresh',
+    section: 'integrations',
+    label: "Keep Mehen's results up to date",
+    hint: 'Let Mehen check in the background when its results are old or a pull changes your packages.',
+    keywords: ['mehen', 'background', 'check', 'refresh', 'automatic', 'scan', 'stale'],
+  },
+  {
+    id: 'mehen-new-fix-notes',
+    section: 'integrations',
+    label: 'New security fixes',
+    hint: 'Tell me once when Mehen finds a new fix for a project I have open.',
+    keywords: ['mehen', 'notify', 'notification', 'alert', 'fix', 'security', 'toast'],
   },
 
   // -------------------------------------------------------------- openspec

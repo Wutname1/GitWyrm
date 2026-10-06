@@ -8,6 +8,7 @@ import {
 import { toast } from 'sonner'
 import {
   commands,
+  type BranchList,
   type DirtyChoice,
   type EditorKind,
   type PullResult,
@@ -17,18 +18,23 @@ import {
   type ResetMode,
   type SelectedLine,
   type SubmoduleFollowed,
+  type WorkingStatus,
 } from '@/lib/bindings'
 import { beginGitOperation, keys, trimLogToFirstPage, unwrap } from '@/lib/queryKeys'
 import { useHostResolver } from '@/hooks/useGitQueries'
+import { hostingKeys } from '@/hooks/useGithub'
 import { timed } from '@/lib/perfTrail'
 import { noteManualFetch } from '@/hooks/useAutoFetch'
+import { cachedPushNote, showPushNoteToast } from '@/hooks/useMehen'
 import { classifyError } from '@/lib/errorClass'
+import { showErrorToast } from '@/lib/errorToast'
 import { copyToClipboard } from '@/lib/clipboard'
 import { plural, shortSha } from '@/lib/gitDisplay'
 import { log } from '@/lib/log'
 import { removeOutcomeMessage } from '@/lib/worktreeCopy'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useUiStore } from '@/stores/uiStore'
+import { showRepoUpdateResult } from '@/stores/updateAllStore'
 
 type QueryName =
   | 'status'
@@ -166,19 +172,27 @@ function invalidate(qc: QueryClient, repoId: string, which: QueryName[]) {
 }
 
 /**
+ * Refresh everything a "get latest" can move in an open repository: branches
+ * and remote refs, the working tree (when the checked-out branch moved), and
+ * stashes (when changes were set aside and kept).
+ */
+export function refreshAfterBranchUpdate(qc: QueryClient, repoId: string) {
+  invalidate(qc, repoId, [...REMOTE_REFS, 'status', 'stashes', 'submodules'])
+}
+
+/**
  * Every mutation failure flows through here. It logs the raw error to
  * the app log (so there is always a durable trace) and shows the user a
  * classified, plain-language toast at the right severity -- info for benign
  * no-ops, warning for recoverable conflicts, error for real failures.
  */
 const onError = (e: Error) => {
-  const { severity, message, raw } = classifyError(e)
+  const classified = classifyError(e)
+  const { severity, raw } = classified
   log[severity === 'info' ? 'info' : severity === 'warning' ? 'warn' : 'error'](
     `mutation failed [${severity}]: ${raw}`
   )
-  if (severity === 'info') toast.info(message)
-  else if (severity === 'warning') toast.warning(message)
-  else toast.error(message)
+  showErrorToast(classified)
 }
 
 /**
@@ -271,7 +285,17 @@ function describeStashedSubmodules(subs: PullResult['submodules']): string {
 
 function describePull(r: PullResult, host: string | null): string {
   const stashed = describeStashedSubmodules(r.submodules)
+  // A detached checkout (the usual state of a submodule) was put on a branch
+  // first. Say so, or the branch name appearing in the sidebar is unexplained.
+  const onBranch = r.attached ? `Switched to ${r.attached}. ` : ''
 
+  if (r.needs_choice) {
+    return `${onBranch}It has commits of its own and new ones on ${describeTarget(r, host)}. Choose how to combine them.`
+  }
+  return onBranch + describePullCounts(r, host, stashed)
+}
+
+function describePullCounts(r: PullResult, host: string | null, stashed: string): string {
   if (r.received === 0) {
     const base = r.branch
       ? `Nothing new to get - ${r.branch} already matches ${describeTarget(r, host)}`
@@ -326,6 +350,7 @@ export function useGitMutations(repoId: string | null) {
   const repoPath = useWorkspaceStore((s) => s.openRepos.find((r) => r.id === repoId)?.path ?? null)
   const resolveTagSettings = useWorkspaceStore((s) => s.resolveTagSettings)
   const promptPushTags = useUiStore((s) => s.promptPushTags)
+  const openRemoteSync = useUiStore((s) => s.openRemoteSync)
   const commitLanding = useUiStore((s) => s.commitLanding)
 
   /**
@@ -666,13 +691,15 @@ export function useGitMutations(repoId: string | null) {
       /** Change id for the `Spec:` trailer; omitted when unlinked or removed. */
       specId?: string | null
     }) =>
-      unwrap(
-        await commands.createCommit(
-          id,
-          args.summary,
-          args.description,
-          args.amend ?? false,
-          args.specId ?? null,
+      timed('git.commit', async () =>
+        unwrap(
+          await commands.createCommit(
+            id,
+            args.summary,
+            args.description,
+            args.amend ?? false,
+            args.specId ?? null,
+          ),
         ),
       ),
     onSuccess: (sha, args) => {
@@ -681,6 +708,15 @@ export function useGitMutations(repoId: string | null) {
       // so without this the row would vanish and the graph would collapse a
       // row, then push everything back down when the commit finally arrives.
       commitLanding(sha)
+      // A commit that succeeded took everything that was staged, so clear that
+      // list now instead of waiting for the status refetch. That refetch queues
+      // behind the graph and branch reloads for the same repository lock, which
+      // left committed files on screen for seconds after the message box had
+      // already emptied (GITWYRM-FRONTEND-19). Unstaged files are untouched by a
+      // commit and stay as they are; the refetch below confirms the real state.
+      qc.setQueryData<WorkingStatus>(keys.status(id), (current) =>
+        current ? { ...current, staged: [] } : current,
+      )
       invalidate(qc, id, ['status', 'log', 'branches'])
       toast(args.amend ? `Amended ${shortSha(sha)}` : `Committed ${shortSha(sha)}`)
     },
@@ -708,7 +744,9 @@ export function useGitMutations(repoId: string | null) {
    */
   const deleteBranch = useMutation({
     mutationFn: async (name: string) => {
-      const outcome = unwrap(await commands.deleteBranch(id, name))
+      const outcome = await timed('git.deleteBranch', async () =>
+        unwrap(await commands.deleteBranch(id, name)),
+      )
       return { name, outcome }
     },
     onSuccess: ({ name, outcome }) => {
@@ -718,6 +756,12 @@ export function useGitMutations(repoId: string | null) {
         })
         return
       }
+      // Drop it from the list straight away; the refetch that confirms it waits
+      // on the graph reload, and a deleted branch lingering there read as the
+      // delete itself being slow (GITWYRM-FRONTEND-19).
+      qc.setQueryData<BranchList>(keys.branches(id), (current) =>
+        current ? { ...current, local: current.local.filter((b) => b.name !== name) } : current,
+      )
       invalidate(qc, id, REFS)
       toast(`Deleted branch ${name}`)
     },
@@ -810,39 +854,20 @@ export function useGitMutations(repoId: string | null) {
   })
 
   /**
-   * Bring several branches up to date without checking them out.
+   * Bring branches up to date with one trip to the server: fetch every
+   * remote, then move each branch that is only behind. `null` means every
+   * branch that tracks a remote.
    *
-   * Only fast-forwards, the same as the single-branch action -- a branch with
-   * its own commits needs a real merge and is reported rather than forced.
+   * Only fast-forwards -- a branch with its own commits needs a real merge and
+   * is reported rather than forced. The checked-out branch moves too, with any
+   * unsaved changes set aside and put back, the same as a plain pull.
    */
   const pullBranchesMany = useMutation({
-    mutationFn: (branches: string[]) =>
-      asGitOperation(id, async () => {
-        const updated: string[] = []
-        const failed: { name: string; reason: string }[] = []
-        for (const branch of branches) {
-          try {
-            await unwrap(await commands.gitPullBranch(id, branch))
-            updated.push(branch)
-          } catch (e) {
-            failed.push({ name: branch, reason: (e as Error).message })
-            logQuietFailure(e as Error)
-          }
-        }
-        return { updated, failed, total: branches.length }
-      }),
-    onSuccess: (r) => {
-      if (r.failed.length === 0) {
-        toast(`Updated ${plural(r.updated.length, 'branch')}`)
-        return
-      }
-      toast.warning(
-        `Updated ${plural(r.updated.length, 'branch')}; ${r.failed.length} could not be updated`,
-        { description: r.failed.slice(0, 3).map((f) => `${f.name}: ${f.reason}`).join(' · ') }
-      )
-    },
+    mutationFn: (branches: string[] | null) =>
+      asGitOperation(id, async () => unwrap(await commands.pullBranches(id, branches))),
+    onSuccess: (report) => showRepoUpdateResult(report),
     onError,
-    onSettled: () => invalidate(qc, id, [...REFS, 'status']),
+    onSettled: () => refreshAfterBranchUpdate(qc, id),
   })
 
   /**
@@ -967,15 +992,24 @@ export function useGitMutations(repoId: string | null) {
    * the two never drift apart in the UI. The remote goes first: if it fails the
    * tag is still here to try again, whereas the reverse would leave a published
    * tag with no local copy to delete it from.
+   *
+   * A release on the host (`releaseId`) goes before both, for the same reason:
+   * if deleting it fails, nothing else has changed yet and the whole delete can
+   * simply be tried again.
    */
   const deleteTag = useMutation({
     mutationFn: async (args: {
       name: string
       alsoRemote?: boolean
       remote?: string
+      /** The host release for this tag, deleted first. Only with `alsoRemote`. */
+      releaseId?: string
       /** Caller reports the failure itself (a progress modal); skip the toast. */
       quiet?: boolean
     }) => {
+      if (args.alsoRemote && args.releaseId) {
+        await unwrap(await commands.hostDeleteRelease(id, args.releaseId))
+      }
       if (args.alsoRemote) {
         await unwrap(await commands.deleteRemoteTag(id, args.name, args.remote ?? ''))
       }
@@ -985,7 +1019,14 @@ export function useGitMutations(repoId: string | null) {
     onSuccess: (args) => {
       invalidate(qc, id, ['tags', 'log'])
       if (args.alsoRemote) qc.invalidateQueries({ queryKey: keys.remoteTagsAll(id) })
-      toast(args.alsoRemote ? `Deleted tag ${args.name} everywhere` : `Deleted tag ${args.name}`)
+      if (args.releaseId) qc.invalidateQueries({ queryKey: hostingKeys.releasesAll(id) })
+      toast(
+        args.alsoRemote && args.releaseId
+          ? `Deleted tag ${args.name} and its release everywhere`
+          : args.alsoRemote
+            ? `Deleted tag ${args.name} everywhere`
+            : `Deleted tag ${args.name}`
+      )
     },
     onError: (e, args) => (args.quiet ? logQuietFailure(e) : onError(e)),
   })
@@ -1009,13 +1050,20 @@ export function useGitMutations(repoId: string | null) {
    * un-published without losing it here.
    */
   const deleteRemoteTag = useMutation({
-    mutationFn: async (args: { name: string; remote?: string }) => {
+    mutationFn: async (args: { name: string; remote?: string; releaseId?: string }) => {
+      // Release first, so a failure leaves the tag published and retryable.
+      if (args.releaseId) await unwrap(await commands.hostDeleteRelease(id, args.releaseId))
       await unwrap(await commands.deleteRemoteTag(id, args.name, args.remote ?? ''))
-      return args.name
+      return args
     },
-    onSuccess: (name) => {
+    onSuccess: (args) => {
       qc.invalidateQueries({ queryKey: keys.remoteTagsAll(id) })
-      toast(`Removed tag ${name} from the remote`)
+      if (args.releaseId) qc.invalidateQueries({ queryKey: hostingKeys.releasesAll(id) })
+      toast(
+        args.releaseId
+          ? `Removed tag ${args.name} and its release from the remote`
+          : `Removed tag ${args.name} from the remote`
+      )
     },
     onError,
   })
@@ -1301,6 +1349,12 @@ export function useGitMutations(repoId: string | null) {
       noteManualFetch(id)
       toast(describePull(result, hostOf(result.upstream)))
       warnStrandedSubmodules(result.submodules)
+      // The pull stopped after putting the checkout on its branch, because that
+      // branch has work on both sides. Hand the merge-or-rebase decision to the
+      // same sync dialog the toolbar opens for any branch in that state.
+      if (result.needs_choice && result.branch && result.upstream) {
+        openRemoteSync(result.upstream, result.branch)
+      }
     },
     onError,
     // A conflicting pull exits as an error but leaves a merge or rebase in
@@ -1318,14 +1372,18 @@ export function useGitMutations(repoId: string | null) {
 
   const push = useMutation({
     mutationKey: syncKey(id, 'push'),
+    // Taken before the push: once it lands, the commits it describes are no
+    // longer outgoing and the note would be worked out as empty.
+    onMutate: () => ({ mehenNote: cachedPushNote(qc, id) }),
     mutationFn: async () =>
       asGitOperation(id, async () => timed('git.push', async () => unwrap(await commands.gitPush(id)))),
-    onSuccess: (result) => {
+    onSuccess: (result, _vars, context) => {
       // REMOTE_REFS, not REFS: a first push publishes the branch, so the
       // sidebar's Remotes section has a new remote branch to show. That list
       // comes from the remotes query, which plain REFS does not refresh.
       invalidate(qc, id, REMOTE_REFS)
       toast(describePush(result, hostOf(result.upstream)))
+      if (result.pushed > 0 && context?.mehenNote) showPushNoteToast(id, context.mehenNote)
       void handleTagsAfterPush()
     },
     onError,
@@ -1400,6 +1458,25 @@ export function useGitMutations(repoId: string | null) {
       ),
     onSuccess: (result) => {
       // See `push`: a force-push moves the remote branch tip the sidebar shows.
+      invalidate(qc, id, REMOTE_REFS)
+      const host = hostOf(result.upstream)
+      toast(
+        result.pushed === 0
+          ? `Force-push finished - ${describeTarget(result, host)} already matched`
+          : `Force-pushed ${commitCount(result.pushed)} to ${describeTarget(result, host)}`
+      )
+    },
+    onError,
+  })
+
+  // Force-push a branch by name, which may not be the one checked out.
+  const pushBranchForce = useMutation({
+    mutationKey: syncKey(id, 'pushBranchForce'),
+    mutationFn: async (branch: string) =>
+      asGitOperation(id, async () =>
+        timed('git.pushBranchForce', async () => unwrap(await commands.gitPushBranchForce(id, branch))),
+      ),
+    onSuccess: (result) => {
       invalidate(qc, id, REMOTE_REFS)
       const host = hostOf(result.upstream)
       toast(
@@ -1847,6 +1924,7 @@ export function useGitMutations(repoId: string | null) {
     pushBranch: useIsMutating({ mutationKey: syncKey(id, 'pushBranch') }),
     pullBranch: useIsMutating({ mutationKey: syncKey(id, 'pullBranch') }),
     pushForce: useIsMutating({ mutationKey: syncKey(id, 'pushForce') }),
+    pushBranchForce: useIsMutating({ mutationKey: syncKey(id, 'pushBranchForce') }),
   }
 
   return {
@@ -1905,6 +1983,7 @@ export function useGitMutations(repoId: string | null) {
     renameBranch,
     reconnectBranch,
     pushForce: scopeToRepo(pushForce, running.pushForce),
+    pushBranchForce: scopeToRepo(pushBranchForce, running.pushBranchForce),
     rebase,
     addRemote,
     renameRemote,

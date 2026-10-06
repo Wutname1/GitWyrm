@@ -95,6 +95,7 @@ import {
   type SavedTabGroup,
 } from "@/stores/workspaceStore";
 import { CodeFoldersSetting } from "@/components/domain/settings/CodeFoldersSetting";
+import { UpdateAllFoldersButton } from "@/components/domain/UpdateAllActions";
 
 type Route = "open" | "clone" | "new";
 type ProjectPathStatus = "idle" | "checking" | "available" | "exists" | "error";
@@ -2652,6 +2653,7 @@ function RepoPickerPanel({
                         Show all folders
                       </Button>
                     )}
+                    <UpdateAllFoldersButton />
                     <TooltipButton
                       tooltip="Look for new repositories"
                       onClick={() => {

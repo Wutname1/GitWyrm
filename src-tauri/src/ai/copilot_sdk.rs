@@ -59,6 +59,7 @@ pub async fn list_models(github_token: &str) -> Result<Vec<CatalogModel>, AppErr
         .models()
         .list_with_params(ModelsListRequest {
             git_hub_token: Some(github_token.to_string()),
+            selection_id: None,
         })
         .await;
     client.stop().await.ok();

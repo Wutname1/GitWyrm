@@ -5,6 +5,8 @@ import { MergeBanner } from '@/components/domain/MergeBanner'
 import { LeftPanel } from '@/components/domain/left-panel/LeftPanel'
 import { RightPanel } from '@/components/domain/RightPanel'
 import { StatusBar } from '@/components/domain/StatusBar'
+import { MehenSync } from '@/components/domain/MehenSync'
+import { UpdateAllSync } from '@/components/domain/UpdateAllSync'
 import { GraphView, WIP_SHA } from '@/views/GraphView'
 import { DiffView } from '@/views/DiffView'
 import { SettingsView } from '@/views/SettingsView'
@@ -14,6 +16,7 @@ import { GithubView } from '@/views/GithubView'
 import { FileHistoryView } from '@/views/FileHistoryView'
 import { BlameView } from '@/views/BlameView'
 import { RawView } from '@/views/RawView'
+import { RenderedView } from '@/views/RenderedView'
 import { CommitDrawer } from '@/components/domain/graph/CommitDrawer'
 import { MultiCommitDrawer } from '@/components/domain/graph/MultiCommitDrawer'
 import { useUiStore } from '@/stores/uiStore'
@@ -41,6 +44,7 @@ function CenterView() {
   if (view === 'fileHistory') return <FileHistoryView />
   if (view === 'blame') return <BlameView />
   if (view === 'raw') return <RawView />
+  if (view === 'rendered') return <RenderedView />
   return <GraphView />
 }
 
@@ -152,6 +156,8 @@ export function WorkspaceLayout() {
       {!inRepoPicker && <MergeBanner />}
       {centerBody}
       <StatusBar />
+      <MehenSync />
+      <UpdateAllSync />
     </div>
   )
 

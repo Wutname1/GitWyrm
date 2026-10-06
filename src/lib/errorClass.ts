@@ -11,7 +11,21 @@
  * sites pick the toast style from the severity instead of assuming `error`.
  */
 
+import type { SettingsSection } from '@/stores/uiStore'
+
 export type Severity = 'error' | 'warning' | 'info'
+
+/**
+ * Where the user goes to fix it, when that is a settings page. A message that
+ * says "go to Settings" without taking them there leaves them hunting.
+ */
+export interface ErrorFix {
+  /** Button label on the toast. */
+  label: string
+  section: SettingsSection
+  /** Settings search id of the row to scroll to and flash. */
+  settingId?: string
+}
 
 export interface ClassifiedError {
   severity: Severity
@@ -19,14 +33,24 @@ export interface ClassifiedError {
   message: string
   /** The original backend string, always kept for the log. */
   raw: string
+  fix?: ErrorFix
 }
 
 interface Rule {
   /** Matches against the lowercased raw message. */
   match: (raw: string) => boolean
   severity: Severity
-  message: string
+  /** Fixed text, or built from the original (not lowercased) raw message. */
+  message: string | ((raw: string) => string)
+  fix?: ErrorFix
 }
+
+// No settingId: these rules cover every host, and flashing the GitHub row for
+// a GitLab remote would point at the wrong account.
+const CONNECT_ACCOUNT: ErrorFix = { label: 'Open Integrations', section: 'integrations' }
+
+// Where SSH keys are made, tested and matched to a host.
+const SSH_SETTINGS: ErrorFix = { label: 'Open Security', section: 'security' }
 
 /**
  * Ordered, most-specific first. The git2 `class=`/`code=` tail is the stable
@@ -61,9 +85,53 @@ const RULES: Rule[] = [
     message: 'Nothing to stash -- your working tree is already clean.',
   },
   {
+    // The delete push exited clean but the branch is still listed on the remote.
+    // Rare, and always the host's or a wrapper's doing rather than a local
+    // problem -- but the user must not be told it worked when it did not.
+    match: (r) => r.includes('the delete reported success but the branch is still there'),
+    severity: 'warning',
+    message:
+      "The remote still has that branch, even though it accepted the request. Try again, or remove it on the website.",
+  },
+  {
+    // Our own guard before anything that rewrites the working tree (merge,
+    // cherry-pick, revert, branch switch, checkout, history rewrite). The tail
+    // names the operation and varies, so match the stable opening. Without a
+    // rule here a deliberate refusal was filed as a crash and shown in the
+    // backend's own wording.
+    match: (r) => r.includes('working tree has changes'),
+    severity: 'warning',
+    message:
+      'You have changes that this would overwrite. Commit or stash them first, then try again.',
+  },
+  {
     match: (r) => r.includes('your local changes conflict'),
     severity: 'warning',
     message: 'Your local changes conflict with that branch. Commit, stash, or discard them first.',
+  },
+  {
+    // The host will not admit the repository exists. It answers 404 whether the
+    // repo is private, renamed, deleted, or merely outside the token's scope, so
+    // the app genuinely cannot tell the user which -- say all four rather than
+    // guess. Covers all three wordings: git's own `fatal: repository '<url>' not
+    // found`, the API's "could not find that", and the fetch path's sentence
+    // built separately in commands/remote.rs.
+    //
+    // That third needle is why this rule had to grow. The backend has listed it
+    // as expected since 2026-08-28, but nothing here matched it, so every fetch
+    // 404 fell through to the unclassified branch and filed a crash report in
+    // git's own wording -- 114 of them (GITWYRM-BACKEND-2).
+    //
+    // Matched on the distinctive half, exactly as the backend does. "could not
+    // find" alone is far too broad: it would swallow "could not find commit
+    // <sha>" and the object-not-found faults that must keep reporting.
+    match: (r) =>
+      r.includes("fatal: repository '") ||
+      r.includes('could not find that') ||
+      r.includes('with your sign-in. it may have been moved or renamed'),
+    severity: 'warning',
+    message:
+      "The cloud copy couldn't be found. It may have been renamed or deleted, or your account may not have access to it.",
   },
   {
     // A repository with nowhere to send work. Push publishes an unlinked branch
@@ -89,6 +157,23 @@ const RULES: Rule[] = [
     message: "This branch isn't on the cloud yet. Send it again to publish it and link it up.",
   },
   {
+    // The pull-side twin of the rule above. The backend already treats both of
+    // these as expected refusals, but with no rule here the frontend still
+    // showed git's own sentence in a red toast and filed a crash report.
+    match: (r) => r.includes('there is no tracking information for the current branch'),
+    severity: 'warning',
+    message:
+      "This branch isn't linked to a cloud copy yet, so there's nothing to get. Send it first to link it up.",
+  },
+  {
+    // Local and cloud both moved on, and git will not choose merge or rebase on
+    // the user's behalf. Ordinary state after working in two places, not a fault.
+    match: (r) => r.includes('divergent branches and need to specify how to reconcile'),
+    severity: 'warning',
+    message:
+      'Your copy and the cloud copy have both changed. Choose whether to merge or rebase, then try again.',
+  },
+  {
     // Server refused the update because the branch is protected -- most force
     // pushes to a shared main branch hit this. Nothing local will fix it.
     match: (r) =>
@@ -98,17 +183,45 @@ const RULES: Rule[] = [
       "The remote won't let you replace this branch - it's protected. Open a pull request instead, or ask a maintainer to allow the change.",
   },
   {
+    // GitHub refuses a push that adds or edits `.github/workflows/` when the
+    // token lacks the `workflow` scope. Sign-ins from before that scope was
+    // requested hit this; a fresh sign-in asks for it.
+    // Name the file: GitHub only checks this when a push touches one, so without
+    // it the refusal reads as "you can't push" to someone who pushes elsewhere daily.
+    match: (r) => r.includes('without `workflow` scope'),
+    severity: 'warning',
+    message: (raw) => {
+      const file = /workflow `([^`]+)`/.exec(raw)?.[1] ?? 'a file in .github/workflows'
+      return `This push changes ${file}, a GitHub Actions file, and GitHub needs one extra permission for that. Pushes that don't touch these files are not affected. To grant it, disconnect and reconnect GitHub, then send again.`
+    },
+    fix: { label: 'Reconnect GitHub', section: 'integrations', settingId: 'github-connection' },
+  },
+  {
     // Non-fast-forward: the cloud moved on since you last fetched. A plain push
     // is refused; the user needs to get those changes first or force past them.
+    // `[rejected]` is git's own refusal; `[remote rejected]` is the server's and
+    // says nothing about who is ahead, so it is handled below instead.
     match: (r) =>
       r.includes('stale info') ||
       r.includes('non-fast-forward') ||
       r.includes('fetch first') ||
-      r.includes('[rejected]') ||
-      r.includes('remote rejected'),
+      r.includes('[rejected]'),
     severity: 'warning',
     message:
       "The cloud has changes yours doesn't, so it turned down the push. Get those changes first, or force push to replace them.",
+  },
+  {
+    // The server accepted the upload and then refused the update: a hook, a
+    // repository rule, a missing permission. Pulling will not help, so pass on
+    // the server's own reason rather than guessing.
+    match: (r) => r.includes('[remote rejected]'),
+    severity: 'warning',
+    message: (raw) => {
+      const reason = /\[remote rejected\][^\n(]*\(([^\n]+)\)/i.exec(raw)?.[1]?.trim()
+      return reason
+        ? `The cloud refused this push. Its reason: ${reason}`
+        : 'The cloud refused this push. Check the repository settings on the host, then try again.'
+    },
   },
   {
     // Branch switch blocked purely by a moved submodule pointer.
@@ -123,9 +236,90 @@ const RULES: Rule[] = [
     message: "Couldn't update the submodule. Check that it's set up and try again.",
   },
   {
+    // Staging or discarding individual lines when the file's diff is already
+    // empty -- it was staged from elsewhere, or changed underneath the view
+    // between render and click. The selection simply no longer applies. The
+    // backend has treated this as expected since the phrasing landed, but with
+    // no rule here the frontend still filed it as a crash (GITWYRM-BACKEND-6).
+    match: (r) => r.includes('no changes found for this file'),
+    severity: 'info',
+    message: 'Those lines have already moved on. Re-open the file and try again.',
+  },
+  {
+    // Committing with a merge still half-resolved. git will not build a tree
+    // until every conflicted file is staged, so this is the conflict doing its
+    // job rather than a failure.
+    match: (r) => r.includes('not fully merged index'),
+    severity: 'warning',
+    message: 'Some conflicts still need resolving. Finish those files, then try again.',
+  },
+  {
+    // A damaged .git/index. Genuinely broken -- stays an error and keeps
+    // reporting -- but the index is a rebuildable cache, not history, so say
+    // that rather than leaving someone thinking their work is gone. Covers both
+    // transports: libgit2's "invalid data in index" and git's "index file
+    // corrupt".
+    match: (r) =>
+      r.includes('invalid data in index') ||
+      r.includes('index file corrupt') ||
+      r.includes('incorrect header signature'),
+    severity: 'error',
+    message:
+      "This project's file index is damaged. Your commits are safe - the index is a rebuildable cache. Close other Git programs and reopen the project.",
+  },
+  {
     match: (r) => r.includes('code=conflict') || r.includes('merge conflict'),
     severity: 'warning',
     message: 'That ran into a conflict. Check the changed files and resolve the markers.',
+  },
+  {
+    // An SSH remote that refused this computer's key. The backend builds this
+    // sentence from ssh's own "Permission denied (publickey)" (commands/remote.rs,
+    // humanize_ssh_failure). It also contains "sign-in needed for", so it must
+    // come before that rule, which points at Integrations: an SSH key is fixed
+    // in Security, not by connecting an account.
+    match: (r) => r.includes('did not accept the ssh key'),
+    severity: 'warning',
+    message:
+      "The server did not accept this computer's SSH key. Check your keys in Security settings, then try again.",
+    fix: SSH_SETTINGS,
+  },
+  {
+    // The first SSH connection to a host has to confirm who the server is, and
+    // a background run has nobody to ask. Testing the host in Security settings
+    // confirms a new host safely.
+    match: (r) => r.includes('has not confirmed who that server is'),
+    severity: 'warning',
+    message:
+      'This computer has not confirmed that server yet. Test the connection in Security settings, then try again.',
+    fix: SSH_SETTINGS,
+  },
+  {
+    // A remote with no credentials yet. Ahead of the generic auth rule below,
+    // which would file this as an error and replace a sentence the backend
+    // already wrote for users. Nothing is broken; the account just needs
+    // connecting, so it is a warning.
+    match: (r) => r.includes('sign-in needed for'),
+    severity: 'warning',
+    message: 'Connect your account for this remote, then try again.',
+    fix: CONNECT_ACCOUNT,
+  },
+  {
+    // A host that has never been connected. Ahead of the generic auth rule
+    // below, which would call a one-time setup step an error. The backend names
+    // the host (GitHub, GitLab, Bitbucket, Azure DevOps); say where to fix it.
+    match: (r) => r.includes('not signed in to'),
+    severity: 'warning',
+    message: 'That account is not connected yet. Connect it in Integrations, then try again.',
+    fix: CONNECT_ACCOUNT,
+  },
+  {
+    // A cloud branch name given to something that only works on the copy here.
+    // The backend sentence already names the local branch to use instead, so
+    // keep it rather than replacing it with something vaguer.
+    match: (r) => r.includes('is a branch on the remote'),
+    severity: 'warning',
+    message: 'That branch lives on the cloud copy. Use the branch of the same name here instead.',
   },
   {
     match: (r) =>
@@ -137,8 +331,18 @@ const RULES: Rule[] = [
     message: "Couldn't authenticate with the remote. Check your credentials and try again.",
   },
   {
+    // The network did not carry the request: offline, a VPN that is down, or a
+    // server that did not answer. The backend has always classed these two
+    // wordings as expected (error.rs EXPECTED), but here they fell to the rule
+    // below at error severity, so the same condition still filed a crash report
+    // from the frontend. Both layers now agree; the broader rule below still
+    // catches everything else network-shaped as an error.
+    match: (r) => r.includes('could not resolve host') || r.includes('failed to connect'),
+    severity: 'warning',
+    message: "Couldn't reach the server. Check your internet or VPN connection, then try again.",
+  },
+  {
     match: (r) =>
-      r.includes('could not resolve host') ||
       r.includes('network') ||
       r.includes('timed out') ||
       r.includes('connection'),
@@ -182,7 +386,8 @@ export function classifyError(e: unknown): ClassifiedError {
 
   for (const rule of RULES) {
     if (rule.match(lower)) {
-      return { severity: rule.severity, message: rule.message, raw }
+      const message = typeof rule.message === 'function' ? rule.message(raw) : rule.message
+      return { severity: rule.severity, message, raw, fix: rule.fix }
     }
   }
 

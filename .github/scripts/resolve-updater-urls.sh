@@ -34,10 +34,21 @@ case "$MODE" in
     # Done in Python rather than jq: the filename is extracted from the signature
     # blob, which uses CRLF internally, and a stray \r in a URL yields a 404 that
     # still looks perfectly correct in logs.
-    python3 - "$manifest" "$REPO" "$TAG" <<'PY'
+    # The assets actually attached to the release, as {api url: file name}.
+    # macOS needs this: tauri-action renames the updater archive per
+    # architecture (GitWyrm_aarch64.app.tar.gz) after it was signed under the
+    # bundler's own name (GitWyrm.app.tar.gz), so the signature's file name
+    # does not exist on the release for those entries.
+    gh release view "$TAG" --repo "$REPO" --json assets --jq '[.assets[] | {name, apiUrl}]' > "$workdir/assets.json"
+
+    python3 - "$manifest" "$REPO" "$TAG" "$workdir/assets.json" <<'PY'
 import base64, json, re, sys
 
-manifest_path, repo, tag = sys.argv[1], sys.argv[2], sys.argv[3]
+manifest_path, repo, tag, assets_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+with open(assets_path) as fh:
+    assets = json.load(fh)
+asset_names = {a["name"] for a in assets}
+name_by_api_url = {a["apiUrl"]: a["name"] for a in assets}
 base = f"https://github.com/{repo}/releases/download/{tag}"
 
 with open(manifest_path) as fh:
@@ -56,8 +67,18 @@ for name, entry in sorted(platforms.items()):
     match = re.search(r"file:(\S+)", sig)
     if not match:
         sys.exit(f"::error::No 'file:' in the signature for {name}.")
-    entry["url"] = f"{base}/{match.group(1)}"
-    print(f"  {name:<22} -> {match.group(1)}")
+    filename = match.group(1)
+    if filename not in asset_names:
+        # Signed under a different name than the one uploaded. Trust the
+        # asset the manifest already points at, found by its API URL.
+        filename = name_by_api_url.get(entry.get("url", ""))
+        if not filename:
+            sys.exit(
+                f"::error::{name}: signed as {match.group(1)}, which is not a release "
+                f"asset, and its URL matches no asset either."
+            )
+    entry["url"] = f"{base}/{filename}"
+    print(f"  {name:<22} -> {filename}")
 
 with open(manifest_path, "w") as fh:
     json.dump(manifest, fh, indent=2)
@@ -83,7 +104,7 @@ if not platforms:
 # simply leaves that key out. The installer still uploads and every name-based
 # asset check passes, so the release ships with those users pinned to their
 # current version forever, with nothing in the logs saying so.
-EXPECTED = ["windows-x86_64", "windows-aarch64", "linux-x86_64"]
+EXPECTED = ["windows-x86_64", "windows-aarch64", "linux-x86_64", "darwin-aarch64", "darwin-x86_64"]
 absent = [key for key in EXPECTED if key not in platforms]
 if absent:
     sys.exit(

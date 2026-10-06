@@ -1,7 +1,46 @@
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { REHYPE_PLUGINS } from '@/lib/markdownPipeline'
+import { markdownLinkAction, REHYPE_PLUGINS } from '@/lib/markdownPipeline'
+import { openWebUrl } from '@/lib/remoteWeb'
 import { cn } from '@/lib/utils'
+
+/**
+ * Links inside rendered markdown, sent to the browser instead of the webview.
+ *
+ * A bare `<a href>` in a Tauri window navigates the window itself, so clicking
+ * a link in a pull request body replaced the whole app with that website and
+ * left no way back. Every link here is someone else's text -- a PR body, a
+ * comment, a bot's release notes -- so the app can never assume it is safe to
+ * follow in place.
+ *
+ * `baseUrl` resolves the relative links GitHub writes (`/owner/repo/pull/1`).
+ * Without it those would be dropped; with it they open on the right host.
+ * In-page fragments (`#issuecomment-123`) are left to the browser engine,
+ * since they move within the text already on screen.
+ */
+function MarkdownLink({
+  href,
+  baseUrl,
+  children,
+}: {
+  href?: string
+  baseUrl?: string
+  children?: React.ReactNode
+}) {
+  const action = markdownLinkAction(href, baseUrl)
+  if (action.kind === 'inPage') return <a href={href}>{children}</a>
+  return (
+    <a
+      href={href}
+      onClick={(event) => {
+        event.preventDefault()
+        if (action.kind === 'external') openWebUrl(action.url, 'that link')
+      }}
+    >
+      {children}
+    </a>
+  )
+}
 
 /**
  * GitHub-flavored markdown, styled to match the app.
@@ -13,11 +52,14 @@ export function Markdown({
   text,
   empty = 'Nothing written yet.',
   className,
+  baseUrl,
 }: {
   text: string
   /** Shown when `text` is blank -- an empty area reads as broken. */
   empty?: string
   className?: string
+  /** Host page relative links resolve against, e.g. a pull request's URL. */
+  baseUrl?: string
 }) {
   if (!text.trim()) {
     return <p className="text-xs italic text-muted-foreground">{empty}</p>
@@ -47,7 +89,17 @@ export function Markdown({
         className
       )}
     >
-      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={REHYPE_PLUGINS}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={REHYPE_PLUGINS}
+        components={{
+          a: ({ href, children }) => (
+            <MarkdownLink href={href} baseUrl={baseUrl}>
+              {children}
+            </MarkdownLink>
+          ),
+        }}
+      >
         {text}
       </ReactMarkdown>
     </div>

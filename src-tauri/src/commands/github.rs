@@ -23,8 +23,8 @@ use crate::hosting::{
 use crate::state::RepoManager;
 
 pub use crate::hosting::{
-    HostComment as GithubComment, IssueDetail, IssueSummary, MergeMethod, PrCommit, PrDetail,
-    PrFile, PrSummary,
+    HostComment as GithubComment, HostRelease, IssueDetail, IssueSummary, MergeMethod, PrCommit,
+    PrDetail, PrFile, PrSummary,
 };
 
 const PROVIDER_ID: &str = "github";
@@ -653,6 +653,49 @@ pub async fn github_close_issue(
 ) -> Result<(), AppError> {
     let (provider, slug) = provider_and_slug(&manager, repo_id.as_deref(), &owner, &repo).await?;
     provider.close_issue(&app, &slug, number).await
+}
+
+// ---------------------------------------------------------------------------
+// Releases
+
+/// The release on the repository's host for `tag`, drafts included.
+///
+/// None when the repository is not on a host GitWyrm integrates with, when that
+/// host is not connected, or when no release uses the tag. The tag-delete
+/// dialogs ask this to decide whether to offer deleting the release as well.
+#[tauri::command]
+#[specta::specta]
+pub async fn host_release_for_tag(
+    app: tauri::AppHandle,
+    manager: State<'_, RepoManager>,
+    repo_id: String,
+    tag: String,
+) -> Result<Option<HostRelease>, AppError> {
+    let tag = tag.trim();
+    if tag.is_empty() {
+        return Ok(None);
+    }
+    let Some((provider, slug)) = resolve(&manager, &repo_id).await? else {
+        return Ok(None);
+    };
+    provider.release_for_tag(&app, &slug, tag).await
+}
+
+/// Deletes a release found by `host_release_for_tag`. The tag is untouched.
+#[tauri::command]
+#[specta::specta]
+pub async fn host_delete_release(
+    app: tauri::AppHandle,
+    manager: State<'_, RepoManager>,
+    repo_id: String,
+    release_id: String,
+) -> Result<(), AppError> {
+    let Some((provider, slug)) = resolve(&manager, &repo_id).await? else {
+        return Err(AppError::Other(
+            "this repository is not on a code host GitWyrm can reach".into(),
+        ));
+    };
+    provider.delete_release(&app, &slug, release_id.trim()).await
 }
 
 // ---------------------------------------------------------------------------

@@ -217,6 +217,20 @@ pub struct PrCommit {
     pub html_url: String,
 }
 
+/// A release published (or drafted) on the host for one tag.
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct HostRelease {
+    /// The host's id for the release, as text: GitHub's are 64-bit numbers,
+    /// which the generated bindings cannot carry as a number.
+    pub id: String,
+    /// The release title, falling back to the tag when it has none.
+    pub name: String,
+    /// Not yet published, so nobody but the project's maintainers can see it.
+    pub draft: bool,
+    pub prerelease: bool,
+    pub html_url: String,
+}
+
 /// How a merge should be performed. Hosts support different subsets; each
 /// implementation maps these onto its own vocabulary and errors clearly when
 /// the host cannot honour the choice.
@@ -391,6 +405,32 @@ pub trait HostProvider: Send + Sync {
         slug: &RepoSlug,
         number: u32,
     ) -> Result<(), AppError>;
+
+    /// The release attached to `tag`, drafts included, or None when there is
+    /// none. None by default, which the UI reads as "nothing to offer" and so
+    /// never shows a release option on hosts that do not implement this.
+    async fn release_for_tag(
+        &self,
+        _app: &tauri::AppHandle,
+        _slug: &RepoSlug,
+        _tag: &str,
+    ) -> Result<Option<HostRelease>, AppError> {
+        Ok(None)
+    }
+
+    /// Deletes a release found by [`Self::release_for_tag`]. The tag itself is
+    /// left alone; deleting it is a separate git push.
+    async fn delete_release(
+        &self,
+        _app: &tauri::AppHandle,
+        _slug: &RepoSlug,
+        _release_id: &str,
+    ) -> Result<(), AppError> {
+        Err(AppError::Other(format!(
+            "{} releases cannot be deleted from GitWyrm",
+            self.display_name()
+        )))
+    }
 }
 
 /// "Not signed in" phrased the same way for every host, since the fix is always

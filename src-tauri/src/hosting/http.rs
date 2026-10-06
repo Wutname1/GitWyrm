@@ -437,6 +437,14 @@ fn try_gh_blocking(fallback: &GhFallback) -> Option<Result<reqwest::Response, Ap
     if !gh_fallback_enabled() {
         return None;
     }
+    let read = fallback.method == "GET";
+    // A read is optional: the caller already holds GitHub's refusal, which is
+    // the right answer to show when `gh` cannot give a better one. Waiting on a
+    // `gh` that just hung would only make every panel request slow.
+    if read && super::gh_cli::stalled_recently() {
+        log::debug!("GitHub CLI fallback paused after it stopped answering");
+        return None;
+    }
     let exe = match super::gh_cli::availability() {
         Ok(exe) => exe,
         Err(reason) => {
@@ -465,6 +473,14 @@ fn try_gh_blocking(fallback: &GhFallback) -> Option<Result<reqwest::Response, Ap
                 body
             };
             Some(Ok(http_response_from_body(body)))
+        }
+        Err(AppError::Other(message)) if read && super::gh_cli::could_not_run(&message) => {
+            log::warn!(
+                "GitHub CLI fallback gave no answer for {} {}: {message}",
+                fallback.method,
+                fallback.path
+            );
+            None
         }
         Err(e) => Some(Err(e)),
     }

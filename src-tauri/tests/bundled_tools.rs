@@ -105,9 +105,16 @@ fn bundled_git_carries_credential_manager() {
         eprintln!("resources/ not populated; run fetch-bundled-tools.sh first");
         return;
     };
+    // Git for Windows 2.56 renamed the toolchain folder from mingw64 to ucrt64,
+    // so accept whichever one this release uses.
+    let found = ["mingw64", "ucrt64"].iter().any(|dir| {
+        root.join("git")
+            .join(dir)
+            .join("bin/git-credential-manager.exe")
+            .is_file()
+    });
     assert!(
-        root.join("git/mingw64/bin/git-credential-manager.exe")
-            .is_file(),
+        found,
         "git-credential-manager.exe missing; bundled HTTPS auth would break"
     );
 }

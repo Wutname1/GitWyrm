@@ -5,6 +5,7 @@ import { WindowControls } from '@/components/domain/WindowControls'
 import { AiProviderChip } from '@/components/domain/spec-desk/AiProviderChip'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { titleBarInsetStyle } from '@/lib/platform'
 
 type CenterView = 'conversation' | 'openspec' | 'setup' | 'import'
 
@@ -47,6 +48,7 @@ export function AgentDeskTitleBar({
   return (
     <div
       data-tauri-drag-region
+      style={titleBarInsetStyle()}
       className="flex h-10 flex-none select-none items-center gap-2.5 border-b border-border bg-panel pl-3 pr-0"
     >
       <span className="text-xs font-semibold text-foreground">Agent Desk</span>

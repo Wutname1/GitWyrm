@@ -113,12 +113,12 @@ export function FileChangeRow({
       ) : sub ? (
         // Line counts are meaningless for a submodule pointer; show what moved.
         <span className="whitespace-nowrap text-2xs text-sub">submodule · {submoduleNote(sub)}</span>
-      ) : (
+      ) : file.lines_counted ? (
         <>
           <span className="font-mono text-2xs text-added">+{file.additions}</span>
           <span className="font-mono text-2xs text-removed">-{file.deletions}</span>
         </>
-      )}
+      ) : null}
       {action}
     </div>
   )

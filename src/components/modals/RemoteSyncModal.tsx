@@ -26,7 +26,7 @@ import { branchSync } from '@/lib/branchActions'
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { useUiStore } from '@/stores/uiStore'
 import { useActiveRepo } from '@/stores/workspaceStore'
-import { modeCopy, modesFor, type Divergence, type PreviewMode, type Tone } from '@/lib/syncPreview'
+import { initialMode, modeCopy, shownModes, type Divergence, type PreviewMode, type Tone } from '@/lib/syncPreview'
 import { SyncTreePreview } from './SyncTreePreview'
 
 /** Icon per mode, used on both the mode button and the confirm button. */
@@ -126,7 +126,6 @@ export function RemoteSyncModal() {
   }, [pair, branchPair, relation.data])
 
   const upstreamGone = pair?.kind === 'tracking' && pair.branch.sync.kind === 'upstream_gone'
-  const modes = divergence ? modesFor(divergence) : []
 
   // Which option is selected. Resets whenever the pair changes, so a fresh drag
   // never inherits a destructive selection from the previous one -- but a mode
@@ -136,9 +135,6 @@ export function RemoteSyncModal() {
   useEffect(() => {
     setMode(preselectedMode)
   }, [syncSource, syncTarget, preselectedMode])
-  // A preselect that doesn't apply to how these two actually diverged falls
-  // back to the default, so a stale hint can never run something unintended.
-  const active: PreviewMode | null = mode && modes.includes(mode) ? mode : (modes.at(-1) ?? null)
 
   // Names. For a tracking pair "ours" is the local branch; for a branch pair it
   // is the branch that receives (the target), which is the one the copy is
@@ -155,6 +151,19 @@ export function RemoteSyncModal() {
   // that would move IS the checked-out one.
   const headName = branches.data?.local.find((b) => b.is_head)?.name
   const canReset = !!branchPair && branchPair.target.name === headName
+
+  // The options on offer, and which is selected. A preselect that is not on
+  // offer (a stale hint, or a pair where it would do something else) falls
+  // back to a safe default, so it can never run something unintended.
+  const shown: PreviewMode[] =
+    divergence && pair
+      ? shownModes(divergence, {
+          kind: pair.kind,
+          canReset,
+          sourceIsRemote: branchPair?.source.type === 'remote',
+        })
+      : []
+  const active: PreviewMode | null = initialMode(shown, mode)
   const switchesBranch = !!branchPair && branchPair.target.name !== headName
 
   // Swapping is only meaningful when flipping still resolves to a valid pair:
@@ -169,6 +178,8 @@ export function RemoteSyncModal() {
     m.push.isPending ||
     m.pushBranch.isPending ||
     m.pushForce.isPending ||
+    m.pushBranchForce.isPending ||
+    m.pullBranch.isPending ||
     m.rebase.isPending ||
     m.mergeDirectional.isPending ||
     m.fastForwardBranch.isPending
@@ -183,9 +194,14 @@ export function RemoteSyncModal() {
   const run = () => {
     if (!active) return
     const tracking = pair?.kind === 'tracking' ? pair : null
+    // A branch dragged onto its own upstream need not be the checked-out one.
+    // The HEAD-only mutations would then act on the wrong branch -- a force push
+    // overwriting some other branch's cloud copy -- so name the branch instead.
+    const other = tracking && !tracking.branch.is_head ? tracking.branch.name : null
 
     switch (active) {
       case 'get':
+        if (other) return void m.pullBranch.mutate(other, done)
         if (tracking) return void m.pull.mutate(undefined, done)
         if (branchPair)
           return void m.fastForwardBranch.mutate(
@@ -194,6 +210,7 @@ export function RemoteSyncModal() {
           )
         return
       case 'send':
+        if (other) return void m.pushBranch.mutate(other, done)
         if (tracking) return void m.push.mutate(undefined, done)
         // Two local branches: "send" means the other branch simply catches up
         // to this one, which is a fast-forward of the source ref.
@@ -204,8 +221,17 @@ export function RemoteSyncModal() {
           )
         return
       case 'replace':
+        // Only a branch and its own upstream: a force push always lands on the
+        // branch's upstream, which is the pair on screen only for a tracking pair.
+        if (!tracking) return
+        if (other) return void m.pushBranchForce.mutate(other, done)
         return void m.pushForce.mutate(undefined, done)
       case 'blend':
+        if (other)
+          return void m.mergeDirectional.mutate(
+            { target: other, source: tracking!.upstream },
+            { onSuccess: ({ result }) => onConflicts(result.conflicts) }
+          )
         if (tracking) return void m.pull.mutate(undefined, done)
         if (branchPair)
           return void m.mergeDirectional.mutate(
@@ -216,7 +242,7 @@ export function RemoteSyncModal() {
       case 'stack':
         if (tracking)
           return void m.rebase.mutate(
-            { onto: tracking.upstream },
+            { onto: tracking.upstream, branch: other ?? undefined },
             { onSuccess: ({ result }) => onConflicts(result.conflicts) }
           )
         if (branchPair)
@@ -242,10 +268,14 @@ export function RemoteSyncModal() {
     m.pushBranch.mutate(pair.branch.name, done)
   }
 
-  const copy = active && divergence ? modeCopy(active, divergence) : null
-  // Reset is an extra option on branch pairs, not one of the three the
-  // divergence implies, so it is appended rather than returned by modesFor.
-  const shown: PreviewMode[] = canReset && modes.length === 3 ? [...modes, 'reset'] : modes
+  // Two local branches move a branch locally and never reach a remote, so the
+  // preview has to drop the cloud wording. Undefined for a tracking pair keeps
+  // the cloud copy exactly as it was.
+  const pairNames = branchPair
+    ? { source: branchPair.source.name, target: branchPair.target.name }
+    : undefined
+
+  const copy = active && divergence ? modeCopy(active, divergence, pairNames) : null
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && closeModal()}>
@@ -257,7 +287,12 @@ export function RemoteSyncModal() {
           </DialogTitle>
         </DialogHeader>
 
-        <div className="grid min-w-0 gap-2.5 px-4 py-3.5">
+        {/* Scrolls on its own so the footer buttons below stay put. A rebase or
+            merge preview grows with the branches involved, and on a short window
+            the whole panel used to grow with it and push the buttons out
+            (GITWYRM-FRONTEND-15). min-h-0 is load-bearing: without it a grid
+            child refuses to shrink below its content and never scrolls. */}
+        <div className="grid min-h-0 min-w-0 gap-2.5 overflow-y-auto px-4 py-3.5">
           {/* Direction. The chips say where commits end up, and Swap fixes a
               drag that went the wrong way without re-dragging. */}
           <div className="flex min-w-0 items-center gap-2.5 rounded-md border border-border bg-panel2 px-2.5 py-2">
@@ -310,10 +345,12 @@ export function RemoteSyncModal() {
             </div>
           )}
 
-          {divergence && modes.length === 0 && (
+          {divergence && shown.length === 0 && (
             <div className="flex items-center gap-1.5 rounded-md border border-border bg-panel2 px-3 py-2 text-2xs text-muted-foreground">
               <Check size={12} className="flex-none" />
-              These already match. Nothing to do.
+              {divergence.ours + divergence.theirs === 0
+                ? 'These already match. Nothing to do.'
+                : `${intoName} already has everything from ${fromName}.`}
             </div>
           )}
 
@@ -324,7 +361,7 @@ export function RemoteSyncModal() {
               style={{ gridTemplateColumns: `repeat(${shown.length}, minmax(0, 1fr))` }}
             >
               {shown.map((k) => {
-                const c = modeCopy(k, divergence)
+                const c = modeCopy(k, divergence, pairNames)
                 const Icon = MODE_ICON[k]
                 const on = k === active
                 return (

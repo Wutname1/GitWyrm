@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo } from 'react'
 import type { CommitEntry, StashInfo } from '@/lib/bindings'
 import { authorColor, laneColor } from '@/lib/gitDisplay'
 import { laneGeometry } from '@/lib/graphLanes'
+import { buildTrackSpans, trackIsBusy } from '@/lib/graphTracks'
 import { useAvatarUrls } from '@/lib/useAvatarUrls'
 import { useUiStore } from '@/stores/uiStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
@@ -119,30 +120,17 @@ export function GraphSvg({ rows, selectedSha, startIndex, endIndex, width, rowHe
     return m
   }, [rows])
 
+  // Indexed once per row change. This is asked from inside `while (busy)
+  // track++` loops, once per stash, so the old row-by-row predicate cost
+  // rows x stashes x tracks and spent seconds on a deeply scrolled graph.
+  // See `@/lib/graphTracks`, where the occupancy rules and their equivalence
+  // to that original scan are tested.
+  const trackSpans = useMemo(() => buildTrackSpans(rows, commitRowBySha), [rows, commitRowBySha])
+
   const commitTrackIsBusy = useMemo(
-    () => (track: number, startRow: number, endRow: number) => {
-      for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
-        const row = rows[rowIndex]
-        if (row.kind !== 'commit') continue
-
-        // A commit node inside the overlay's span owns this lane even if its
-        // incoming edge happens to travel through another track.
-        if (rowIndex >= startRow && rowIndex < endRow && row.commit.lane === track) {
-          return true
-        }
-
-        for (let parentIndex = 0; parentIndex < row.commit.parent_shas.length; parentIndex++) {
-          const parentSha = row.commit.parent_shas[parentIndex]
-          const parentTrack = row.commit.parent_lanes[parentIndex] ?? row.commit.lane
-          if (parentTrack !== track) continue
-          const parentRow = commitRowBySha.get(parentSha)?.row ?? rowIndex + 1
-          // Sharing the base endpoint is fine; crossing the span is not.
-          if (rowIndex < endRow && parentRow > startRow) return true
-        }
-      }
-      return false
-    },
-    [rows, commitRowBySha],
+    () => (track: number, startRow: number, endRow: number) =>
+      trackIsBusy(trackSpans, track, startRow, endRow),
+    [trackSpans],
   )
 
   // The WIP row is a synthetic child of the checked-out branch tip, not of
