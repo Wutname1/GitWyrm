@@ -3989,7 +3989,13 @@ export type FileChange = { path: string;
  * the name the file has now, so the UI can show "old -> new" and every file
  * action (stage, diff, open) targets the name that currently exists.
  */
-old_path: string | null; status: StatusCode; additions: number; deletions: number; conflicted: boolean; 
+old_path: string | null; status: StatusCode; additions: number; deletions: number; 
+/**
+ * False when the line counts were not worked out because too many files
+ * changed at once. `additions`/`deletions` are then 0, which must not be
+ * shown as "+0 -0" -- that reads as "nothing changed".
+ */
+lines_counted: boolean; conflicted: boolean; 
 /**
  * Set when this path is a submodule whose pinned commit moved. Ordinary file
  * actions (stash, discard-by-checkout) can't touch it; the UI must offer

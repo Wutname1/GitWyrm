@@ -247,6 +247,7 @@ pub async fn get_commit_detail(
                         status: delta_code(delta.status()),
                         additions: 0,
                         deletions: 0,
+                        lines_counted: true,
                         conflicted: false,
                         submodule: None,
                     });

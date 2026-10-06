@@ -95,6 +95,10 @@ pub struct FileChange {
     pub status: StatusCode,
     pub additions: u32,
     pub deletions: u32,
+    /// False when the line counts were not worked out because too many files
+    /// changed at once. `additions`/`deletions` are then 0, which must not be
+    /// shown as "+0 -0" -- that reads as "nothing changed".
+    pub lines_counted: bool,
     pub conflicted: bool,
     /// Set when this path is a submodule whose pinned commit moved. Ordinary file
     /// actions (stash, discard-by-checkout) can't touch it; the UI must offer

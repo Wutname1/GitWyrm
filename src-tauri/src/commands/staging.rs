@@ -26,14 +26,29 @@ fn stage_paths(repo: &git2::Repository, root: &Path, paths: &[String]) -> Result
 /// A rename is one change to the user but two index entries: the new file added
 /// and the old one deleted. Staging a renamed file by its new name alone would
 /// leave the old name behind as a stray "deleted" row, so pull in its partner.
+///
+/// Only a new or deleted file can be half of a rename, so a request made only of
+/// edited files returns without scanning. That check is per path and cheap; the
+/// pairing scan reads file contents and once took seconds per click on a large
+/// restructure (GITWYRM-FRONTEND-1F). It pairs exactly what status shows, so
+/// past the size limit, where status shows no renames, there is nothing to pair.
 fn rename_counterparts(repo: &git2::Repository, paths: &[String]) -> Vec<String> {
     let mut out = paths.to_vec();
-    let mut opts = git2::StatusOptions::new();
-    opts.include_untracked(true)
-        .recurse_untracked_dirs(true)
-        .renames_head_to_index(true)
-        .renames_index_to_workdir(true);
-    let Ok(statuses) = repo.statuses(Some(&mut opts)) else {
+    let could_be_rename = paths.iter().any(|p| match repo.status_file(Path::new(p)) {
+        Ok(st) => st.intersects(
+            git2::Status::INDEX_NEW
+                | git2::Status::INDEX_DELETED
+                | git2::Status::WT_NEW
+                | git2::Status::WT_DELETED,
+        ),
+        // A folder, or a path git cannot resolve to a single entry: scan rather
+        // than guess.
+        Err(_) => true,
+    });
+    if !could_be_rename {
+        return out;
+    }
+    let Ok((statuses, _)) = crate::commands::status::status_with_renames(repo, false) else {
         return out;
     };
     for entry in statuses.iter() {
@@ -508,5 +523,33 @@ mod tests {
             .status_file(Path::new("outside.txt"))
             .expect("outside dirty")
             .contains(git2::Status::WT_MODIFIED));
+    }
+
+    /// An edited file can't be half of a rename, so staging it needs no pairing
+    /// scan, even with a real rename elsewhere in the tree.
+    #[test]
+    fn an_edited_file_has_no_rename_partner() {
+        let (dir, repo) = committed_repo();
+        fs::rename(
+            dir.path().join("target/nested/tracked.txt"),
+            dir.path().join("target/moved.txt"),
+        )
+        .expect("move");
+        fs::write(dir.path().join("outside.txt"), "edited\n").expect("edit");
+
+        assert_eq!(
+            rename_counterparts(&repo, &["outside.txt".to_string()]),
+            vec!["outside.txt".to_string()]
+        );
+        let mut pair = rename_counterparts(&repo, &["target/moved.txt".to_string()]);
+        pair.sort();
+        assert_eq!(
+            pair,
+            vec![
+                "target/moved.txt".to_string(),
+                "target/nested/tracked.txt".to_string()
+            ],
+            "a moved file still brings its old name along"
+        );
     }
 }
