@@ -34,6 +34,9 @@ import {
   type StartFailureCard as StartFailureCardModel,
 } from '@/lib/agentDeskStartFailure'
 import { StartFailureCard } from './StartFailureCard'
+import { SlashCommandMenu } from './SlashCommandMenu'
+import { useSlashCommands } from '@/hooks/useSlashCommands'
+import { applySlashCommand, matchSlashCommands } from '@/lib/slashCommands'
 import type { ChatProjectChoice } from './NewChatLanding'
 
 /**
@@ -342,6 +345,35 @@ export function SessionComposer({
   }
 
   const canSend = canSendComposerDraft({ draft, sessionId, sending })
+
+  // Slash commands: whatever the chosen tool offers, filtered by what has been
+  // typed after a leading "/". The caret is tracked so editing the middle of
+  // a long message does not reopen the list.
+  const slashCommands = useSlashCommands(provider, header?.repoPath)
+  const [caret, setCaret] = useState(0)
+  const [slashDismissedFor, setSlashDismissedFor] = useState<string | null>(null)
+  const [slashIndex, setSlashIndex] = useState(0)
+  const slash = useMemo(
+    () => (slashDismissedFor === draft ? null : matchSlashCommands(slashCommands, draft, caret)),
+    [slashCommands, draft, caret, slashDismissedFor]
+  )
+  const slashQuery = slash?.query ?? null
+  useEffect(() => setSlashIndex(0), [slashQuery])
+  const slashListId = `agent-desk-slash-${sessionId ?? 'none'}`
+
+  const acceptSlash = (index: number) => {
+    const match = slash?.matches[index]
+    if (!match) return
+    const next = applySlashCommand(draft, match.command, caret)
+    setDraft(next)
+    // Put the caret after the command so typing its arguments just works.
+    const at = match.command.name.length + 2
+    setCaret(at)
+    const box = document.getElementById(`agent-desk-composer-${sessionId ?? 'none'}`)
+    if (box instanceof HTMLTextAreaElement) {
+      requestAnimationFrame(() => box.setSelectionRange(at, at))
+    }
+  }
   // A run is going, so the action button offers the way out of it.
   const running = runIsActive(header?.state)
   const [stopping, setStopping] = useState(false)
@@ -526,7 +558,16 @@ export function SessionComposer({
           />
         </div>
       )}
-      <div className="rounded-lg border border-border bg-panel2 p-1.5">
+      <div className="relative rounded-lg border border-border bg-panel2 p-1.5">
+        {slash && (
+          <SlashCommandMenu
+            state={slash}
+            activeIndex={slashIndex}
+            onPick={(match) => acceptSlash(slash.matches.indexOf(match))}
+            onHover={setSlashIndex}
+            listId={slashListId}
+          />
+        )}
         <Textarea
           // Stable id so "New chat" can put the caret straight in here.
           // Focusing the surrounding wrapper only moved focus near the box,
@@ -534,7 +575,15 @@ export function SessionComposer({
           id={`agent-desk-composer-${sessionId ?? 'none'}`}
           data-agent-desk-composer
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => {
+            setDraft(e.target.value)
+            setCaret(e.target.selectionStart)
+          }}
+          onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
+          role={slash ? 'combobox' : undefined}
+          aria-expanded={slash ? true : undefined}
+          aria-controls={slash ? slashListId : undefined}
+          aria-activedescendant={slash ? `${slashListId}-${slashIndex}` : undefined}
           // While a run is going the Send button is replaced by Stop, so the
           // only way to add a note for afterwards is Enter -- which nothing
           // on screen said. Queuing was real, wired, and discoverable only by
@@ -552,6 +601,28 @@ export function SessionComposer({
           rows={2}
           className="resize-none border-0 bg-transparent px-1 py-1 text-xs shadow-none focus-visible:ring-0"
           onKeyDown={(e) => {
+            if (slash) {
+              const count = slash.matches.length
+              if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                e.preventDefault()
+                setSlashIndex((i) => (i + (e.key === 'ArrowDown' ? 1 : count - 1)) % count)
+                return
+              }
+              if (e.key === 'Escape') {
+                e.preventDefault()
+                setSlashDismissedFor(draft)
+                return
+              }
+              // Enter accepts too, except when the command is already typed
+              // out in full: then it means "send this".
+              const active = slash.matches[slashIndex]
+              const typedInFull = active && draft.trimEnd() === `/${active.command.name}`
+              if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey && !typedInFull)) {
+                e.preventDefault()
+                acceptSlash(slashIndex)
+                return
+              }
+            }
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault()
               void send()

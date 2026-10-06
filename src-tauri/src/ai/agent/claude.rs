@@ -495,6 +495,10 @@ async fn read_loop(
             continue;
         }
 
+        // The init message names every command this install offers, built-ins
+        // included, for the message box's slash menu.
+        super::slash_commands::remember_announced("claude", super::slash_commands::from_claude_init(&message));
+
         for incoming in classify(&message) {
             if tx.send(incoming).is_err() {
                 return;

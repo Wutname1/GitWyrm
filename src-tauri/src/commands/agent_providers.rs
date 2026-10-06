@@ -294,6 +294,38 @@ pub async fn agent_providers_refresh(
     .map_err(|e| crate::error::AppError::Other(e.to_string()))
 }
 
+/// The slash commands a tool offers for a chat in `repo_path`: its skills and
+/// custom commands on disk, plus any built-ins it announced while running.
+///
+/// `provider` is the chat's chosen tool, or the default one when `None`.
+/// Reads only small files, but on the blocking pool so a slow disk never
+/// holds the IPC thread.
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_slash_commands(
+    repo_path: Option<String>,
+    provider: Option<String>,
+) -> Result<Vec<crate::ai::agent::slash_commands::SlashCommandInfo>, crate::error::AppError> {
+    let agent_id = provider
+        .as_deref()
+        .and_then(registry::find)
+        .unwrap_or_else(registry::default_agent)
+        .id;
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(windows)]
+        let home = std::env::var_os("USERPROFILE");
+        #[cfg(not(windows))]
+        let home = std::env::var_os("HOME");
+        let Some(home) = home.map(std::path::PathBuf::from) else {
+            return Vec::new();
+        };
+        let repo = repo_path.filter(|p| !p.is_empty()).map(std::path::PathBuf::from);
+        crate::ai::agent::slash_commands::list(&home, repo.as_deref(), agent_id)
+    })
+    .await
+    .map_err(|e| crate::error::AppError::Other(e.to_string()))
+}
+
 /// The least time between two quiet re-checks, in seconds.
 ///
 /// Long enough that the list screens re-asking after a change cannot start a

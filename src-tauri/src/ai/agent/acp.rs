@@ -256,7 +256,7 @@ impl AcpConnection {
         let (tx, incoming) = mpsc::unbounded_channel();
 
         let stdin = Arc::new(Mutex::new(stdin));
-        tokio::spawn(read_loop(stdout, pending.clone(), tx, stdin.clone()));
+        tokio::spawn(read_loop(stdout, pending.clone(), tx, stdin.clone(), spec.id));
         // In stdio mode stdout carries the protocol, so the CLI's own diagnostics
         // arrive on stderr. Logged rather than parsed.
         tokio::spawn(async move {
@@ -481,6 +481,7 @@ async fn read_loop(
     pending: Pending,
     tx: mpsc::UnboundedSender<Incoming>,
     stdin: Arc<Mutex<ChildStdin>>,
+    agent_id: &'static str,
 ) {
     let mut lines = BufReader::new(stdout).lines();
     loop {
@@ -594,6 +595,15 @@ async fn read_loop(
                     .and_then(|p| p.get("update"))
                     .cloned()
                     .unwrap_or(Value::Null);
+                // The tool's own command list, kept for the message box's
+                // slash menu. Not a run event: nothing in the chat changes.
+                if update.get("sessionUpdate").and_then(Value::as_str) == Some("available_commands_update") {
+                    super::slash_commands::remember_announced(
+                        agent_id,
+                        super::slash_commands::from_acp_update(&update),
+                    );
+                    continue;
+                }
                 if let Some(item) = classify_update(&update) {
                     if tx.send(item).is_err() {
                         break;

@@ -317,6 +317,22 @@ async agentProvidersRefresh(sessionId: string | null) : Promise<Result<AgentProv
 }
 },
 /**
+ * The slash commands a tool offers for a chat in `repo_path`: its skills and
+ * custom commands on disk, plus any built-ins it announced while running.
+ * 
+ * `provider` is the chat's chosen tool, or the default one when `None`.
+ * Reads only small files, but on the blocking pool so a slow disk never
+ * holds the IPC thread.
+ */
+async agentSlashCommands(repoPath: string | null, provider: string | null) : Promise<Result<SlashCommandInfo[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_slash_commands", { repoPath, provider }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Whether `snip` is installed, and which version answered.
  * 
  * Safe to call repeatedly: a found result is cached, and a "not found" is
@@ -8637,6 +8653,19 @@ missingSigningKey: boolean;
  * the user hunting for a setting that is not where they are looking.
  */
 signingScope: string | null }
+/**
+ * One command, as the menu shows it.
+ */
+export type SlashCommandInfo = { 
+/**
+ * Without the slash. Sub-folders and plugins use a colon ("plugin:skill").
+ */
+name: string; description: string; kind: SlashCommandKind; 
+/**
+ * What to type after it, when the tool says ("<issue number>").
+ */
+argumentHint: string | null }
+export type SlashCommandKind = "skill" | "command" | "builtin"
 /**
  * Savings attributed to one command.
  * 

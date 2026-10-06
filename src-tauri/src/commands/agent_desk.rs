@@ -1714,7 +1714,7 @@ pub(crate) fn start_execution_at(
 
         crate::airun::cli_run::run_task(
             &agent,
-            &format!(
+            &lead_with_slash_command(&session.messages, format!(
                 "{}\n\nThe task:\n{}",
                 // Built from what this run actually is. Telling a blank chat
                 // it was "on one task from a spec", and that it finishes by
@@ -1732,7 +1732,7 @@ pub(crate) fn start_execution_at(
                     intent_policy.can_write,
                 ),
                 prompt
-            ),
+            )),
             sink,
             answer_rx,
             policy,
@@ -1864,6 +1864,33 @@ fn build_prompt(session: &AgentSession) -> String {
         parts.push(session.header.title.clone());
     }
     parts.join("\n\n")
+}
+
+/// Puts the newest message first when it is a slash command.
+///
+/// Every agent tool reads a command only at the very start of a turn, and the
+/// turn GitWyrm sends opens with its own instructions, the source and the
+/// history -- so "/review" typed into the box reached the agent as one more
+/// line of quoted conversation and nothing ran. With the command leading, the
+/// tool runs it and receives everything after it, including that context, as
+/// the command's arguments.
+fn lead_with_slash_command(messages: &[SessionMessage], task: String) -> String {
+    let newest = messages
+        .iter()
+        .rev()
+        .find(|m| matches!(m.role, MessageRole::User) && matches!(m.kind, MessageKind::User));
+    match newest.map(|m| m.plain_content.trim()) {
+        Some(text) if is_slash_command(text) => format!("{text}\n\n{task}"),
+        _ => task,
+    }
+}
+
+/// "/name" at the very start, where name begins with a letter. Rules out a
+/// path ("/usr/bin") only loosely on purpose: the box offers commands, and a
+/// message that starts with a slash is overwhelmingly one of them.
+fn is_slash_command(text: &str) -> bool {
+    let mut chars = text.chars();
+    chars.next() == Some('/') && chars.next().is_some_and(|c| c.is_ascii_alphabetic())
 }
 
 fn build_transcript_handoff(messages: &[SessionMessage]) -> Option<String> {
@@ -4485,6 +4512,40 @@ mod tests {
         assert!(prompt.contains("Earlier history shortened:"));
         assert!(prompt.contains("Message shortened:"));
         assert!(prompt.chars().count() < PROMPT_TRANSCRIPT_CHAR_BUDGET + 1_000);
+    }
+
+    #[test]
+    fn a_slash_command_leads_the_turn_and_keeps_its_context() {
+        let (_dir, root) = temp_root();
+        let locks = test_locks();
+        let CreateSessionOutcome::Created { session } = create_session_at(&root, create_request("Slash")) else {
+            panic!("expected Created");
+        };
+        let id = session.header.session_id.clone();
+        append_user_message_at(&locks, &root, &id, "Look at the login page".into(), vec![]);
+        append_user_message_at(&locks, &root, &id, "/impeccable audit the header".into(), vec![]);
+        let session = store::read_session(&root, &id).expect("session");
+        let task = format!("Instructions\n\nThe task:\n{}", build_prompt(&session));
+        let sent = lead_with_slash_command(&session.messages, task.clone());
+        assert!(sent.starts_with("/impeccable audit the header\n\n"));
+        assert!(sent.ends_with(&task), "the context still follows the command");
+    }
+
+    #[test]
+    fn plain_messages_are_sent_unchanged() {
+        let (_dir, root) = temp_root();
+        let locks = test_locks();
+        let CreateSessionOutcome::Created { session } = create_session_at(&root, create_request("Plain")) else {
+            panic!("expected Created");
+        };
+        let id = session.header.session_id.clone();
+        append_user_message_at(&locks, &root, &id, "/review this".into(), vec![]);
+        append_user_message_at(&locks, &root, &id, "now fix it".into(), vec![]);
+        let session = store::read_session(&root, &id).expect("session");
+        assert_eq!(lead_with_slash_command(&session.messages, "task".into()), "task");
+        assert!(!is_slash_command("/ not a command"));
+        assert!(!is_slash_command("and/or"));
+        assert!(is_slash_command("/goal ship it"));
     }
 
     #[test]
