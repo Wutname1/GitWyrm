@@ -175,6 +175,13 @@ pub async fn agent_providers_list(
         let app = app.clone();
         let _ = tauri::async_runtime::spawn_blocking(move || remember_learned(&app, &to_write)).await;
         fresh
+    } else if !claim_quiet_recheck(crate::ai::agent::tool_memory::now_secs().into()) {
+        // A quiet re-check ran a moment ago. Every screen that lists tools asks
+        // on mount and again when told the list changed, so without this gate
+        // one "changed" answer started the next check, which answered
+        // "changed", and the loop ran thousands of times a second -- flooding
+        // the window's message queue until chats could no longer open.
+        restored
     } else {
         // Check again quietly behind the answer already being returned.
         // Deliberately not awaited: the whole point is that nobody waits for
@@ -287,6 +294,33 @@ pub async fn agent_providers_refresh(
     .map_err(|e| crate::error::AppError::Other(e.to_string()))
 }
 
+/// The least time between two quiet re-checks, in seconds.
+///
+/// Long enough that the list screens re-asking after a change cannot start a
+/// chain of checks; short enough that a tool installed while GitWyrm is open
+/// still shows up without pressing Refresh. Refresh itself is never gated.
+const QUIET_RECHECK_GAP_SECS: u64 = 120;
+
+/// When the last quiet re-check started, in seconds since the epoch.
+static LAST_QUIET_RECHECK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Whether a quiet re-check may start now, recording that it has if so.
+fn claim_quiet_recheck(now: u64) -> bool {
+    use std::sync::atomic::Ordering;
+    let last = LAST_QUIET_RECHECK.load(Ordering::Relaxed);
+    if !quiet_recheck_due(last, now) {
+        return false;
+    }
+    // Only the caller that wins the swap runs the check.
+    LAST_QUIET_RECHECK
+        .compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed)
+        .is_ok()
+}
+
+fn quiet_recheck_due(last: u64, now: u64) -> bool {
+    last == 0 || now.saturating_sub(last) >= QUIET_RECHECK_GAP_SECS
+}
+
 /// Fired when a quiet re-check found something different from what the picker
 /// was already showing.
 ///
@@ -347,25 +381,19 @@ fn clone_learned(src: &HashMap<&'static str, Learned>) -> HashMap<&'static str, 
 
 /// Whether a fresh answer says anything different from the one on screen.
 ///
-/// Compares only what a reader would see -- which models are offered, in what
-/// order, and whether a newer release exists. A re-check that confirms the
-/// picker must not redraw it.
+/// Compares the rows the picker would actually draw from each answer. The
+/// remembered answer only has entries for tools it has notes on, while a fresh
+/// one has an entry for every tool, installed or not -- so comparing the two
+/// maps entry by entry reported a change on every single check. Both go
+/// through `list` here, which fills the gaps the same way the picker does.
 fn differs_from(shown: &HashMap<&'static str, Learned>, fresh: &HashMap<&'static str, Learned>) -> bool {
-    if shown.len() != fresh.len() {
-        return true;
-    }
-    shown.iter().any(|(id, was)| match fresh.get(id) {
-        None => true,
-        Some(now) => {
-            let model_ids = |l: &Learned| {
-                l.catalog
-                    .as_ref()
-                    .map(|c| c.models.iter().map(|m| m.id.clone()).collect::<Vec<_>>())
-                    .unwrap_or_default()
-            };
-            was.update != now.update || model_ids(was) != model_ids(now)
-        }
-    })
+    rows_as_seen(&list(shown)) != rows_as_seen(&list(fresh))
+}
+
+fn rows_as_seen(rows: &[AgentProvider]) -> Vec<serde_json::Value> {
+    rows.iter()
+        .map(|r| serde_json::to_value(r).unwrap_or(serde_json::Value::Null))
+        .collect()
 }
 
 /// What was remembered from a previous run, for the tools it is still about.
@@ -700,6 +728,28 @@ mod tests {
         };
         write_session(&root, &AgentSession::new(header)).expect("write");
         (dir, root, "s-1".to_string())
+    }
+
+    #[test]
+    fn a_tool_the_memory_has_no_notes_on_is_not_a_change() {
+        // The loop this guards: memory holds entries only for the tools it
+        // learnt something about, a fresh check holds one for every tool. An
+        // entry-by-entry comparison saw different sizes and said "changed"
+        // every time, which re-fired the check forever.
+        let shown: HashMap<&'static str, Learned> = HashMap::new();
+        let fresh: HashMap<&'static str, Learned> = registry::AGENTS
+            .iter()
+            .map(|spec| (spec.id, Learned { catalog: None, update: Some(UpdateCheck::NotChecked) }))
+            .collect();
+        assert!(!differs_from(&shown, &fresh));
+    }
+
+    #[test]
+    fn quiet_rechecks_are_spaced_out() {
+        assert!(quiet_recheck_due(0, 1_000), "the first check of a run always goes");
+        assert!(!quiet_recheck_due(1_000, 1_001), "a check a second later is held back");
+        assert!(!quiet_recheck_due(1_000, 1_000 + QUIET_RECHECK_GAP_SECS - 1));
+        assert!(quiet_recheck_due(1_000, 1_000 + QUIET_RECHECK_GAP_SECS));
     }
 
     #[test]
