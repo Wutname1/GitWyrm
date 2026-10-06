@@ -21,10 +21,17 @@
 //!
 //! The resolution is to listen to git. After a 401 git runs `erase` with the
 //! credential that failed. When that credential is ours, the helper records a
-//! refusal marker for the host and stops offering the token until the user
-//! reconnects the account (`auth.json` becoming newer than the marker clears
-//! it). One failed push, then Credential Manager handles that host from then
-//! on -- instead of either failing forever or prompting forever.
+//! refusal marker for that repository and stops offering the token there until
+//! the user reconnects the account (`auth.json` becoming newer than the marker
+//! clears it). One failed push, then Credential Manager handles that repository
+//! from then on -- instead of either failing forever or prompting forever.
+//!
+//! The marker was once per host. One refused repository -- often found by a
+//! background fetch nobody saw -- then sent every push on the host to
+//! Credential Manager, and the user got sign-in windows while Settings still
+//! showed the account as connected (GITWYRM-FRONTEND-1E). Git names the
+//! repository only with `credential.useHttpPath`, which `shell::credential_args`
+//! sets.
 //!
 //! # Why Credential Manager is reached through us
 //!
@@ -57,7 +64,7 @@
 //!
 //! This process runs before Tauri initializes: no logger, no Sentry. Decisions
 //! are appended to `credential-helper.log` next to `auth.json` instead --
-//! operation, host, and outcome only. No username, token, or reply ever
+//! operation, host and repository, and outcome only. No username, token, or reply ever
 //! reaches the trace; the credential passes through this process on its way to
 //! git and leaves no record in it. The app-side counterpart is the
 //! `git push: ... helpers=[...]` line in `commands::remote`, which does reach
@@ -153,6 +160,9 @@ fn username_for(provider: ProviderId, stored_email: Option<&str>) -> String {
 struct Request {
     protocol: Option<String>,
     host: Option<String>,
+    /// `owner/repo.git`. Present because `shell::credential_args` sets
+    /// `credential.useHttpPath`; it scopes the refusal marker to one repository.
+    path: Option<String>,
     password: Option<String>,
 }
 
@@ -173,6 +183,7 @@ fn parse_request(block: &str) -> Request {
         match line.split_once('=') {
             Some(("protocol", v)) => req.protocol = Some(v.to_string()),
             Some(("host", v)) => req.host = Some(v.to_string()),
+            Some(("path", v)) if !v.is_empty() => req.path = Some(v.to_string()),
             Some(("password", v)) => req.password = Some(v.to_string()),
             _ => {}
         }
@@ -182,17 +193,57 @@ fn parse_request(block: &str) -> Request {
 
 // ---------------------------------------------------------------- refusal marker
 
-/// The file recording that `host` refused our token for git operations.
+/// Folder holding one refusal marker per repository, next to `auth.json` so
+/// their timestamps are comparable.
+const MARKER_DIR: &str = "refused-tokens";
+
+/// The host without a port, lowercased, for comparing and naming.
+fn bare_host(host: &str) -> String {
+    host.split(':').next().unwrap_or(host).to_ascii_lowercase()
+}
+
+/// The file recording that the host refused our token for this repository.
 ///
-/// Lives next to `auth.json` so their timestamps are comparable. The host is
-/// sanitised to filename-safe characters; every host we answer for is a fixed
-/// public name, so collisions cannot occur in practice.
-fn marker_path(data_dir: &Path, host: &str) -> PathBuf {
-    let safe: String = host
-        .split(':')
-        .next()
-        .unwrap_or(host)
-        .to_ascii_lowercase()
+/// Per repository, not per host. A host-wide marker meant one refusal -- an
+/// organization that blocks third-party apps, or a renamed repository that
+/// GitHub answers with 401 even for a good sign-in, possibly from a background
+/// fetch nobody saw -- switched the connected account off for every repository
+/// on that host. Every push after that asked Credential Manager, which opened
+/// a sign-in window for a user whose account still showed as connected
+/// (GITWYRM-FRONTEND-1E).
+///
+/// Without a path (a git run that did not get `credential.useHttpPath`) the
+/// marker falls back to the whole host, which is the old behaviour.
+///
+/// Names are filename-safe: GitHub, GitLab, Bitbucket and Azure names use only
+/// letters, digits, `.`, `-` and `_`, and `/` becomes `~`, so two repositories
+/// cannot share a marker.
+fn marker_path(data_dir: &Path, host: &str, path: Option<&str>) -> PathBuf {
+    let mut key = bare_host(host);
+    if let Some(path) = path {
+        let repo = path
+            .trim_matches('/')
+            .trim_end_matches(".git")
+            .to_ascii_lowercase();
+        if !repo.is_empty() {
+            key.push('~');
+            key.push_str(&repo);
+        }
+    }
+    let safe: String = key
+        .chars()
+        .map(|c| match c {
+            c if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '~') => c,
+            '/' => '~',
+            _ => '-',
+        })
+        .collect();
+    data_dir.join(MARKER_DIR).join(safe)
+}
+
+/// Where the host-wide marker of earlier versions lived.
+fn legacy_marker_path(data_dir: &Path, host: &str) -> PathBuf {
+    let safe: String = bare_host(host)
         .chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() || c == '.' || c == '-' {
@@ -205,6 +256,15 @@ fn marker_path(data_dir: &Path, host: &str) -> PathBuf {
     data_dir.join(format!("git-token-refused-{safe}"))
 }
 
+/// Remove a host-wide marker left by an earlier version.
+///
+/// It switched the connected account off for every repository on the host. A
+/// repository that really refuses the token records its own marker on the
+/// next attempt, so dropping the old one costs at most one more refusal there.
+fn forget_legacy_marker(data_dir: &Path, host: &str) {
+    let _ = std::fs::remove_file(legacy_marker_path(data_dir, host));
+}
+
 /// Whether a recorded refusal still applies.
 ///
 /// The marker outlives the refusal it records only until the user touches
@@ -212,8 +272,8 @@ fn marker_path(data_dir: &Path, host: &str) -> PathBuf {
 /// `auth.json`, and a marker older than the store describes a token that no
 /// longer exists. Missing files fail open in the safe direction -- no marker
 /// means try the token, no `auth.json` means there is no token to try.
-fn refusal_active(data_dir: &Path, host: &str) -> bool {
-    let marker = match std::fs::metadata(marker_path(data_dir, host)) {
+fn refusal_active(data_dir: &Path, host: &str, path: Option<&str>) -> bool {
+    let marker = match std::fs::metadata(marker_path(data_dir, host, path)) {
         Ok(m) => m,
         Err(_) => return false,
     };
@@ -227,13 +287,33 @@ fn refusal_active(data_dir: &Path, host: &str) -> bool {
     }
 }
 
-fn record_refusal(data_dir: &Path, host: &str) {
+fn record_refusal(data_dir: &Path, host: &str, path: Option<&str>) {
+    let marker = marker_path(data_dir, host, path);
+    if let Some(dir) = marker.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
     // Content is irrelevant; the file's mtime is the record.
-    let _ = std::fs::write(marker_path(data_dir, host), b"see credential_helper.rs");
+    let _ = std::fs::write(marker, b"see credential_helper.rs");
 }
 
-fn clear_refusal(data_dir: &Path, host: &str) {
-    let _ = std::fs::remove_file(marker_path(data_dir, host));
+fn clear_refusal(data_dir: &Path, host: &str, path: Option<&str>) {
+    let _ = std::fs::remove_file(marker_path(data_dir, host, path));
+}
+
+/// The request block with its `path=` line removed, for Credential Manager.
+///
+/// The path is only there to scope our own refusal marker. Credential Manager
+/// keys the user's saved sign-ins by host; handed a path it would look them up
+/// per repository, miss, and prompt.
+fn without_path(request: &[u8]) -> Vec<u8> {
+    let text = String::from_utf8_lossy(request);
+    let mut out = String::with_capacity(text.len());
+    for line in text.split_inclusive('\n') {
+        if !line.starts_with("path=") {
+            out.push_str(line);
+        }
+    }
+    out.into_bytes()
 }
 
 // ---------------------------------------------------------------- stored token
@@ -265,7 +345,7 @@ fn answer(req: &Request, data_dir: &Path) -> Option<String> {
         return None;
     }
     let host = req.host.as_deref()?;
-    if refusal_active(data_dir, host) {
+    if refusal_active(data_dir, host, req.path.as_deref()) {
         return None;
     }
     let stored = stored_for(data_dir, host)?;
@@ -297,6 +377,7 @@ fn is_ours(req: &Request, data_dir: &Path) -> bool {
 /// `GCM_INTERACTIVE=never` on unattended runs and the variable inherits down
 /// to the child spawned here.
 fn forward_to_gcm(operation: &str, request: &[u8]) {
+    let request = without_path(request);
     let git = std::env::var(GIT_PROGRAM_ENV).unwrap_or_else(|_| "git".to_string());
     let mut cmd = Command::new(git);
     cmd.args(["credential-manager", operation])
@@ -318,7 +399,7 @@ fn forward_to_gcm(operation: &str, request: &[u8]) {
         return;
     };
     if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(request);
+        let _ = stdin.write_all(&request);
         // Dropping closes the pipe, which is how Credential Manager knows the
         // request is complete.
     }
@@ -359,8 +440,16 @@ fn trace(data_dir: &Path, line: &str) {
     }
 }
 
-fn host_label(req: &Request) -> &str {
-    req.host.as_deref().unwrap_or("<no host>")
+/// The host, plus the repository when git sent one, for trace lines.
+///
+/// The repository name stays in this local file; nothing here is attached to
+/// reports.
+fn host_label(req: &Request) -> String {
+    let host = req.host.as_deref().unwrap_or("<no host>");
+    match req.path.as_deref() {
+        Some(path) => format!("{host}/{}", path.trim_end_matches(".git")),
+        None => host.to_string(),
+    }
 }
 
 // ---------------------------------------------------------------- entry point
@@ -376,10 +465,14 @@ pub fn run(args: &[String], data_dir: PathBuf) -> i32 {
 
     // Read the whole request before anything else: git closes its end after
     // the blank line, and a forwarded block must reach Credential Manager
-    // verbatim.
+    // verbatim apart from the `path=` line (see `without_path`).
     let mut request = Vec::new();
     let _ = std::io::stdin().lock().read_to_end(&mut request);
     let req = parse_request(&String::from_utf8_lossy(&request));
+    let path = req.path.as_deref();
+    if let Some(host) = req.host.as_deref() {
+        forget_legacy_marker(&data_dir, host);
+    }
 
     match operation {
         "get" => {
@@ -403,9 +496,9 @@ pub fn run(args: &[String], data_dir: PathBuf) -> i32 {
                         if req
                             .host
                             .as_deref()
-                            .is_some_and(|h| refusal_active(&data_dir, h))
+                            .is_some_and(|h| refusal_active(&data_dir, h, path))
                         {
-                            " (host refused it earlier)"
+                            " (refused here earlier)"
                         } else {
                             ""
                         }
@@ -419,7 +512,7 @@ pub fn run(args: &[String], data_dir: PathBuf) -> i32 {
                 // Our token just worked. A leftover marker describes a refusal
                 // that is no longer true.
                 if let Some(host) = req.host.as_deref() {
-                    clear_refusal(&data_dir, host);
+                    clear_refusal(&data_dir, host, path);
                 }
                 trace(
                     &data_dir,
@@ -437,11 +530,13 @@ pub fn run(args: &[String], data_dir: PathBuf) -> i32 {
         }
         "erase" => {
             if is_ours(&req, &data_dir) {
-                // The host refused our token. Remember that instead of
-                // touching any store: next time this host falls straight
-                // through to Credential Manager.
+                // The host refused our token for this repository. Remember
+                // that instead of touching any store: next time this
+                // repository goes straight to Credential Manager. Recorded for
+                // unattended runs too -- scoped to one repository it cannot
+                // switch the account off anywhere else.
                 if let Some(host) = req.host.as_deref() {
-                    record_refusal(&data_dir, host);
+                    record_refusal(&data_dir, host, path);
                 }
                 trace(
                     &data_dir,
@@ -553,18 +648,76 @@ mod tests {
     }
 
     #[test]
-    fn marker_names_are_filename_safe_and_ignore_ports() {
+    fn parses_the_repository_path_and_ignores_an_empty_one() {
+        let req = parse_request("protocol=https\nhost=github.com\npath=me/app.git\n\n");
+        assert_eq!(req.path.as_deref(), Some("me/app.git"));
+        let req = parse_request("protocol=https\nhost=github.com\npath=\n\n");
+        assert_eq!(req.path, None);
+    }
+
+    #[test]
+    fn marker_names_are_filename_safe_and_ignore_ports_and_case() {
         let dir = Path::new("/data");
         assert_eq!(
-            marker_path(dir, "github.com:443"),
-            marker_path(dir, "GitHub.com")
+            marker_path(dir, "github.com:443", Some("Me/App.git")),
+            marker_path(dir, "GitHub.com", Some("me/app"))
         );
-        let path = marker_path(dir, "weird/host?name");
+        let path = marker_path(dir, "weird/host?name", Some("a/b?c/d.git"));
         let name = path.file_name().unwrap().to_str().unwrap();
-        assert!(name.chars().all(|c| c.is_ascii_alphanumeric()
-            || c == '.'
-            || c == '-'
-            || c == '_'));
+        assert!(
+            name.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '~')),
+            "{name}"
+        );
+        assert_ne!(
+            marker_path(dir, "github.com", Some("a-b/c")),
+            marker_path(dir, "github.com", Some("a/b-c")),
+            "two repositories must never share a marker"
+        );
+    }
+
+    #[test]
+    fn credential_manager_never_sees_the_repository_path() {
+        let block = b"protocol=https\nhost=github.com\npath=me/app.git\nusername=me\n\n";
+        assert_eq!(
+            without_path(block),
+            b"protocol=https\nhost=github.com\nusername=me\n\n".to_vec()
+        );
+    }
+
+    fn scratch_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("gitwyrm-cred-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("auth.json"), b"{}").unwrap();
+        dir
+    }
+
+    /// The report this scoping exists for: one repository refusing the token
+    /// must leave every other repository on the host using it.
+    #[test]
+    fn a_refusal_in_one_repository_leaves_the_others_alone() {
+        let dir = scratch_dir("scope");
+        record_refusal(&dir, "github.com", Some("org/locked.git"));
+
+        assert!(refusal_active(&dir, "github.com", Some("org/locked.git")));
+        assert!(!refusal_active(&dir, "github.com", Some("me/app.git")));
+        assert!(!refusal_active(&dir, "github.com", None));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A host-wide marker from an earlier version is removed, so a user stuck
+    /// with one gets the connected account back after updating.
+    #[test]
+    fn an_old_host_wide_marker_is_forgotten() {
+        let dir = scratch_dir("legacy");
+        std::fs::write(legacy_marker_path(&dir, "github.com"), b"old").unwrap();
+
+        forget_legacy_marker(&dir, "github.com:443");
+
+        assert!(!legacy_marker_path(&dir, "github.com").exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The refusal cycle end to end: no marker means the token is offered, a
@@ -572,25 +725,23 @@ mod tests {
     /// the account) makes it eligible again.
     #[test]
     fn a_refusal_holds_until_the_account_is_reconnected() {
-        let dir = std::env::temp_dir().join(format!("gitwyrm-cred-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("auth.json"), b"{}").unwrap();
+        let dir = scratch_dir("cycle");
+        let repo = Some("me/app.git");
 
-        assert!(!refusal_active(&dir, "github.com"));
-        record_refusal(&dir, "github.com");
-        assert!(refusal_active(&dir, "github.com"));
+        assert!(!refusal_active(&dir, "github.com", repo));
+        record_refusal(&dir, "github.com", repo);
+        assert!(refusal_active(&dir, "github.com", repo));
 
         // Reconnecting rewrites auth.json with a fresh mtime. Filesystem
         // timestamps can be coarse, so nudge past the marker's.
         std::thread::sleep(std::time::Duration::from_millis(20));
         std::fs::write(dir.join("auth.json"), b"{ }").unwrap();
-        assert!(!refusal_active(&dir, "github.com"));
+        assert!(!refusal_active(&dir, "github.com", repo));
 
         // And an explicit clear (a successful `store`) removes it outright.
-        record_refusal(&dir, "github.com");
-        clear_refusal(&dir, "github.com");
-        assert!(!refusal_active(&dir, "github.com"));
+        record_refusal(&dir, "github.com", repo);
+        clear_refusal(&dir, "github.com", repo);
+        assert!(!refusal_active(&dir, "github.com", repo));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -120,6 +120,13 @@ pub enum Attended {
 /// the stored sign-in.
 pub fn credential_args(attended: Attended) -> Vec<String> {
     let mut args = vec!["-c".into(), "credential.helper=".into()];
+    // Hands the helper the repository path as well as the host, so a refusal of
+    // the connected account is remembered for that one repository instead of
+    // for every repository on the host (GITWYRM-FRONTEND-1E). The helper strips
+    // the path again before asking Credential Manager, so the user's saved
+    // sign-ins are still looked up by host as before.
+    args.push("-c".into());
+    args.push("credential.useHttpPath=true".into());
     args.push("-c".into());
     // When the current executable cannot be located the helper could not be
     // spawned anyway; Credential Manager alone is the behaviour before the
@@ -569,9 +576,17 @@ mod credential_trace_tests {
                 "{args:?}"
             );
             assert_eq!(
-                args.len(),
-                4,
+                args.iter()
+                    .filter(|a| a.starts_with("credential.helper="))
+                    .count(),
+                2,
                 "exactly one helper after the reset: {args:?}"
+            );
+            // Without the path the helper can only remember a refusal for the
+            // whole host, which switched the connected account off everywhere.
+            assert!(
+                args.contains(&"credential.useHttpPath=true".to_string()),
+                "{args:?}"
             );
 
             // The path is quoted because a default Windows install sits under
