@@ -893,6 +893,8 @@ interface WorkspaceState {
   mehenKeepFresh: boolean;
   /** Note once when Mehen finds a new fix for an open repository (persisted, on by default). */
   mehenNewFixNotes: boolean;
+  /** Leave the Mehen sidebar section out while it lists nothing (persisted, off by default). */
+  mehenHideWhenEmpty: boolean;
   /** Groups that currently wrap open repository tabs (persisted while open). */
   tabGroups: TabGroup[];
   /** Shared order of loose repository tabs and complete groups (persisted). */
@@ -1039,6 +1041,7 @@ interface WorkspaceState {
   setMehenTabLevel: (level: MehenTabLevel) => void;
   setMehenKeepFresh: (enabled: boolean) => void;
   setMehenNewFixNotes: (enabled: boolean) => void;
+  setMehenHideWhenEmpty: (enabled: boolean) => void;
   /** Set the whole-app zoom factor (clamped to the supported range). */
   setUiScale: (scale: number) => void;
   /** Set the UI font by id (see lib/fonts.ts). */
@@ -1268,6 +1271,7 @@ function toSettings(s: WorkspaceState): Settings {
     mehen_tab_level: s.mehenTabLevel,
     mehen_keep_fresh: s.mehenKeepFresh,
     mehen_new_fix_notes: s.mehenNewFixNotes,
+    mehen_hide_when_empty: s.mehenHideWhenEmpty,
     tab_groups: s.tabGroups.map((group) => ({
       id: group.id,
       name: group.name,
@@ -1642,6 +1646,7 @@ export const SETTINGS_DEFAULTS = {
   mehenTabLevel: DEFAULT_MEHEN_TAB_LEVEL,
   mehenKeepFresh: true,
   mehenNewFixNotes: true,
+  mehenHideWhenEmpty: false,
 } satisfies Partial<WorkspaceState>;
 
 /** A resettable preference key. */
@@ -1700,7 +1705,7 @@ export const SETTINGS_GROUPS = {
   ],
   // Only the tab badges. Resetting this screen must not sign the user out of
   // GitHub -- disconnecting is a deliberate act with its own button.
-  integrations: ["showTabPrCount", "showTabIssueCount", "mehenShowStatus", "mehenTabLevel", "mehenKeepFresh", "mehenNewFixNotes"],
+  integrations: ["showTabPrCount", "showTabIssueCount", "mehenShowStatus", "mehenTabLevel", "mehenKeepFresh", "mehenNewFixNotes", "mehenHideWhenEmpty"],
 } satisfies Record<string, SettingsKey[]>;
 
 export type SettingsGroup = keyof typeof SETTINGS_GROUPS;
@@ -1790,6 +1795,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   mehenTabLevel: DEFAULT_MEHEN_TAB_LEVEL,
   mehenKeepFresh: true,
   mehenNewFixNotes: true,
+  mehenHideWhenEmpty: false,
   tabGroups: [],
   tabOrder: [],
   tabSort: "manual",
@@ -2377,6 +2383,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   setMehenNewFixNotes: (enabled) => {
     set({ mehenNewFixNotes: enabled });
+    schedulePersist();
+  },
+  setMehenHideWhenEmpty: (enabled) => {
+    set({ mehenHideWhenEmpty: enabled });
     schedulePersist();
   },
   setUiScale: (scale) => {
@@ -3289,6 +3299,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         mehenTabLevel: parseMehenTabLevel(settings.mehen_tab_level),
         mehenKeepFresh: settings.mehen_keep_fresh ?? true,
         mehenNewFixNotes: settings.mehen_new_fix_notes ?? true,
+        mehenHideWhenEmpty: settings.mehen_hide_when_empty ?? false,
         tabGroups,
         tabOrder: deserializeTabOrder(settings.tab_order, tabGroups),
         tabSort: normalizeTabSort(settings.tab_sort),

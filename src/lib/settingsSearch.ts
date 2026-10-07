@@ -292,6 +292,13 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     keywords: ['mehen', 'unsafe', 'vulnerable', 'badge', 'tab', 'count', 'shield', 'critical', 'high', 'medium', 'severity', 'outdated', 'updates', 'major', 'minor'],
   },
   {
+    id: 'mehen-hide-when-empty',
+    section: 'integrations',
+    label: 'Sidebar',
+    hint: 'Hide the Mehen list in the sidebar while it has nothing to show.',
+    keywords: ['mehen', 'sidebar', 'hide', 'empty', 'section', 'list'],
+  },
+  {
     id: 'mehen-keep-fresh',
     section: 'integrations',
     label: "Keep Mehen's results up to date",

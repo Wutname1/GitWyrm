@@ -577,6 +577,8 @@ function MehenSettings() {
   const setKeepFresh = useWorkspaceStore((s) => s.setMehenKeepFresh)
   const newFixNotes = useWorkspaceStore((s) => s.mehenNewFixNotes)
   const setNewFixNotes = useWorkspaceStore((s) => s.setMehenNewFixNotes)
+  const hideWhenEmpty = useWorkspaceStore((s) => s.mehenHideWhenEmpty)
+  const setHideWhenEmpty = useWorkspaceStore((s) => s.setMehenHideWhenEmpty)
 
   const status = isLoading
     ? 'Looking for Mehen…'
@@ -622,6 +624,14 @@ function MehenSettings() {
           ))}
         </select>
       </SettingRow>
+      <MehenToggle
+        label="Sidebar"
+        searchId="mehen-hide-when-empty"
+        hint="Leave the Mehen list out of the sidebar while it has nothing to show. It comes back as soon as Mehen flags something."
+        text="Hide the Mehen list when it's empty"
+        checked={hideWhenEmpty}
+        onChange={setHideWhenEmpty}
+      />
       <MehenToggle
         label="Keep Mehen's results up to date"
         searchId="mehen-keep-fresh"

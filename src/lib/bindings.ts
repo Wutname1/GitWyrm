@@ -8534,6 +8534,11 @@ mehen_keep_fresh?: boolean;
  */
 mehen_new_fix_notes?: boolean; 
 /**
+ * Leave the Mehen section out of the sidebar while it has nothing to list
+ * at the chosen level.
+ */
+mehen_hide_when_empty?: boolean; 
+/**
  * Open tab groups. These disappear when their last repository is closed.
  */
 tab_groups?: TabGroupSetting[]; 

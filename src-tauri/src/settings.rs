@@ -520,6 +520,10 @@ pub struct Settings {
     /// A one-time note when Mehen finds a new fix for an open repository.
     #[serde(default = "default_mehen_on")]
     pub mehen_new_fix_notes: bool,
+    /// Leave the Mehen section out of the sidebar while it has nothing to list
+    /// at the chosen level.
+    #[serde(default)]
+    pub mehen_hide_when_empty: bool,
     /// Open tab groups. These disappear when their last repository is closed.
     #[serde(default)]
     pub tab_groups: Vec<TabGroupSetting>,
@@ -859,6 +863,7 @@ impl Default for Settings {
             mehen_tab_level: None,
             mehen_keep_fresh: true,
             mehen_new_fix_notes: true,
+            mehen_hide_when_empty: false,
             tab_groups: Vec::new(),
             tab_order: Vec::new(),
             tab_sort: None,
