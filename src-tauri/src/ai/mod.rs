@@ -9,3 +9,4 @@ pub mod copilot_sdk;
 pub mod local_cli;
 pub mod models;
 pub mod prompt;
+pub mod provider_usage;

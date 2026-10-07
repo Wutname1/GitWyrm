@@ -7,6 +7,7 @@ import { AiProviderChip } from '@/components/domain/spec-desk/AiProviderChip'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { titleBarInsetStyle } from '@/lib/platform'
+import { PlanLimitsButton } from './ProviderUsage'
 
 type CenterView = 'conversation' | 'openspec' | 'setup' | 'import'
 
@@ -100,6 +101,8 @@ export function AgentDeskTitleBar({
       </nav>
 
       <div className={cn('ml-auto flex h-full flex-none items-center gap-2', compact ? 'pl-1' : 'pl-3')}>
+        {/* Every AI tool's plan limits, one click from anywhere in the window. */}
+        <PlanLimitsButton />
         {layoutControls}
         {/* The chat list already starts with New chat. Only once it folds
             into a drawer does the title bar need its own. */}

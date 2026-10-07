@@ -115,6 +115,14 @@ pub struct AgentModelChoice {
     /// list and stays for the tools whose levels really are tool-wide; this
     /// is empty when the tool does not say.
     pub efforts: Vec<String>,
+    /// Premium-request multiplier on GitHub Copilot (`1`, `0.33`). `null` for
+    /// tools that do not bill this way, or when Copilot did not say.
+    pub multiplier: Option<f32>,
+    /// AI credits per million tokens on GitHub Copilot, where the price varies
+    /// by model. `null` when unknown.
+    pub credits_per_million: Option<crate::ai::copilot_sdk::TokenCredits>,
+    /// Context window in tokens, when the tool published it.
+    pub context_window: Option<u32>,
 }
 
 /// What the picker needs to render itself for one chat.
@@ -170,7 +178,7 @@ pub async fn agent_providers_list(
         // Nothing remembered -- a first run, a cleared memory, or an install
         // that has changed since. There is no faster honest answer than
         // asking, so this one time the picker waits.
-        let fresh = resolve_learned().await;
+        let fresh = resolve_learned(&app).await;
         let to_write = clone_learned(&fresh);
         let app = app.clone();
         let _ = tauri::async_runtime::spawn_blocking(move || remember_learned(&app, &to_write)).await;
@@ -190,7 +198,7 @@ pub async fn agent_providers_list(
         let shown = clone_learned(&restored);
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
-            let fresh = resolve_learned().await;
+            let fresh = resolve_learned(&app).await;
             let differs = differs_from(&shown, &fresh);
             let to_write = clone_learned(&fresh);
             let app_for_disk = app.clone();
@@ -255,6 +263,7 @@ pub async fn agent_providers_refresh(
         // remembered would make the button that exists to pick up a newly
         // installed or updated tool keep showing that tool's old models.
         crate::ai::agent::codex_models::forget_all_cached();
+        forget_copilot_models();
         // And what was learnt about newer releases: refresh means ask
         // everything again, and somebody who has just updated a tool should
         // not keep reading that a newer one is available.
@@ -273,7 +282,7 @@ pub async fn agent_providers_refresh(
     .await
     .map_err(|e| crate::error::AppError::Other(e.to_string()))?;
 
-    let learned = resolve_learned().await;
+    let learned = resolve_learned(&app).await;
 
     // Write the fresh answer down, so the next launch opens on it rather than
     // paying the wait again. Refresh is the one path that always asks, which
@@ -368,6 +377,22 @@ pub const TOOLS_CHANGED_EVENT: &str = "agent-tools-changed";
 struct Learned {
     catalog: Option<ModelCatalog>,
     update: Option<UpdateCheck>,
+    /// What each model in `catalog` costs, keyed by model id.
+    pricing: HashMap<String, ModelPricing>,
+}
+
+/// What one model costs and how much it can read, as the picker shows it.
+///
+/// Kept beside the catalog, keyed by model id, rather than added to
+/// `CodexModel`: that type is Codex's protocol shape and derives `Eq`, which
+/// float prices cannot satisfy, and only Copilot publishes prices at all. A
+/// model with no entry here simply has no price, which is also what every
+/// fallback list gets -- the built-in lists never knew a price.
+#[derive(Debug, Clone, Default, PartialEq)]
+struct ModelPricing {
+    multiplier: Option<f32>,
+    credits_per_million: Option<crate::ai::copilot_sdk::TokenCredits>,
+    context_window: Option<u32>,
 }
 
 /// Every tool's row, with whatever could be learnt already resolved.
@@ -392,6 +417,7 @@ fn list(learned: &HashMap<&'static str, Learned>) -> Vec<AgentProvider> {
             row(
                 spec,
                 catalog,
+                &known.pricing,
                 known.update.clone().unwrap_or(UpdateCheck::NotChecked),
             )
         })
@@ -405,7 +431,11 @@ fn clone_learned(src: &HashMap<&'static str, Learned>) -> HashMap<&'static str, 
         .map(|(k, v)| {
             (
                 *k,
-                Learned { catalog: v.catalog.clone(), update: v.update.clone() },
+                Learned {
+                    catalog: v.catalog.clone(),
+                    update: v.update.clone(),
+                    pricing: v.pricing.clone(),
+                },
             )
         })
         .collect()
@@ -479,6 +509,21 @@ fn restore_learned(app: &tauri::AppHandle) -> HashMap<&'static str, Learned> {
                 // a verdict, which would go stale the moment it is updated.
                 source: ModelSource::Live,
             });
+            learned.pricing = entry
+                .models
+                .iter()
+                .map(|m| {
+                    (
+                        m.id.clone(),
+                        ModelPricing {
+                            multiplier: m.multiplier,
+                            credits_per_million: m.credits_per_million,
+                            context_window: m.context_window,
+                        },
+                    )
+                })
+                .filter(|(_, p)| *p != ModelPricing::default())
+                .collect();
         }
         learned.update = entry
             .latest_release
@@ -513,13 +558,19 @@ fn remember_learned(app: &tauri::AppHandle, learned: &HashMap<&'static str, Lear
             .map(|c| {
                 c.models
                     .iter()
-                    .map(|m| mem::RememberedModel {
-                        id: m.id.clone(),
-                        display_name: m.display_name.clone(),
-                        description: m.description.clone(),
-                        is_default: m.is_default,
-                        efforts: m.efforts.clone(),
-                        default_effort: m.default_effort.clone(),
+                    .map(|m| {
+                        let price = known.pricing.get(&m.id).cloned().unwrap_or_default();
+                        mem::RememberedModel {
+                            id: m.id.clone(),
+                            display_name: m.display_name.clone(),
+                            description: m.description.clone(),
+                            is_default: m.is_default,
+                            efforts: m.efforts.clone(),
+                            default_effort: m.default_effort.clone(),
+                            multiplier: price.multiplier,
+                            credits_per_million: price.credits_per_million,
+                            context_window: price.context_window,
+                        }
                     })
                     .collect()
             })
@@ -566,12 +617,24 @@ fn remember_learned(app: &tauri::AppHandle, learned: &HashMap<&'static str, Lear
 ///
 /// The update checks run together rather than one after another, because they
 /// are independent network calls and a picker should not wait five times.
-async fn resolve_learned() -> HashMap<&'static str, Learned> {
+async fn resolve_learned(app: &tauri::AppHandle) -> HashMap<&'static str, Learned> {
     let mut out: HashMap<&'static str, Learned> = HashMap::new();
 
-    if let Some(codex) = registry::find("codex") {
-        out.entry(codex.id).or_default().catalog =
-            Some(crate::ai::agent::codex_models::catalog(codex).await);
+    // Both model lists spawn a child process, so they are asked together.
+    let codex = async {
+        match registry::find("codex") {
+            Some(spec) => Some((spec.id, crate::ai::agent::codex_models::catalog(spec).await)),
+            None => None,
+        }
+    };
+    let (codex, copilot) = tokio::join!(codex, copilot_catalog(app));
+    if let Some((id, catalog)) = codex {
+        out.entry(id).or_default().catalog = Some(catalog);
+    }
+    if let Some((catalog, pricing)) = copilot {
+        let learned = out.entry(COPILOT_AGENT_ID).or_default();
+        learned.catalog = Some(catalog);
+        learned.pricing = pricing;
     }
 
     let mut checks = tokio::task::JoinSet::new();
@@ -600,9 +663,141 @@ async fn resolve_learned() -> HashMap<&'static str, Learned> {
     out
 }
 
+/// The registry row Copilot's live model list belongs to.
+const COPILOT_AGENT_ID: &str = "copilot";
+
+/// Guards against a Copilot CLI that starts but never answers.
+///
+/// Abandoning the listing on timeout drops the SDK client, and its `Drop`
+/// kills the CLI process, so nothing is left running.
+const COPILOT_LIST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// How long a live Copilot list is trusted. The same span Codex uses: the
+/// quiet re-check runs every two minutes, and spawning the CLI that often to
+/// re-read a price list would be waste.
+const COPILOT_TTL: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+
+struct CopilotCached {
+    /// A hash of the token the list was read with, so signing in as someone
+    /// else is never answered with the previous account's models. The token
+    /// itself is not kept.
+    account: u64,
+    at: std::time::Instant,
+    models: Vec<crate::ai::copilot_sdk::CopilotModelInfo>,
+}
+
+static COPILOT_MODELS: std::sync::Mutex<Option<CopilotCached>> = std::sync::Mutex::new(None);
+
+/// Drops the remembered Copilot list, so the next read asks again.
+fn forget_copilot_models() {
+    if let Ok(mut guard) = COPILOT_MODELS.lock() {
+        *guard = None;
+    }
+}
+
+fn account_key(token: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    token.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Copilot's own model list with prices, or `None` to keep the built-in list.
+///
+/// Needs the GitHub sign-in GitWyrm holds for Copilot (the same one the commit
+/// message generator uses). Without it, or on any failure, the Copilot row
+/// keeps its fallback list -- a stale list beats an empty menu.
+async fn copilot_catalog(app: &tauri::AppHandle) -> Option<(ModelCatalog, HashMap<String, ModelPricing>)> {
+    use crate::ai::auth::{self, AuthInfo};
+    let token = match auth::get(app, crate::ai::copilot_sdk::PROVIDER_ID) {
+        Ok(Some(AuthInfo::Api { key })) => key,
+        Ok(Some(AuthInfo::Oauth { refresh, .. })) => refresh,
+        Ok(None) => return None,
+        Err(e) => {
+            log::info!("copilot models: could not read the Copilot sign-in ({e}); using the built-in list");
+            return None;
+        }
+    };
+    let account = account_key(&token);
+
+    let cached = COPILOT_MODELS.lock().ok().and_then(|guard| {
+        guard
+            .as_ref()
+            .filter(|c| c.account == account && c.at.elapsed() < COPILOT_TTL)
+            .map(|c| c.models.clone())
+    });
+    let models = match cached {
+        Some(models) => models,
+        None => {
+            let ask = crate::ai::copilot_sdk::list_models_detailed(&token);
+            match tokio::time::timeout(COPILOT_LIST_TIMEOUT, ask).await {
+                Ok(Ok(models)) if !models.is_empty() => {
+                    if let Ok(mut guard) = COPILOT_MODELS.lock() {
+                        *guard = Some(CopilotCached {
+                            account,
+                            at: std::time::Instant::now(),
+                            models: models.clone(),
+                        });
+                    }
+                    models
+                }
+                Ok(Ok(_)) => {
+                    log::warn!("copilot models: Copilot answered with an empty list; using the built-in one");
+                    return None;
+                }
+                Ok(Err(e)) => {
+                    log::info!("copilot models: could not ask Copilot ({e}); using the built-in list");
+                    return None;
+                }
+                Err(_) => {
+                    log::info!("copilot models: Copilot did not answer in time; using the built-in list");
+                    return None;
+                }
+            }
+        }
+    };
+    Some(copilot_catalog_from(models))
+}
+
+/// Copilot's answer as a picker catalog plus its prices. Pure, for testing.
+///
+/// `auto` goes first, as in the built-in list: it is Copilot's own default and
+/// the choice most people want. Everything else keeps Copilot's order.
+fn copilot_catalog_from(
+    models: Vec<crate::ai::copilot_sdk::CopilotModelInfo>,
+) -> (ModelCatalog, HashMap<String, ModelPricing>) {
+    let (mut ordered, rest): (Vec<_>, Vec<_>) = models.into_iter().partition(|m| m.id == "auto");
+    ordered.extend(rest);
+
+    let mut pricing = HashMap::new();
+    let models = ordered
+        .into_iter()
+        .map(|m| {
+            let price = ModelPricing {
+                multiplier: m.multiplier,
+                credits_per_million: m.credits_per_million,
+                context_window: m.context_window,
+            };
+            if price != ModelPricing::default() {
+                pricing.insert(m.id.clone(), price);
+            }
+            crate::ai::agent::codex::CodexModel {
+                display_name: if m.name.is_empty() { m.id.clone() } else { m.name },
+                id: m.id,
+                description: String::new(),
+                is_default: false,
+                efforts: m.efforts,
+                default_effort: m.default_effort,
+            }
+        })
+        .collect();
+    (ModelCatalog { models, source: ModelSource::Live }, pricing)
+}
+
 fn row(
     spec: &'static registry::AgentSpec,
     catalog: &ModelCatalog,
+    pricing: &HashMap<String, ModelPricing>,
     update: UpdateCheck,
 ) -> AgentProvider {
     let probe = detect_agent(spec);
@@ -639,12 +834,18 @@ fn row(
         models: catalog
             .models
             .iter()
-            .map(|m| AgentModelChoice {
-                id: m.id.clone(),
-                display_name: m.display_name.clone(),
-                description: m.description.clone(),
-                is_default: m.is_default,
-                efforts: m.efforts.clone(),
+            .map(|m| {
+                let price = pricing.get(&m.id);
+                AgentModelChoice {
+                    id: m.id.clone(),
+                    display_name: m.display_name.clone(),
+                    description: m.description.clone(),
+                    is_default: m.is_default,
+                    efforts: m.efforts.clone(),
+                    multiplier: price.and_then(|p| p.multiplier),
+                    credits_per_million: price.and_then(|p| p.credits_per_million),
+                    context_window: price.and_then(|p| p.context_window),
+                }
             })
             .collect(),
         effort_levels: match spec.effort {
@@ -771,9 +972,68 @@ mod tests {
         let shown: HashMap<&'static str, Learned> = HashMap::new();
         let fresh: HashMap<&'static str, Learned> = registry::AGENTS
             .iter()
-            .map(|spec| (spec.id, Learned { catalog: None, update: Some(UpdateCheck::NotChecked) }))
+            .map(|spec| {
+                (
+                    spec.id,
+                    Learned {
+                        catalog: None,
+                        update: Some(UpdateCheck::NotChecked),
+                        pricing: HashMap::new(),
+                    },
+                )
+            })
             .collect();
         assert!(!differs_from(&shown, &fresh));
+    }
+
+    fn copilot_model(id: &str, multiplier: Option<f32>) -> crate::ai::copilot_sdk::CopilotModelInfo {
+        crate::ai::copilot_sdk::CopilotModelInfo {
+            id: id.into(),
+            name: id.to_uppercase(),
+            multiplier,
+            credits_per_million: multiplier.map(|_| crate::ai::copilot_sdk::TokenCredits {
+                input: 1_000.0,
+                cached_input: Some(100.0),
+                output: 5_000.0,
+            }),
+            context_window: multiplier.map(|_| 400_000),
+            price_category: None,
+            efforts: Vec::new(),
+            default_effort: None,
+        }
+    }
+
+    /// Copilot's live list reaches the picker rows with its prices, `auto`
+    /// first, and a model Copilot gave no price for carries none rather than
+    /// a zero.
+    #[test]
+    fn copilot_prices_reach_the_picker_rows() {
+        let (catalog, pricing) = copilot_catalog_from(vec![
+            copilot_model("gpt-5.5", Some(1.0)),
+            copilot_model("auto", None),
+            copilot_model("gpt-5-mini", Some(0.33)),
+        ]);
+        assert_eq!(catalog.source, ModelSource::Live);
+        let ids: Vec<&str> = catalog.models.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, vec!["auto", "gpt-5.5", "gpt-5-mini"]);
+
+        let spec = registry::find(COPILOT_AGENT_ID).expect("copilot row");
+        let rows = row(spec, &catalog, &pricing, UpdateCheck::NotChecked).models;
+        assert!(rows[0].multiplier.is_none() && rows[0].credits_per_million.is_none());
+        assert_eq!(rows[1].multiplier, Some(1.0));
+        assert_eq!(rows[1].context_window, Some(400_000));
+        assert_eq!(rows[1].credits_per_million.map(|c| c.output), Some(5_000.0));
+        assert_eq!(rows[2].multiplier, Some(0.33));
+    }
+
+    /// The built-in lists never knew a price, so they must not show one.
+    #[test]
+    fn fallback_rows_carry_no_price() {
+        for provider in list_without_asking_any_tool() {
+            for m in provider.models {
+                assert!(m.multiplier.is_none() && m.credits_per_million.is_none() && m.context_window.is_none());
+            }
+        }
     }
 
     #[test]
@@ -904,7 +1164,8 @@ mod tests {
     #[test]
     fn the_binary_name_shown_is_one_that_is_probed_for() {
         for spec in registry::AGENTS {
-            let shown = row(spec, &ModelCatalog::fallback(spec), UpdateCheck::NotChecked).binary_name;
+            let shown = row(spec, &ModelCatalog::fallback(spec), &HashMap::new(), UpdateCheck::NotChecked)
+                .binary_name;
             assert!(
                 spec.candidate_names().contains(&shown.as_str()),
                 "{} shows {shown} but probes for {:?}",

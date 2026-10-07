@@ -333,6 +333,45 @@ async agentSlashCommands(repoPath: string | null, provider: string | null) : Pro
 }
 },
 /**
+ * Every file in the project a person might mention: tracked files plus new
+ * ones not yet committed, with ignored files left out. Paths are relative,
+ * with forward slashes, in a stable order.
+ */
+async agentProjectFiles(repoPath: string) : Promise<Result<string[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_project_files", { repoPath }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * The plugins the chosen tool has installed. Only Claude Code has plugins
+ * GitWyrm can read; every other tool returns an empty list.
+ */
+async agentPlugins(provider: string | null) : Promise<Result<AgentPlugin[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_plugins", { provider }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * One entry per AI tool that looks set up on this machine.
+ * 
+ * `force` skips the minimum re-fetch intervals (for a refresh button), but
+ * never the backoff after Claude's endpoint has said to slow down.
+ */
+async agentProviderUsage(force: boolean) : Promise<Result<ProviderUsage[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("agent_provider_usage", { force }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Whether `snip` is installed, and which version answered.
  * 
  * Safe to call repeatedly: a found result is cached, and a "not found" is
@@ -4250,7 +4289,25 @@ isDefault: boolean;
  * list and stays for the tools whose levels really are tool-wide; this
  * is empty when the tool does not say.
  */
-efforts: string[] }
+efforts: string[]; 
+/**
+ * Premium-request multiplier on GitHub Copilot (`1`, `0.33`). `null` for
+ * tools that do not bill this way, or when Copilot did not say.
+ */
+multiplier: number | null; 
+/**
+ * AI credits per million tokens on GitHub Copilot, where the price varies
+ * by model. `null` when unknown.
+ */
+creditsPerMillion: TokenCredits | null; 
+/**
+ * Context window in tokens, when the tool published it.
+ */
+contextWindow: number | null }
+/**
+ * One Claude Code plugin and whether it is switched on.
+ */
+export type AgentPlugin = { name: string; marketplace: string | null; enabled: boolean }
 /**
  * One row in the provider picker.
  */
@@ -7033,6 +7090,28 @@ dependsOn: string[]; budget: JobBudget; completion: CompletionCondition }
  */
 export type ProviderId = "github" | "gitlab" | "bitbucket" | "azure_devops"
 /**
+ * Where one AI tool stands against its plan's limits.
+ */
+export type ProviderUsage = { 
+/**
+ * Agent registry id: `"claude"`, `"codex"` or `"copilot"`.
+ */
+provider: string; displayName: string; 
+/**
+ * The plan name as the tool reports it, e.g. "Max 20x" or "Plus".
+ */
+plan: string | null; windows: UsageWindow[]; 
+/**
+ * When these numbers were read (RFC 3339). For Codex this is when Codex
+ * itself last reported them, which can be well before this call.
+ */
+fetchedAt: string | null; 
+/**
+ * Plain-language reason the limits could not be shown. Set only when
+ * there is no earlier answer to fall back on.
+ */
+unavailableReason: string | null }
+/**
  * Outcome of a pull, measured the same way as `PushResult`.
  */
 export type PullResult = { branch: string | null; upstream: string | null; 
@@ -9479,6 +9558,17 @@ export type ToggleOutcome =
  */
 "lineMoved"
 /**
+ * What one model costs in AI credits per million tokens.
+ * 
+ * Copilot publishes prices per billing batch (`batchSize` tokens), which is a
+ * unit nobody reads. Per million is what Copilot's own picker shows.
+ */
+export type TokenCredits = { input: number; 
+/**
+ * Reading from the prompt cache, when Copilot prices it separately.
+ */
+cachedInput: number | null; output: number }
+/**
  * Which git and gpg the app resolved, and where each came from. Drives the
  * "using the copy that came with GitWyrm" vs "using your own" line in Settings.
  */
@@ -9720,6 +9810,23 @@ export type UsageSource =
  */
 "estimated"
 export type UsageValue = { value: number; source: UsageSource }
+/**
+ * One limit window, drawn as one progress bar.
+ */
+export type UsageWindow = { label: string; kind: UsageWindowKind; 
+/**
+ * 0..=100.
+ */
+usedPercent: number; 
+/**
+ * When the window starts over (RFC 3339), if the tool says.
+ */
+resetsAt: string | null; 
+/**
+ * Extra words for the bar, e.g. "212 of 300 used".
+ */
+detail: string | null }
+export type UsageWindowKind = "fiveHour" | "weekly" | "monthly" | "other"
 export type UseSoloOutcome = 
 /**
  * The proposal was discarded; the session is back to a plain

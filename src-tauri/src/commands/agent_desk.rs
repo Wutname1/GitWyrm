@@ -1948,6 +1948,20 @@ fn render_prompt_message(message: &SessionMessage) -> String {
         .unwrap_or_default();
     let (content, omitted_chars) = truncate_prompt_text(message.plain_content.trim(), PROMPT_MESSAGE_CHAR_BUDGET);
     let mut rendered = format!("{role}{origin}:\n{content}");
+    // Files and folders attached from the message box. They were saved with
+    // the message and shown as chips, but never reached the agent: only the
+    // text did. Listed by path, because every tool reads files itself.
+    let attached: Vec<&str> = message
+        .targets
+        .iter()
+        .filter_map(|t| match t {
+            crate::agentdesk::model::MessageTarget::File { path } => Some(path.as_str()),
+            _ => None,
+        })
+        .collect();
+    if !attached.is_empty() {
+        rendered.push_str(&format!("\n[Attached: {}]", attached.join(", ")));
+    }
     if omitted_chars > 0 {
         rendered.push_str(&format!(
             "\n[Message shortened: {omitted_chars} character(s) omitted.]"
@@ -4529,6 +4543,28 @@ mod tests {
         let sent = lead_with_slash_command(&session.messages, task.clone());
         assert!(sent.starts_with("/impeccable audit the header\n\n"));
         assert!(sent.ends_with(&task), "the context still follows the command");
+    }
+
+    #[test]
+    fn attached_files_are_named_in_the_prompt() {
+        let (_dir, root) = temp_root();
+        let locks = test_locks();
+        let CreateSessionOutcome::Created { session } = create_session_at(&root, create_request("Attach")) else {
+            panic!("expected Created");
+        };
+        let id = session.header.session_id.clone();
+        append_user_message_at(
+            &locks,
+            &root,
+            &id,
+            "Look at these".into(),
+            vec![
+                crate::agentdesk::model::MessageTarget::File { path: "src/a.rs".into() },
+                crate::agentdesk::model::MessageTarget::File { path: "C:/notes/plan.md".into() },
+            ],
+        );
+        let prompt = build_prompt(&store::read_session(&root, &id).expect("session"));
+        assert!(prompt.contains("Look at these\n[Attached: src/a.rs, C:/notes/plan.md]"));
     }
 
     #[test]

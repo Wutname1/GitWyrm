@@ -24,6 +24,8 @@ pub mod opencode;
 pub mod openspec;
 pub mod patch;
 pub mod profiles;
+pub mod provider_usage;
+pub mod agent_attach;
 pub mod remote;
 pub mod repo;
 pub mod repo_icon;

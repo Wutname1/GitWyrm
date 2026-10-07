@@ -29,7 +29,9 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 /// One tool's remembered answer, and what install it was about.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// `PartialEq` without `Eq` from here down: model prices are floats.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Remembered {
     /// Where the executable was when this was learnt.
@@ -64,7 +66,7 @@ pub struct Remembered {
 /// Not `CodexModel` itself: that type is what the live protocol produced and
 /// is free to change with it, while this is a file format that has to keep
 /// reading what an older GitWyrm wrote.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RememberedModel {
     pub id: String,
@@ -77,10 +79,20 @@ pub struct RememberedModel {
     pub efforts: Vec<String>,
     #[serde(default)]
     pub default_effort: Option<String>,
+    /// Premium-request multiplier, for tools that publish one (Copilot).
+    ///
+    /// The three price fields are `default` so a file written before they
+    /// existed still loads; an older entry simply has no price to show.
+    #[serde(default)]
+    pub multiplier: Option<f32>,
+    #[serde(default)]
+    pub credits_per_million: Option<crate::ai::copilot_sdk::TokenCredits>,
+    #[serde(default)]
+    pub context_window: Option<u32>,
 }
 
 /// Everything remembered, keyed by agent id.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Memory {
     /// The format this file was written in.
@@ -209,6 +221,13 @@ mod tests {
                 is_default: false,
                 efforts: vec!["low".into()],
                 default_effort: None,
+                multiplier: Some(0.33),
+                credits_per_million: Some(crate::ai::copilot_sdk::TokenCredits {
+                    input: 1_000.0,
+                    cached_input: Some(100.0),
+                    output: 5_000.0,
+                }),
+                context_window: Some(400_000),
             }],
             latest_release: Some("0.154.0".into()),
             written_at: 1_700_000_000,
@@ -343,5 +362,35 @@ mod tests {
         let back = load(&path);
         assert_eq!(back, m);
         assert_eq!(back.tools["codex"].models[0].id, "gpt-5.6-sol");
+    }
+
+    /// A file written before models carried prices must still load, with the
+    /// prices simply absent. Failing here would throw away every remembered
+    /// answer on the first launch after an update.
+    #[test]
+    fn a_file_from_before_prices_still_loads() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("tool-memory.json");
+        let old = r#"{
+            "version": 1,
+            "tools": {
+                "copilot": {
+                    "path": "C:/tools/copilot.cmd",
+                    "version": "GitHub Copilot CLI 1.0.81",
+                    "models": [
+                        { "id": "gpt-5.5", "displayName": "GPT-5.5", "isDefault": false, "efforts": ["low"] }
+                    ],
+                    "latestRelease": null,
+                    "writtenAt": 1700000000
+                }
+            }
+        }"#;
+        std::fs::write(&path, old).expect("write");
+        let back = load(&path);
+        let model = &back.tools["copilot"].models[0];
+        assert_eq!(model.id, "gpt-5.5");
+        assert!(model.multiplier.is_none());
+        assert!(model.credits_per_million.is_none());
+        assert!(model.context_window.is_none());
     }
 }

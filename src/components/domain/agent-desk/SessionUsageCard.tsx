@@ -7,6 +7,7 @@ import { buildAgentUsageLines, explainUsageUnavailable, buildUsageRows, hasAnyUs
 import { formatCompactAge } from '@/lib/agentSessionGrouping'
 import { cn } from '@/lib/utils'
 import { useAgentDeskUiStore } from '@/stores/agentDeskUiStore'
+import { ProviderUsageList } from './ProviderUsage'
 
 /**
  * Collapsible session usage card (tasks.md 7.3/7.4).
@@ -56,10 +57,9 @@ export function SessionUsageCard({ sessionId }: { sessionId: string }) {
       >
         <TimerReset size={13} className="flex-none text-muted-foreground" aria-hidden />
         <strong className="text-2xs font-semibold text-foreground">Usage</strong>
-        {/* Names what is actually here. Account-wide totals and plan quota
-            have no source yet, so promising "overall" described numbers that
-            were never going to appear. */}
-        <span className="flex-1 truncate text-2xs text-muted-foreground">this chat and its agents</span>
+        {/* Names what is actually here: this chat's own figures, then each
+            tool's plan limits below them. */}
+        <span className="flex-1 truncate text-2xs text-muted-foreground">this chat and your plan limits</span>
         <ChevronDown size={13} className={cn('flex-none text-muted-foreground transition-transform', collapsed && '-rotate-90')} />
       </button>
 
@@ -136,6 +136,12 @@ export function SessionUsageCard({ sessionId }: { sessionId: string }) {
               {asOf === 'now' ? 'Counted just now' : `Counted ${asOf} ago`}
             </p>
           )}
+          {/* Account-wide, not this chat: how much of each tool's plan is
+              left, so a long run does not stop on a limit nobody saw coming. */}
+          <div className="mt-2 border-t border-border pt-2">
+            <p className="mb-2 text-2xs font-semibold uppercase tracking-wide text-muted-foreground">Plan limits</p>
+            <ProviderUsageList />
+          </div>
         </div>
       )}
     </section>

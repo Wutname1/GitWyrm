@@ -88,6 +88,127 @@ pub async fn list_models(github_token: &str) -> Result<Vec<CatalogModel>, AppErr
     Ok(models)
 }
 
+/// What one model costs in AI credits per million tokens.
+///
+/// Copilot publishes prices per billing batch (`batchSize` tokens), which is a
+/// unit nobody reads. Per million is what Copilot's own picker shows.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TokenCredits {
+    pub input: f32,
+    /// Reading from the prompt cache, when Copilot prices it separately.
+    pub cached_input: Option<f32>,
+    pub output: f32,
+}
+
+/// One Copilot model with what it costs, for pickers that show the price.
+///
+/// Every number is optional: the SDK marks all of billing as experimental and
+/// the `auto` pseudo-model carries a discount rather than prices, so a missing
+/// figure means "Copilot did not say", never zero.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CopilotModelInfo {
+    pub id: String,
+    pub name: String,
+    /// Premium-request multiplier relative to the base rate (`1`, `0.33`).
+    pub multiplier: Option<f32>,
+    pub credits_per_million: Option<TokenCredits>,
+    /// Total context window in tokens.
+    pub context_window: Option<u32>,
+    /// Copilot's relative cost tier: `low`, `medium`, `high` or `very_high`.
+    pub price_category: Option<String>,
+    /// Reasoning-effort levels this model accepts, in Copilot's order. Empty
+    /// when it takes none.
+    pub efforts: Vec<String>,
+    /// The effort Copilot uses when none is chosen.
+    pub default_effort: Option<String>,
+}
+
+/// [`list_models`], keeping what each model costs.
+///
+/// A separate function rather than a change to `list_models`, whose callers
+/// only want ids and names and should not grow a dependency on the SDK's
+/// experimental billing shape.
+pub async fn list_models_detailed(github_token: &str) -> Result<Vec<CopilotModelInfo>, AppError> {
+    let client = start().await?;
+    let result = client
+        .rpc()
+        .models()
+        .list_with_params(ModelsListRequest {
+            git_hub_token: Some(github_token.to_string()),
+            selection_id: None,
+        })
+        .await;
+    client.stop().await.ok();
+
+    let list = result.map_err(|e| {
+        log::error!("copilot sdk: detailed model list failed: {e}");
+        AppError::Other(format!("Could not read your Copilot models: {e}"))
+    })?;
+
+    let models: Vec<CopilotModelInfo> = list.models.into_iter().map(model_info).collect();
+    log::info!(
+        "copilot sdk: {} models available, {} with token prices",
+        models.len(),
+        models.iter().filter(|m| m.credits_per_million.is_some()).count()
+    );
+    Ok(models)
+}
+
+/// One SDK model as GitWyrm shows it. Pure, so the mapping is testable without
+/// starting the CLI.
+fn model_info(m: github_copilot_sdk::rpc::Model) -> CopilotModelInfo {
+    use github_copilot_sdk::rpc::ModelPickerPriceCategory as Tier;
+
+    let billing = m.billing.as_ref();
+    let context_window = m
+        .capabilities
+        .limits
+        .as_ref()
+        .and_then(|l| l.max_context_window_tokens)
+        .filter(|n| *n > 0)
+        .map(|n| n.min(u32::MAX as i64) as u32);
+    let price_category = match m.model_picker_price_category {
+        Some(Tier::Low) => Some("low"),
+        Some(Tier::Medium) => Some("medium"),
+        Some(Tier::High) => Some("high"),
+        Some(Tier::VeryHigh) => Some("very_high"),
+        Some(Tier::Unknown) | None => None,
+    }
+    .map(str::to_string);
+
+    CopilotModelInfo {
+        multiplier: billing.and_then(|b| b.multiplier).map(|x| x as f32),
+        credits_per_million: billing
+            .and_then(|b| b.token_prices.as_ref())
+            .and_then(credits_per_million),
+        context_window,
+        price_category,
+        efforts: m.supported_reasoning_efforts.unwrap_or_default(),
+        default_effort: m.default_reasoning_effort,
+        id: m.id,
+        name: m.name,
+    }
+}
+
+/// Batch prices converted to credits per million tokens.
+///
+/// `None` unless both input and output are priced and the batch size is
+/// usable: a card showing an input price with no output price would read as
+/// "output is free".
+fn credits_per_million(
+    prices: &github_copilot_sdk::rpc::ModelBillingTokenPrices,
+) -> Option<TokenCredits> {
+    let batch = prices.batch_size.filter(|b| *b > 0)? as f64;
+    let per_million = |price: f64| (price * 1_000_000.0 / batch) as f32;
+    Some(TokenCredits {
+        input: per_million(prices.input_price?),
+        cached_input: prices.cache_read_price.map(per_million),
+        output: per_million(prices.output_price?),
+    })
+}
+
 /// A live report from a model that is still working.
 ///
 /// The SDK streams the reply as it is produced, so a caller that wants to show
@@ -252,6 +373,97 @@ pub async fn complete_streaming(
         ));
     }
     Ok(text)
+}
+
+#[cfg(test)]
+mod pricing_tests {
+    use super::*;
+    use github_copilot_sdk::rpc::{
+        Model, ModelBilling, ModelBillingTokenPrices, ModelCapabilities, ModelCapabilitiesLimits,
+        ModelPickerPriceCategory,
+    };
+
+    fn prices(batch: i64, input: f64, cached: Option<f64>, output: f64) -> ModelBillingTokenPrices {
+        ModelBillingTokenPrices {
+            batch_size: Some(batch),
+            input_price: Some(input),
+            cache_read_price: cached,
+            output_price: Some(output),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_million_token_batch_is_priced_as_is() {
+        let c = credits_per_million(&prices(1_000_000, 1_000.0, Some(100.0), 5_000.0)).unwrap();
+        assert_eq!(c.input, 1_000.0);
+        assert_eq!(c.cached_input, Some(100.0));
+        assert_eq!(c.output, 5_000.0);
+    }
+
+    #[test]
+    fn a_smaller_batch_is_scaled_up_to_a_million() {
+        let c = credits_per_million(&prices(1_000, 1.0, Some(0.1), 5.0)).unwrap();
+        assert!((c.input - 1_000.0).abs() < 1e-3);
+        assert!((c.cached_input.unwrap() - 100.0).abs() < 1e-3);
+        assert!((c.output - 5_000.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn an_unusable_batch_or_missing_side_gives_no_price() {
+        assert!(credits_per_million(&prices(0, 1.0, None, 5.0)).is_none());
+        let mut no_output = prices(1_000, 1.0, None, 5.0);
+        no_output.output_price = None;
+        assert!(credits_per_million(&no_output).is_none());
+        let mut no_batch = prices(1_000, 1.0, None, 5.0);
+        no_batch.batch_size = None;
+        assert!(credits_per_million(&no_batch).is_none());
+    }
+
+    #[test]
+    fn a_model_with_billing_carries_its_price() {
+        let m = Model {
+            id: "gpt-5.5".into(),
+            name: "GPT-5.5".into(),
+            billing: Some(ModelBilling {
+                multiplier: Some(0.33),
+                token_prices: Some(prices(1_000_000, 1_000.0, None, 5_000.0)),
+                ..Default::default()
+            }),
+            capabilities: ModelCapabilities {
+                limits: Some(ModelCapabilitiesLimits {
+                    max_context_window_tokens: Some(400_000),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            model_picker_price_category: Some(ModelPickerPriceCategory::VeryHigh),
+            supported_reasoning_efforts: Some(vec!["low".into(), "high".into()]),
+            default_reasoning_effort: Some("low".into()),
+            ..Default::default()
+        };
+        let info = model_info(m);
+        assert_eq!(info.id, "gpt-5.5");
+        assert_eq!(info.name, "GPT-5.5");
+        assert!((info.multiplier.unwrap() - 0.33).abs() < 1e-6);
+        let credits = info.credits_per_million.unwrap();
+        assert_eq!((credits.input, credits.cached_input, credits.output), (1_000.0, None, 5_000.0));
+        assert_eq!(info.context_window, Some(400_000));
+        assert_eq!(info.price_category.as_deref(), Some("very_high"));
+        assert_eq!(info.efforts, vec!["low", "high"]);
+        assert_eq!(info.default_effort.as_deref(), Some("low"));
+    }
+
+    #[test]
+    fn a_model_without_billing_says_nothing_rather_than_zero() {
+        let info = model_info(Model { id: "auto".into(), name: "Auto".into(), ..Default::default() });
+        assert_eq!(info.id, "auto");
+        assert!(info.multiplier.is_none());
+        assert!(info.credits_per_million.is_none());
+        assert!(info.context_window.is_none());
+        assert!(info.price_category.is_none());
+        assert!(info.efforts.is_empty());
+    }
 }
 
 #[cfg(test)]
