@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { ArrowUp, Sparkles, Square } from 'lucide-react'
+import { ArrowUp, FileText, Sparkles, Square, X } from 'lucide-react'
 import { commands, type AgentSessionHeader } from '@/lib/bindings'
 import { unwrap, keys } from '@/lib/queryKeys'
 import { describeOutcome, describeSetPreferencesFailure, explainStopOutcome, runIsActive } from '@/lib/agentDeskResult'
@@ -34,9 +34,11 @@ import {
   type StartFailureCard as StartFailureCardModel,
 } from '@/lib/agentDeskStartFailure'
 import { StartFailureCard } from './StartFailureCard'
-import { SlashCommandMenu } from './SlashCommandMenu'
+import { FileMentionMenu, SlashCommandMenu } from './SlashCommandMenu'
+import { ComposerAddMenu } from './ComposerAddMenu'
 import { useSlashCommands } from '@/hooks/useSlashCommands'
 import { applySlashCommand, matchSlashCommands } from '@/lib/slashCommands'
+import { applyFileMention, fileLabel, matchFileMention } from '@/lib/fileMentions'
 import type { ChatProjectChoice } from './NewChatLanding'
 
 /**
@@ -374,6 +376,65 @@ export function SessionComposer({
       requestAnimationFrame(() => box.setSelectionRange(at, at))
     }
   }
+
+  // "@" mentions of project files. The file list is only fetched once an "@"
+  // is typed, and the slash menu wins when both could match.
+  const repoPath = header?.repoPath ?? null
+  const projectFiles = useQuery({
+    queryKey: ['agentProjectFiles', repoPath] as const,
+    queryFn: async () => unwrap(await commands.agentProjectFiles(repoPath!)),
+    enabled: repoPath != null && draft.includes('@'),
+    staleTime: 30_000,
+  })
+  const mention = useMemo(
+    () =>
+      slash || slashDismissedFor === draft || !projectFiles.data
+        ? null
+        : matchFileMention(projectFiles.data, draft, caret),
+    [slash, slashDismissedFor, draft, caret, projectFiles.data]
+  )
+  const mentionListId = `agent-desk-mention-${sessionId ?? 'none'}`
+  const mentionKey = mention ? `${mention.start}:${mention.query}` : null
+  useEffect(() => setSlashIndex(0), [mentionKey])
+
+  const composerBoxId = `agent-desk-composer-${sessionId ?? 'none'}`
+  const placeCaret = (at: number) => {
+    setCaret(at)
+    const box = document.getElementById(composerBoxId)
+    if (box instanceof HTMLTextAreaElement) {
+      // Next frame, not now: when this runs from the "+" menu, the menu still
+      // holds focus inside itself and would take it straight back.
+      requestAnimationFrame(() => {
+        box.focus()
+        box.setSelectionRange(at, at)
+      })
+    }
+  }
+  const acceptMention = (index: number) => {
+    const path = mention?.matches[index]
+    if (!mention || !path) return
+    setDraft(applyFileMention(draft, mention, path, caret))
+    placeCaret(mention.start + path.length + 2)
+  }
+  // From the "+" menu: start a mention or a command exactly as if typed.
+  const startMention = () => {
+    const needsSpace = caret > 0 && !/\s/.test(draft[caret - 1] ?? '')
+    const insert = needsSpace ? ' @' : '@'
+    setDraft(draft.slice(0, caret) + insert + draft.slice(caret))
+    placeCaret(caret + insert.length)
+  }
+  const startSlash = () => {
+    // A command only counts at the very start of a message.
+    if (!draft.startsWith('/')) setDraft(`/${draft}`)
+    placeCaret(1)
+  }
+
+  // Files and folders attached with the "+" menu, sent with the message and
+  // named to the agent. Cleared when the chat changes or the message is sent.
+  const [attached, setAttached] = useState<string[]>([])
+  useEffect(() => setAttached([]), [sessionId])
+  const addAttached = (paths: string[]) =>
+    setAttached((current) => [...current, ...paths.filter((p) => !current.includes(p))])
   // A run is going, so the action button offers the way out of it.
   const running = runIsActive(header?.state)
   const [stopping, setStopping] = useState(false)
@@ -512,8 +573,15 @@ export function SessionComposer({
     setSending(true)
     const content = draft.trim()
     try {
-      const outcome = unwrap(await commands.agentSessionAppendUserMessage(sessionId, content, []))
+      const outcome = unwrap(
+        await commands.agentSessionAppendUserMessage(
+          sessionId,
+          content,
+          attached.map((path) => ({ kind: 'file' as const, path }))
+        )
+      )
       if (outcome.kind === 'appended') {
+        setAttached([])
         // The message is durably saved and the transcript query is about to
         // reflect it -- clear the draft and invalidate before touching
         // execution, so a failure below never hides that the send worked.
@@ -568,6 +636,37 @@ export function SessionComposer({
             listId={slashListId}
           />
         )}
+        {mention && (
+          <FileMentionMenu
+            state={mention}
+            activeIndex={slashIndex}
+            onPick={(path) => acceptMention(mention.matches.indexOf(path))}
+            onHover={setSlashIndex}
+            listId={mentionListId}
+          />
+        )}
+        {attached.length > 0 && (
+          <ul className="flex flex-wrap gap-1 px-0.5 pb-1" aria-label="Attached to this message">
+            {attached.map((path) => (
+              <li
+                key={path}
+                title={path}
+                className="flex max-w-[16rem] items-center gap-1 rounded border border-border bg-panel px-1.5 py-0.5 text-2xs text-foreground"
+              >
+                <FileText size={11} className="flex-none text-muted-foreground" aria-hidden />
+                <span className="truncate">{fileLabel(path)}</span>
+                <button
+                  type="button"
+                  onClick={() => setAttached((current) => current.filter((p) => p !== path))}
+                  aria-label={`Remove ${fileLabel(path)}`}
+                  className="flex-none rounded text-muted-foreground hover:text-foreground"
+                >
+                  <X size={11} aria-hidden />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
         <Textarea
           // Stable id so "New chat" can put the caret straight in here.
           // Focusing the surrounding wrapper only moved focus near the box,
@@ -580,10 +679,12 @@ export function SessionComposer({
             setCaret(e.target.selectionStart)
           }}
           onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
-          role={slash ? 'combobox' : undefined}
-          aria-expanded={slash ? true : undefined}
-          aria-controls={slash ? slashListId : undefined}
-          aria-activedescendant={slash ? `${slashListId}-${slashIndex}` : undefined}
+          role={slash || mention ? 'combobox' : undefined}
+          aria-expanded={slash || mention ? true : undefined}
+          aria-controls={slash ? slashListId : mention ? mentionListId : undefined}
+          aria-activedescendant={
+            slash ? `${slashListId}-${slashIndex}` : mention ? `${mentionListId}-${slashIndex}` : undefined
+          }
           // While a run is going the Send button is replaced by Stop, so the
           // only way to add a note for afterwards is Enter -- which nothing
           // on screen said. Queuing was real, wired, and discoverable only by
@@ -601,6 +702,24 @@ export function SessionComposer({
           rows={2}
           className="resize-none border-0 bg-transparent px-1 py-1 text-xs shadow-none focus-visible:ring-0"
           onKeyDown={(e) => {
+            if (mention) {
+              const count = mention.matches.length
+              if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                e.preventDefault()
+                setSlashIndex((i) => (i + (e.key === 'ArrowDown' ? 1 : count - 1)) % count)
+                return
+              }
+              if (e.key === 'Escape') {
+                e.preventDefault()
+                setSlashDismissedFor(draft)
+                return
+              }
+              if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+                e.preventDefault()
+                acceptMention(slashIndex)
+                return
+              }
+            }
             if (slash) {
               const count = slash.matches.length
               if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -651,6 +770,15 @@ export function SessionComposer({
           {/* The mode chip sits first: it is the one control here that decides
               whether the agent may touch files, and it reads left-to-right as
               "how much / how many / which tool". */}
+          <ComposerAddMenu
+            sessionId={sessionId}
+            repoId={header?.repoId ?? null}
+            provider={provider}
+            onAddPaths={addAttached}
+            onStartMention={startMention}
+            onStartSlash={startSlash}
+          />
+
           <OperatingModeControl mode={mode} onChange={changeMode} canWrite={canWrite} />
 
           <TeamShapeControl team={team} mode={mode} onChange={changeTeam} open={teamOpen} onOpenChange={setTeamOpen} />

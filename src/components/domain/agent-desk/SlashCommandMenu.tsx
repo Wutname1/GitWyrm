@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import { slashKindLabel, type SlashMatch, type SlashQuery } from '@/lib/slashCommands'
+import type { FileMentionQuery } from '@/lib/fileMentions'
 
 /**
  * The list that opens above the message box when a message starts with "/".
@@ -70,6 +71,64 @@ export function SlashCommandMenu({
             </span>
             <span className="min-w-0 flex-1 truncate text-2xs text-muted-foreground">{command.description}</span>
             <span className="flex-none text-2xs text-muted-foreground">{slashKindLabel(command.kind)}</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+/** The project-file list for an "@" mention, drawn like the slash menu. */
+export function FileMentionMenu({
+  state,
+  activeIndex,
+  onPick,
+  onHover,
+  listId,
+}: {
+  state: FileMentionQuery
+  activeIndex: number
+  onPick: (path: string) => void
+  onHover: (index: number) => void
+  listId: string
+}) {
+  const listRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const row = listRef.current?.querySelector<HTMLElement>(`[data-index="${activeIndex}"]`)
+    row?.scrollIntoView({ block: 'nearest' })
+  }, [activeIndex])
+
+  return (
+    <div
+      ref={listRef}
+      id={listId}
+      role="listbox"
+      aria-label="Project files"
+      className="absolute bottom-full left-0 right-0 z-20 mb-1.5 max-h-[16rem] overflow-y-auto rounded-lg border border-border bg-panel p-1 shadow-lg"
+    >
+      {state.matches.map((path, index) => {
+        const slash = path.lastIndexOf('/')
+        const name = path.slice(slash + 1)
+        const folder = slash > 0 ? path.slice(0, slash) : ''
+        return (
+          <div
+            key={path}
+            id={`${listId}-${index}`}
+            data-index={index}
+            role="option"
+            aria-selected={index === activeIndex}
+            onMouseDown={(e) => {
+              e.preventDefault()
+              onPick(path)
+            }}
+            onMouseEnter={() => onHover(index)}
+            className={cn(
+              'flex cursor-pointer items-baseline gap-2.5 rounded-md border-l-2 px-2 py-1 text-xs',
+              index === activeIndex ? 'border-primary bg-panel3' : 'border-transparent hover:bg-panel2'
+            )}
+          >
+            <span className="flex-none font-semibold text-foreground">{name}</span>
+            <span className="min-w-0 flex-1 truncate text-2xs text-muted-foreground">{folder}</span>
           </div>
         )
       })}
