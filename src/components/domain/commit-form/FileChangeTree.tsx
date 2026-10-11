@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { Archive, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, FolderOpen, MinusCircle, Pencil, Plus, PlusCircle, Trash2 } from 'lucide-react'
 import type { FileChange, StatusCode } from '@/lib/bindings'
 import { statusColor } from '@/lib/gitDisplay'
@@ -18,43 +19,14 @@ import { IgnoreMenuItems } from '@/components/domain/commit-form/IgnoreMenuItems
 import { useGitMutations } from '@/hooks/useGitMutations'
 import { changeTreeKey, useActiveRepo, useWorkspaceStore, type ChangesViewMode } from '@/stores/workspaceStore'
 import { cn } from '@/lib/utils'
-
-interface TreeNode {
-  name: string
-  path: string
-  directories: Map<string, TreeNode>
-  files: Array<{ name: string; file: FileChange }>
-}
-
-function buildTree(files: FileChange[]): TreeNode {
-  const root: TreeNode = { name: '', path: '', directories: new Map(), files: [] }
-
-  for (const file of files) {
-    const segments = file.path.replaceAll('\\', '/').split('/').filter(Boolean)
-    const fileName = segments.pop() ?? file.path
-    let node = root
-    for (const segment of segments) {
-      const path = node.path ? `${node.path}/${segment}` : segment
-      let child = node.directories.get(segment)
-      if (!child) {
-        child = { name: segment, path, directories: new Map(), files: [] }
-        node.directories.set(segment, child)
-      }
-      node = child
-    }
-    node.files.push({ name: fileName, file })
-  }
-
-  return root
-}
-
-function folderKeys(node: TreeNode, treeId: string): string[] {
-  const keys: string[] = []
-  for (const directory of node.directories.values()) {
-    keys.push(`${treeId}:${directory.path}`, ...folderKeys(directory, treeId))
-  }
-  return keys
-}
+import {
+  buildChangeTree,
+  filesByFolder,
+  flatRows,
+  flattenVisible,
+  folderKeys,
+  type ChangeTreeNode,
+} from '@/lib/changeTreeRows'
 
 interface FileChangeTreeProps {
   files: FileChange[]
@@ -71,6 +43,11 @@ interface FileChangeTreeProps {
   >
   /** `depth` is undefined in list view, where rows are not tree items. */
   renderFile: (file: FileChange, name: string, depth: number | undefined) => ReactNode
+  /**
+   * The element that scrolls this list. Only the rows on screen in it are
+   * drawn, so a thousand changed files cost about the same as thirty.
+   */
+  scrollRef: RefObject<HTMLDivElement | null>
 }
 
 interface PendingFolderDiscard {
@@ -79,21 +56,15 @@ interface PendingFolderDiscard {
   paths: string[]
 }
 
-function filesInFolder(files: FileChange[], folder: string): FileChange[] {
-  const prefix = `${folder.replaceAll('\\', '/').replace(/\/$/, '')}/`
-  const unique = new Map<string, FileChange>()
-  for (const file of files) {
-    const normalized = file.path.replaceAll('\\', '/')
-    if (normalized.startsWith(prefix)) unique.set(normalized, file)
-  }
-  return [...unique.values()]
-}
-
 interface FolderRollup {
   added: number
   removed: number
   modified: number
 }
+
+/** Estimated row heights, refined by measuring each row as it is drawn. */
+const FOLDER_ROW_HEIGHT = 24
+const FILE_ROW_HEIGHT = 26
 
 /**
  * How many files under a folder were added, removed, or edited. Renames count
@@ -149,7 +120,16 @@ function FolderCounts({ counts }: { counts: FolderRollup }) {
   )
 }
 
-/** Folder grouping without folder icons; nesting carries the path context. */
+/**
+ * Folder grouping without folder icons; nesting carries the path context.
+ *
+ * Virtualized: the visible tree is flattened into rows (`flattenVisible`) and
+ * only the rows inside the scroll area are drawn. Every file row carries a
+ * right-click menu and a tooltip button, and every click re-renders the rows
+ * because the "something is staging" flag they read changes - with around a
+ * thousand changed files, drawing them all froze the window while staging a
+ * few.
+ */
 export function FileChangeTree({
   files,
   allFiles,
@@ -159,8 +139,13 @@ export function FileChangeTree({
   operationsDisabled,
   mutations: m,
   renderFile,
+  scrollRef,
 }: FileChangeTreeProps) {
-  const root = useMemo(() => buildTree(files), [files])
+  const root = useMemo(() => buildChangeTree(files), [files])
+  // Worked out once per list rather than by scanning every file again for each
+  // folder row as it is drawn.
+  const groupFilesByFolder = useMemo(() => filesByFolder(files), [files])
+  const discardFilesByFolder = useMemo(() => filesByFolder(allFiles), [allFiles])
   const allFolderKeys = useMemo(() => folderKeys(root, treeId), [root, treeId])
   const repo = useActiveRepo()
   const storeKey = repo ? changeTreeKey(repo.path, treeId) : null
@@ -196,129 +181,126 @@ export function FileChangeTree({
     })
   }
 
-  const renderNode = (node: TreeNode, depth: number): ReactNode => {
-    const directories = [...node.directories.values()].sort((left, right) => left.name.localeCompare(right.name))
-    const fileNodes = [...node.files].sort((left, right) => left.name.localeCompare(right.name))
+  const rows = useMemo(
+    () => (viewMode === 'list' ? flatRows(files, treeId) : flattenVisible(root, expanded, treeId)),
+    [viewMode, files, root, expanded, treeId],
+  )
 
+  // The list shares its scroll area with the bar above it, so the virtualizer
+  // is told where the list starts inside that area.
+  const listRef = useRef<HTMLDivElement>(null)
+  const [scrollMargin, setScrollMargin] = useState(0)
+  useLayoutEffect(() => {
+    const top = listRef.current?.offsetTop ?? 0
+    setScrollMargin((current) => (current === top ? current : top))
+  })
+
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: (index) => (rows[index]?.kind === 'folder' ? FOLDER_ROW_HEIGHT : FILE_ROW_HEIGHT),
+    getItemKey: (index) => rows[index]?.key ?? index,
+    overscan: 16,
+    scrollMargin,
+  })
+
+  const renderFolder = (directory: ChangeTreeNode<FileChange>, depth: number, isExpanded: boolean) => {
+    const key = `${treeId}:${directory.path}`
+    const groupFiles = groupFilesByFolder.get(directory.path) ?? []
+    const discardFiles = discardFilesByFolder.get(directory.path) ?? []
+    const groupPaths = groupFiles.map((file) => file.path)
+    const discardPaths = discardFiles.map((file) => file.path)
+    const hasConflicts = groupFiles.some((file) => file.conflicted)
+    const counts = rollup(groupFiles)
+    const isFolderPending =
+      (m.stageFiles.isPending && m.stageFiles.variables?.folder === directory.path) ||
+      (m.unstageFiles.isPending && m.unstageFiles.variables?.folder === directory.path) ||
+      (m.discardFiles.isPending && m.discardFiles.variables?.folder === directory.path)
     return (
-      <>
-        {directories.map((directory) => {
-          const key = `${treeId}:${directory.path}`
-          const isExpanded = expanded.has(key)
-          const groupFiles = filesInFolder(files, directory.path)
-          const discardFiles = filesInFolder(allFiles, directory.path)
-          const groupPaths = groupFiles.map((file) => file.path)
-          const discardPaths = discardFiles.map((file) => file.path)
-          const hasConflicts = groupFiles.some((file) => file.conflicted)
-          const counts = rollup(groupFiles)
-          const isFolderPending =
-            (m.stageFiles.isPending && m.stageFiles.variables?.folder === directory.path) ||
-            (m.unstageFiles.isPending && m.unstageFiles.variables?.folder === directory.path) ||
-            (m.discardFiles.isPending && m.discardFiles.variables?.folder === directory.path)
-          return (
-            <div key={key} role="none">
-              <ContextMenu>
-                <ContextMenuTrigger asChild>
-                  <button
-                    type="button"
-                    role="treeitem"
-                    aria-level={depth + 1}
-                    aria-expanded={isExpanded}
-                    onClick={() => toggle(key)}
-                    style={{ paddingLeft: 10 + depth * 14 }}
-                    className={cn(
-                      'flex h-6 w-full items-center gap-1.5 pr-3.5 text-left text-xs font-medium text-sub hover:bg-panel2 hover:text-foreground',
-                      isFolderPending && 'bg-soft text-accent-text',
-                    )}
-                  >
-                    {isExpanded
-                      ? <ChevronDown aria-hidden className="size-3 flex-none" />
-                      : <ChevronRight aria-hidden className="size-3 flex-none" />}
-                    <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{directory.name}</span>
-                    <FolderCounts counts={counts} />
-                    {isFolderPending && <PendingIndicator className="size-3 flex-none" />}
-                  </button>
-                </ContextMenuTrigger>
-                <ContextMenuContent className="w-60">
-                  <ContextMenuLabel className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-2xs text-sub">
-                    {directory.path} · {groupFiles.length} file{groupFiles.length === 1 ? '' : 's'}
-                  </ContextMenuLabel>
-                  <ContextMenuSeparator />
-                  {staged ? (
-                    <PendingMenuItem
-                      icon={<MinusCircle />}
-                      label="Unstage this folder"
-                      pendingLabel="Unstaging folder…"
-                      pending={m.unstageFiles.isPending && m.unstageFiles.variables?.folder === directory.path}
-                      disabled={operationsDisabled || folderOperationPending}
-                      onRun={() => m.unstageFiles.mutate({ folder: directory.path, paths: groupPaths })}
-                    />
-                  ) : (
-                    <PendingMenuItem
-                      icon={<PlusCircle />}
-                      label={hasConflicts ? 'Resolve conflicts first' : 'Stage this folder'}
-                      pendingLabel="Staging folder…"
-                      pending={m.stageFiles.isPending && m.stageFiles.variables?.folder === directory.path}
-                      disabled={hasConflicts || operationsDisabled || folderOperationPending}
-                      onRun={() => m.stageFiles.mutate({ folder: directory.path, paths: groupPaths })}
-                    />
-                  )}
-                  <PendingMenuItem
-                    icon={<Archive />}
-                    label="Stash this folder"
-                    pendingLabel="Stashing folder…"
-                    pending={m.stashFolder.isPending && m.stashFolder.variables?.folder === directory.path}
-                    disabled={operationsDisabled || m.stashFolder.isPending}
-                    onRun={() => m.stashFolder.mutate({ folder: directory.path })}
-                  />
-                  <IgnoreMenuItems
-                    path={directory.path}
-                    isFolder
-                    disabled={operationsDisabled}
-                  />
-                  <ContextMenuSeparator />
-                  <PendingMenuItem
-                    icon={<FolderOpen />}
-                    label="Open in Explorer"
-                    pendingLabel="Opening…"
-                    pending={m.openFolder.isPending && m.openFolder.variables === directory.path}
-                    onRun={() => m.openFolder.mutate(directory.path)}
-                  />
-                  <ContextMenuSeparator />
-                  <ContextMenuItem
-                    variant="destructive"
-                    disabled={operationsDisabled || folderOperationPending || discardPaths.length === 0}
-                    onSelect={() => setDiscardFolder({
-                      name: directory.name,
-                      path: directory.path,
-                      paths: discardPaths,
-                    })}
-                  >
-                    <Trash2 />
-                    Discard folder changes
-                  </ContextMenuItem>
-                </ContextMenuContent>
-              </ContextMenu>
-              {isExpanded && (
-                <div role="group">
-                  {renderNode(directory, depth + 1)}
-                </div>
-              )}
-            </div>
-          )
-        })}
-        {fileNodes.map(({ name, file }) => (
-          <div key={file.path} role="none">{renderFile(file, name, depth)}</div>
-        ))}
-      </>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <button
+            type="button"
+            role="treeitem"
+            aria-level={depth + 1}
+            aria-expanded={isExpanded}
+            onClick={() => toggle(key)}
+            style={{ paddingLeft: 10 + depth * 14 }}
+            className={cn(
+              'flex h-6 w-full items-center gap-1.5 pr-3.5 text-left text-xs font-medium text-sub hover:bg-panel2 hover:text-foreground',
+              isFolderPending && 'bg-soft text-accent-text',
+            )}
+          >
+            {isExpanded
+              ? <ChevronDown aria-hidden className="size-3 flex-none" />
+              : <ChevronRight aria-hidden className="size-3 flex-none" />}
+            <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{directory.name}</span>
+            <FolderCounts counts={counts} />
+            {isFolderPending && <PendingIndicator className="size-3 flex-none" />}
+          </button>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="w-60">
+          <ContextMenuLabel className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-2xs text-sub">
+            {directory.path} · {groupFiles.length} file{groupFiles.length === 1 ? '' : 's'}
+          </ContextMenuLabel>
+          <ContextMenuSeparator />
+          {staged ? (
+            <PendingMenuItem
+              icon={<MinusCircle />}
+              label="Unstage this folder"
+              pendingLabel="Unstaging folder…"
+              pending={m.unstageFiles.isPending && m.unstageFiles.variables?.folder === directory.path}
+              disabled={operationsDisabled || folderOperationPending}
+              onRun={() => m.unstageFiles.mutate({ folder: directory.path, paths: groupPaths })}
+            />
+          ) : (
+            <PendingMenuItem
+              icon={<PlusCircle />}
+              label={hasConflicts ? 'Resolve conflicts first' : 'Stage this folder'}
+              pendingLabel="Staging folder…"
+              pending={m.stageFiles.isPending && m.stageFiles.variables?.folder === directory.path}
+              disabled={hasConflicts || operationsDisabled || folderOperationPending}
+              onRun={() => m.stageFiles.mutate({ folder: directory.path, paths: groupPaths })}
+            />
+          )}
+          <PendingMenuItem
+            icon={<Archive />}
+            label="Stash this folder"
+            pendingLabel="Stashing folder…"
+            pending={m.stashFolder.isPending && m.stashFolder.variables?.folder === directory.path}
+            disabled={operationsDisabled || m.stashFolder.isPending}
+            onRun={() => m.stashFolder.mutate({ folder: directory.path })}
+          />
+          <IgnoreMenuItems
+            path={directory.path}
+            isFolder
+            disabled={operationsDisabled}
+          />
+          <ContextMenuSeparator />
+          <PendingMenuItem
+            icon={<FolderOpen />}
+            label="Open in Explorer"
+            pendingLabel="Opening…"
+            pending={m.openFolder.isPending && m.openFolder.variables === directory.path}
+            onRun={() => m.openFolder.mutate(directory.path)}
+          />
+          <ContextMenuSeparator />
+          <ContextMenuItem
+            variant="destructive"
+            disabled={operationsDisabled || folderOperationPending || discardPaths.length === 0}
+            onSelect={() => setDiscardFolder({
+              name: directory.name,
+              path: directory.path,
+              paths: discardPaths,
+            })}
+          >
+            <Trash2 />
+            Discard folder changes
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
     )
   }
-
-  // Flat view: one row per file, full path as the label, no expand/collapse bar.
-  const flatFiles = useMemo(
-    () => [...files].sort((left, right) => left.path.localeCompare(right.path)),
-    [files],
-  )
 
   return (
     <>
@@ -336,17 +318,31 @@ export function FileChangeTree({
           </button>
         </div>
       )}
-      {viewMode === 'list' ? (
-        <div role="list" aria-label={staged ? 'Staged changed files' : 'Unstaged changed files'}>
-          {flatFiles.map((file) => (
-            <div key={file.path} role="listitem">{renderFile(file, file.path, undefined)}</div>
-          ))}
-        </div>
-      ) : (
-        <div role="tree" aria-label={staged ? 'Staged changed files' : 'Unstaged changed files'}>
-          {renderNode(root, 0)}
-        </div>
-      )}
+      <div
+        ref={listRef}
+        role={viewMode === 'list' ? 'list' : 'tree'}
+        aria-label={staged ? 'Staged changed files' : 'Unstaged changed files'}
+        style={{ height: virtualizer.getTotalSize(), position: 'relative' }}
+      >
+        {virtualizer.getVirtualItems().map((item) => {
+          const row = rows[item.index]
+          if (!row) return null
+          return (
+            <div
+              key={item.key}
+              data-index={item.index}
+              ref={virtualizer.measureElement}
+              role={viewMode === 'list' ? 'listitem' : 'none'}
+              className="absolute left-0 top-0 w-full"
+              style={{ transform: `translateY(${item.start - scrollMargin}px)` }}
+            >
+              {row.kind === 'folder'
+                ? renderFolder(row.node, row.depth, row.expanded)
+                : renderFile(row.file, row.name, row.depth)}
+            </div>
+          )
+        })}
+      </div>
       <ConfirmDialog
         open={discardFolder != null}
         onOpenChange={(open) => !open && setDiscardFolder(null)}

@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import {
   FolderTree,
   GitCommitHorizontal,
@@ -138,6 +138,8 @@ export function ChangesList() {
   const changesSplit = useWorkspaceStore((s) => s.changesSplit);
   const setChangesSplit = useWorkspaceStore((s) => s.setChangesSplit);
   const splitRef = useRef<HTMLDivElement>(null);
+  const unstagedScrollRef = useRef<HTMLDivElement>(null);
+  const stagedScrollRef = useRef<HTMLDivElement>(null);
   const m = useGitMutations(repo?.id ?? null);
 
   /** Drag distance in pixels as a share of the height the two lists split. */
@@ -146,9 +148,11 @@ export function ChangesList() {
     return height > 0 ? (pixels / height) * 100 : 0;
   };
 
-  const staged = status.data?.staged ?? [];
-  const unstaged = status.data?.unstaged ?? [];
-  const allFiles = [...staged, ...unstaged];
+  const staged = useMemo(() => status.data?.staged ?? [], [status.data]);
+  const unstaged = useMemo(() => status.data?.unstaged ?? [], [status.data]);
+  // Kept stable between renders: the trees index it by folder, and with a
+  // thousand changed files redoing that on every click is real work.
+  const allFiles = useMemo(() => [...staged, ...unstaged], [staged, unstaged]);
   const hasChanges = staged.length > 0 || unstaged.length > 0;
   const changedFiles = new Set(
     [...staged, ...unstaged].map((file) => file.path),
@@ -215,9 +219,13 @@ export function ChangesList() {
               </Button>
             )}
           </GroupHeader>
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div
+            ref={unstagedScrollRef}
+            className="relative min-h-0 flex-1 overflow-y-auto"
+          >
             {unstaged.length > 0 && (
               <FileChangeTree
+                scrollRef={unstagedScrollRef}
                 files={unstaged}
                 allFiles={allFiles}
                 treeId="unstaged"
@@ -317,9 +325,13 @@ export function ChangesList() {
               </Button>
             )}
           </GroupHeader>
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div
+            ref={stagedScrollRef}
+            className="relative min-h-0 flex-1 overflow-y-auto"
+          >
             {staged.length > 0 && (
               <FileChangeTree
+                scrollRef={stagedScrollRef}
                 files={staged}
                 allFiles={allFiles}
                 treeId="staged"
