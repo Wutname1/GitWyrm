@@ -266,10 +266,30 @@ const EXPECTED: &[&str] = &[
     // which happens while Git is being installed or updated
     // (GITWYRM-BACKEND-J). Our sentence (remote.rs humanize_git_install_failure).
     "while git is being installed or updated",
+    // The network dropped mid-transfer. git and curl word a reset, a hang-up and
+    // a gateway timeout several ways; all of them are the connection, not the
+    // app. The HTTP codes keep their "returned error:" prefix so a bare number
+    // in a path or a sha cannot match.
+    "connection was reset",
+    "connection reset by peer",
+    "the remote end hung up unexpectedly",
+    "aborted session",
+    "operation timed out",
+    "connection timed out",
+    "the requested url returned error: 502",
+    "the requested url returned error: 503",
+    "the requested url returned error: 504",
+    // `gh` gave no answer at all - it hung, or could not be started
+    // (hosting::gh_cli RUN_FAILURE). The machine or the network, not the app.
+    "could not run the github cli",
     // A network git command the watchdog ended after a long silence
     // (commands::remote stopped_responding_message): a hidden sign-in window or
     // a server that stopped answering.
     "stopped responding for",
+    // The AI service answered with nothing. Our own sentences
+    // (ai::copilot_sdk); the request can simply be tried again.
+    "copilot finished without replying",
+    "copilot replied with nothing",
     // A project folder that was deleted or stopped being a repository while it
     // was open - a removed worktree, a deleted clone. The user's to sort out by
     // closing or re-opening the tab; repeated by every background fetch until

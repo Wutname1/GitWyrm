@@ -41,7 +41,7 @@ const SEND_TIMEOUT: Duration = Duration::from_secs(90);
 /// reuse the returned client for the whole operation and stop it afterwards.
 async fn start() -> Result<Client, AppError> {
     Client::start(ClientOptions::default()).await.map_err(|e| {
-    log::error!("copilot sdk: could not start the Copilot CLI: {e}");
+    log::warn!("copilot sdk: could not start the Copilot CLI: {e}");
     AppError::Other(format!(
       "Could not start GitHub Copilot. Make sure you are signed in to Copilot, then try again. ({e})"
     ))
@@ -65,7 +65,7 @@ pub async fn list_models(github_token: &str) -> Result<Vec<CatalogModel>, AppErr
     client.stop().await.ok();
 
     let list = result.map_err(|e| {
-        log::error!("copilot sdk: model list failed: {e}");
+        log::warn!("copilot sdk: model list failed: {e}");
         AppError::Other(format!("Could not read your Copilot models: {e}"))
     })?;
 
@@ -143,7 +143,7 @@ pub async fn list_models_detailed(github_token: &str) -> Result<Vec<CopilotModel
     client.stop().await.ok();
 
     let list = result.map_err(|e| {
-        log::error!("copilot sdk: detailed model list failed: {e}");
+        log::warn!("copilot sdk: detailed model list failed: {e}");
         AppError::Other(format!("Could not read your Copilot models: {e}"))
     })?;
 
@@ -275,7 +275,7 @@ pub async fn complete_streaming(
         Ok(session) => session,
         Err(e) => {
             client.stop().await.ok();
-            log::error!("copilot sdk: could not create a session: {e}");
+            log::warn!("copilot sdk: could not create a session: {e}");
             return Err(AppError::Other(format!(
                 "Could not start a Copilot session: {e}"
             )));
@@ -345,11 +345,11 @@ pub async fn complete_streaming(
 
     let event = result
         .map_err(|e| {
-            log::error!("copilot sdk: request failed: {e}");
+            log::warn!("copilot sdk: request failed: {e}");
             AppError::Other(format!("Copilot could not answer: {e}"))
         })?
         .ok_or_else(|| {
-            log::error!("copilot sdk: request finished with no reply");
+            log::warn!("copilot sdk: request finished with no reply");
             AppError::Other(
                 "Copilot finished without replying. No changes were made -- try again.".into(),
             )
@@ -364,7 +364,7 @@ pub async fn complete_streaming(
         .to_string();
 
     if text.is_empty() {
-        log::error!(
+        log::warn!(
             "copilot sdk: reply had no text (event_type={})",
             event.event_type
         );

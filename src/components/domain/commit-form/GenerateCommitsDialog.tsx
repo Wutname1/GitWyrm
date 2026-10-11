@@ -37,6 +37,7 @@ import type {
 } from "@/lib/bindings";
 import { copyToClipboard } from "@/lib/clipboard";
 import { describeError, log } from "@/lib/log";
+import { failureLogLevel } from "@/lib/commandError";
 import { useActiveRepo, useWorkspaceStore } from "@/stores/workspaceStore";
 
 // Both shapes are generated from the Rust side, so the list of steps is one
@@ -247,7 +248,11 @@ export function GenerateCommitsDialog({
         onError: (reason) => {
           const message =
             reason instanceof Error ? reason.message : String(reason);
-          log.error(`AI commit generation failed: ${describeError(reason)}`);
+          // A backend failure is already reported where it was raised; only a
+          // failure in this dialog's own code is reported from here.
+          log[failureLogLevel("error", reason)](
+            `AI commit generation failed: ${describeError(reason)}`,
+          );
           setError(message);
           setActivity((current) => {
             const failure: AiCommitProgressPayload = {

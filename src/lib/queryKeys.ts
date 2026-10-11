@@ -1,5 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query'
 import type { DiffSource } from './bindings'
+import { CommandError } from './commandError'
 
 export const keys = {
   log: (repoId: string, hiddenBranches: string[] = [], focusedBranch: string | null = null) =>
@@ -233,6 +234,6 @@ export function trimLogToFirstPage(qc: QueryClient, repoId: string) {
 
 /** Unwraps tauri-specta's Result<T, string> into T-or-throw for TanStack Query. */
 export function unwrap<T>(result: { status: 'ok'; data: T } | { status: 'error'; error: string }): T {
-  if (result.status === 'error') throw new Error(result.error)
+  if (result.status === 'error') throw new CommandError(result.error)
   return result.data
 }

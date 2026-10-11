@@ -27,6 +27,7 @@ import { timed } from '@/lib/perfTrail'
 import { noteManualFetch } from '@/hooks/useAutoFetch'
 import { cachedPushNote, showPushNoteToast } from '@/hooks/useMehen'
 import { classifyError } from '@/lib/errorClass'
+import { failureLogLevel } from '@/lib/commandError'
 import { showErrorToast } from '@/lib/errorToast'
 import { copyToClipboard } from '@/lib/clipboard'
 import { plural, shortSha } from '@/lib/gitDisplay'
@@ -189,9 +190,7 @@ export function refreshAfterBranchUpdate(qc: QueryClient, repoId: string) {
 const onError = (e: Error) => {
   const classified = classifyError(e)
   const { severity, raw } = classified
-  log[severity === 'info' ? 'info' : severity === 'warning' ? 'warn' : 'error'](
-    `mutation failed [${severity}]: ${raw}`
-  )
+  log[failureLogLevel(severity, e)](`mutation failed [${severity}]: ${raw}`)
   showErrorToast(classified)
 }
 
@@ -202,9 +201,7 @@ const onError = (e: Error) => {
  */
 const logQuietFailure = (e: Error) => {
   const { severity, raw } = classifyError(e)
-  log[severity === 'info' ? 'info' : severity === 'warning' ? 'warn' : 'error'](
-    `mutation failed [${severity}, reported by caller]: ${raw}`
-  )
+  log[failureLogLevel(severity, e)](`mutation failed [${severity}, reported by caller]: ${raw}`)
 }
 
 const commitCount = (n: number) => plural(n, 'commit')
