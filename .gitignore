@@ -69,3 +69,4 @@ src-tauri/resources/*
 # Linux packages built locally for VM testing. Rebuild with
 # `npx tauri build --config src-tauri/tauri.linux.conf.json`.
 linux-artifacts/
+/brag-output/
