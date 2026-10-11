@@ -497,7 +497,53 @@ fn run_streaming(
     run_streaming_with(app, repo_id, repo_path, operation, args, Attended::User)
 }
 
+/// Run a network command, retrying once when the connected account was refused.
+///
+/// The connected account answers git's sign-in question first. When the host
+/// turns it down for a repository - an organization that blocks third-party
+/// apps, an app that is not installed on that repository - git records nothing
+/// useful and gives up: it never asks a second helper after a refusal. The
+/// helper does note the refusal, so the same command run again goes straight to
+/// Credential Manager and works with the sign-in the user already has there.
+///
+/// Before this the user had to find that out by pressing Push again, so a push
+/// that "randomly" failed and then asked for a sign-in looked like a different
+/// path from pull - which worked only because pulling a public repository needs
+/// no sign-in at all. Only attended runs retry: a background run must never
+/// reach a login window.
 fn run_streaming_with(
+    app: &AppHandle,
+    repo_id: &str,
+    repo_path: Option<&str>,
+    operation: &str,
+    args: &[&str],
+    attended: Attended,
+) -> Result<String, AppError> {
+    let started = std::time::SystemTime::now();
+    match run_streaming_once(app, repo_id, repo_path, operation, args, attended) {
+        Err(e) if attended == Attended::User && account_refused_since(app, started) => {
+            log::info!(
+                "git {operation}: the connected account was refused for this repository; trying again through Credential Manager"
+            );
+            run_streaming_once(app, repo_id, repo_path, operation, args, attended).inspect_err(
+                |_| {
+                    log::info!("git {operation}: first attempt failed with: {e}");
+                },
+            )
+        }
+        other => other,
+    }
+}
+
+/// Whether the credential helper recorded a refusal of the connected account
+/// since `since`. See `git::credential_helper::refusal_recorded_since`.
+fn account_refused_since(app: &AppHandle, since: std::time::SystemTime) -> bool {
+    crate::settings::app_data_dir(app)
+        .map(|dir| crate::git::credential_helper::refusal_recorded_since(&dir, since))
+        .unwrap_or(false)
+}
+
+fn run_streaming_once(
     app: &AppHandle,
     repo_id: &str,
     repo_path: Option<&str>,

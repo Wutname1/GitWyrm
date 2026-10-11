@@ -277,6 +277,23 @@ fn refusal_active(data_dir: &Path, host: &str, path: Option<&str>) -> bool {
         Ok(m) => m,
         Err(_) => return false,
     };
+    // A refusal is remembered for a day, not forever. GitHub also answers 401 for
+    // reasons that pass - a token mid-refresh, a repository briefly renamed - and
+    // a marker that never expired switched the connected account off for that
+    // repository for good: every push from then on went to Credential Manager
+    // and asked the user to sign in, while Settings still showed the account as
+    // connected. A repository that really refuses the token records a fresh
+    // marker on its next attempt, and the app retries that attempt through
+    // Credential Manager straight away (commands::remote), so expiry costs no
+    // failed push.
+    if marker
+        .modified()
+        .ok()
+        .and_then(|m| m.elapsed().ok())
+        .is_some_and(|age| age > REFUSAL_TTL)
+    {
+        return false;
+    }
     let auth = match std::fs::metadata(data_dir.join("auth.json")) {
         Ok(m) => m,
         Err(_) => return true,
@@ -285,6 +302,32 @@ fn refusal_active(data_dir: &Path, host: &str, path: Option<&str>) -> bool {
         (Ok(m), Ok(a)) => m >= a,
         _ => false,
     }
+}
+
+/// How long a recorded refusal keeps the connected account out of a repository.
+const REFUSAL_TTL: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+/// Whether this helper recorded a refusal of the connected account at or after
+/// `since`, in any repository.
+///
+/// Read by the app after an attended network command fails: git does not try a
+/// second credential after a 401, so the command that discovered the refusal
+/// fails even though the next one would go to Credential Manager and work. The
+/// app sees the fresh marker and runs the command once more.
+pub fn refusal_recorded_since(data_dir: &Path, since: std::time::SystemTime) -> bool {
+    let Ok(entries) = std::fs::read_dir(data_dir.join(MARKER_DIR)) else {
+        return false;
+    };
+    // File times can trail the clock slightly, so allow a little slack.
+    let since = since
+        .checked_sub(std::time::Duration::from_secs(2))
+        .unwrap_or(since);
+    entries.flatten().any(|entry| {
+        entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .is_ok_and(|modified| modified >= since)
+    })
 }
 
 fn record_refusal(data_dir: &Path, host: &str, path: Option<&str>) {
@@ -529,12 +572,27 @@ pub fn run(args: &[String], data_dir: PathBuf) -> i32 {
             }
         }
         "erase" => {
-            if is_ours(&req, &data_dir) {
-                // The host refused our token for this repository. Remember
-                // that instead of touching any store: next time this
-                // repository goes straight to Credential Manager. Recorded for
-                // unattended runs too -- scoped to one repository it cannot
-                // switch the account off anywhere else.
+            if is_ours(&req, &data_dir) && unattended {
+                // A background fetch got a 401 with our token. Not recorded:
+                // GitHub answers 401 for a renamed or deleted repository and for
+                // a token mid-refresh, and a background run that recorded it
+                // switched the connected account off for that repository behind
+                // the user's back. Their next push then opened a Credential
+                // Manager window while Settings still said "connected" - push
+                // asked for a sign-in, pull did not. Only a refusal met by
+                // something the user pressed is remembered.
+                trace(
+                    &data_dir,
+                    &format!(
+                        "erase {}: host refused our token (unattended, not recorded)",
+                        host_label(&req)
+                    ),
+                );
+            } else if is_ours(&req, &data_dir) {
+                // The host refused our token for this repository while the user
+                // was waiting. Remember that instead of touching any store: the
+                // app retries the command at once, and this repository now goes
+                // straight to Credential Manager.
                 if let Some(host) = req.host.as_deref() {
                     record_refusal(&data_dir, host, path);
                 }
@@ -743,6 +801,52 @@ mod tests {
         clear_refusal(&dir, "github.com", repo);
         assert!(!refusal_active(&dir, "github.com", repo));
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A refusal expires after a day, so one passing 401 cannot switch the
+    /// connected account off for a repository for good.
+    #[test]
+    fn an_old_refusal_expires() {
+        let dir = scratch_dir("ttl");
+        let repo = Some("me/app.git");
+        // auth.json older than the marker, so only the age can clear it.
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3 * 24 * 60 * 60);
+        std::fs::File::options()
+            .write(true)
+            .open(dir.join("auth.json"))
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        record_refusal(&dir, "github.com", repo);
+        assert!(refusal_active(&dir, "github.com", repo));
+
+        let two_days =
+            std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 24 * 60 * 60);
+        std::fs::File::options()
+            .write(true)
+            .open(marker_path(&dir, "github.com", repo))
+            .unwrap()
+            .set_modified(two_days)
+            .unwrap();
+        assert!(!refusal_active(&dir, "github.com", repo));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The app asks this after a failed push to decide whether to retry it
+    /// through Credential Manager.
+    #[test]
+    fn a_fresh_refusal_is_seen_by_the_app() {
+        let dir = scratch_dir("since");
+        let before = std::time::SystemTime::now();
+        assert!(!refusal_recorded_since(&dir, before), "no markers yet");
+        record_refusal(&dir, "github.com", Some("me/app.git"));
+        assert!(refusal_recorded_since(&dir, before));
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(60);
+        assert!(
+            !refusal_recorded_since(&dir, later),
+            "an older marker is not new"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
