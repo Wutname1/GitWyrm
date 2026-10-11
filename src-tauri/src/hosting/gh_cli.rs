@@ -268,6 +268,130 @@ pub fn api(
     path: &str,
     body: Option<&serde_json::Value>,
 ) -> Result<String, AppError> {
+    // A read with no body is the same request every time it is made, so a panel
+    // that asks for one thing several times at once - every tab mounting, a
+    // refresh landing on top of a load - waits for the one already running
+    // instead of starting its own `gh`.
+    if method == "GET" && body.is_none() {
+        let key = format!("{method} {}", path.trim_start_matches('/'));
+        return shared_read(&key, || gated_call(exe, method, path, None)).map_err(AppError::Other);
+    }
+    gated_call(exe, method, path, body)
+}
+
+/// How many `gh` processes may run at once.
+///
+/// Each one is a process spawn and a network round trip. Ten panels falling
+/// back at the same moment started ten of them, and when the network was slow
+/// all ten waited out the full timeout together: "could not run the GitHub CLI:
+/// timed out" ten times in seven seconds (GITWYRM-BACKEND-H). Two at a time, and
+/// a stall noticed by the first stops the queue behind it.
+const MAX_CONCURRENT_CALLS: usize = 2;
+
+struct CallGate {
+    running: Mutex<usize>,
+    freed: std::sync::Condvar,
+}
+
+static CALL_GATE: CallGate = CallGate {
+    running: Mutex::new(0),
+    freed: std::sync::Condvar::new(),
+};
+
+struct CallPermit;
+
+impl CallGate {
+    fn acquire(&self) -> CallPermit {
+        let mut running = self.running.lock().unwrap_or_else(|e| e.into_inner());
+        while *running >= MAX_CONCURRENT_CALLS {
+            running = self.freed.wait(running).unwrap_or_else(|e| e.into_inner());
+        }
+        *running += 1;
+        CallPermit
+    }
+}
+
+impl Drop for CallPermit {
+    fn drop(&mut self) {
+        *CALL_GATE.running.lock().unwrap_or_else(|e| e.into_inner()) -= 1;
+        CALL_GATE.freed.notify_one();
+    }
+}
+
+/// One `gh api` call, run once a slot is free.
+///
+/// A read that waited for its slot while another call stalled gives up at once
+/// rather than waiting out its own timeout: the caller already holds GitHub's
+/// answer and only wanted a better one. Writes still run - the user asked for
+/// them, and they are rare.
+fn gated_call(
+    exe: &PathBuf,
+    method: &str,
+    path: &str,
+    body: Option<&serde_json::Value>,
+) -> Result<String, AppError> {
+    let _permit = CALL_GATE.acquire();
+    if method == "GET" && stalled_recently() {
+        return Err(AppError::Other(format!(
+            "{RUN_FAILURE}: paused after it stopped answering"
+        )));
+    }
+    run_api(exe, method, path, body)
+}
+
+type SharedResult = std::sync::Arc<(Mutex<Option<Result<String, String>>>, std::sync::Condvar)>;
+
+/// Reads in flight, by request. An entry is removed as soon as its result is
+/// handed out, so this never caches an answer - it only joins identical
+/// requests that overlap.
+static IN_FLIGHT: Mutex<Option<std::collections::HashMap<String, SharedResult>>> = Mutex::new(None);
+
+/// Run `call` once for every overlapping request with the same `key`.
+fn shared_read(
+    key: &str,
+    call: impl FnOnce() -> Result<String, AppError>,
+) -> Result<String, String> {
+    let (slot, leader) = {
+        let mut guard = IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner());
+        let map = guard.get_or_insert_with(std::collections::HashMap::new);
+        match map.get(key) {
+            Some(existing) => (existing.clone(), false),
+            None => {
+                let slot: SharedResult =
+                    std::sync::Arc::new((Mutex::new(None), std::sync::Condvar::new()));
+                map.insert(key.to_string(), slot.clone());
+                (slot, true)
+            }
+        }
+    };
+
+    if leader {
+        let result = call().map_err(|e| e.to_string());
+        // Out of the map first, so a request arriving after this point starts
+        // fresh instead of reading an answer that is already old.
+        if let Some(map) = IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+            map.remove(key);
+        }
+        *slot.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(result.clone());
+        slot.1.notify_all();
+        return result;
+    }
+
+    let mut done = slot.0.lock().unwrap_or_else(|e| e.into_inner());
+    while done.is_none() {
+        done = slot.1.wait(done).unwrap_or_else(|e| e.into_inner());
+    }
+    done.clone()
+        .unwrap_or_else(|| Err(format!("{RUN_FAILURE}: no answer")))
+}
+
+/// The `gh api` process itself.
+fn run_api(
+    exe: &PathBuf,
+    method: &str,
+    path: &str,
+    body: Option<&serde_json::Value>,
+) -> Result<String, AppError> {
     let mut cmd = base_command(exe);
     cmd.arg("api");
     cmd.args(["--method", method]);
@@ -295,6 +419,14 @@ fn finish(out: std::process::Output) -> Result<String, AppError> {
         return Ok(String::from_utf8_lossy(&out.stdout).into_owned());
     }
     let stderr = String::from_utf8_lossy(&out.stderr);
+    // `gh` could not reach GitHub at all. Every call queued behind this one would
+    // fail the same way, so pause the fallback just as a hang does.
+    if is_offline(&stderr) {
+        note_stall();
+        return Err(AppError::Other(format!(
+            "{RUN_FAILURE}: GitHub could not be reached"
+        )));
+    }
     // `gh` writes the API's own JSON error to stderr around its own wrapper
     // text. The API message is the useful half, so prefer it when present.
     let message = extract_api_message(&stderr)
@@ -303,6 +435,23 @@ fn finish(out: std::process::Output) -> Result<String, AppError> {
         extract_status(&stderr),
         &message,
     )))
+}
+
+/// Whether `gh` failed before reaching GitHub: no network, no DNS, a refused
+/// or reset connection. Go's networking words these as below.
+fn is_offline(stderr: &str) -> bool {
+    let low = stderr.to_lowercase();
+    [
+        "error connecting to",
+        "dial tcp",
+        "no such host",
+        "connection refused",
+        "connection reset",
+        "i/o timeout",
+        "tls handshake timeout",
+    ]
+    .iter()
+    .any(|needle| low.contains(needle))
 }
 
 /// The HTTP status `gh` printed in its own wrapper line, e.g. `(HTTP 404)`.
@@ -393,6 +542,83 @@ mod tests {
             "repos/o/r/pulls"
         );
         assert_eq!("repos/o/r/pulls".trim_start_matches('/'), "repos/o/r/pulls");
+    }
+
+    /// Identical reads that overlap share one `gh` run.
+    #[test]
+    fn overlapping_identical_reads_run_once() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let runs = Arc::new(AtomicUsize::new(0));
+        let start = Arc::new(std::sync::Barrier::new(4));
+        let handles: Vec<_> = (0..4)
+            .map(|_| {
+                let runs = runs.clone();
+                let start = start.clone();
+                std::thread::spawn(move || {
+                    start.wait();
+                    shared_read("GET repos/o/r/pulls-test", || {
+                        runs.fetch_add(1, Ordering::SeqCst);
+                        std::thread::sleep(Duration::from_millis(300));
+                        Ok("[]".to_string())
+                    })
+                })
+            })
+            .collect();
+        for h in handles {
+            assert_eq!(h.join().unwrap().as_deref(), Ok("[]"));
+        }
+        assert_eq!(
+            runs.load(Ordering::SeqCst),
+            1,
+            "one run serves every caller"
+        );
+
+        // Nothing is cached: the next request after they finish runs again.
+        let again = shared_read("GET repos/o/r/pulls-test", || {
+            runs.fetch_add(1, Ordering::SeqCst);
+            Ok("[1]".to_string())
+        });
+        assert_eq!(again.as_deref(), Ok("[1]"));
+        assert_eq!(runs.load(Ordering::SeqCst), 2);
+    }
+
+    /// Never more than the limit at once, however many callers pile up.
+    #[test]
+    fn the_call_gate_caps_concurrency() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let live = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let (live, peak) = (live.clone(), peak.clone());
+                std::thread::spawn(move || {
+                    let _permit = CALL_GATE.acquire();
+                    let now = live.fetch_add(1, Ordering::SeqCst) + 1;
+                    peak.fetch_max(now, Ordering::SeqCst);
+                    std::thread::sleep(Duration::from_millis(30));
+                    live.fetch_sub(1, Ordering::SeqCst);
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+        assert!(peak.load(Ordering::SeqCst) <= MAX_CONCURRENT_CALLS);
+    }
+
+    #[test]
+    fn an_unreachable_github_is_recognised() {
+        assert!(is_offline(
+            "error connecting to api.github.com\ncheck your internet connection"
+        ));
+        assert!(is_offline(
+            "Get \"https://api.github.com/x\": dial tcp: lookup api.github.com: no such host"
+        ));
+        assert!(!is_offline("gh: Not Found (HTTP 404)"));
     }
 
     #[test]
