@@ -351,6 +351,10 @@ const EXPECTED: &[&str] = &[
     "not a git repository",
     "could not find repository at",
     "this project's folder is gone",
+    // Staging picked lines from a file that changed after it was shown
+    // (commands::patch STALE_SELECTION). The selection no longer applies; the
+    // view refreshes.
+    "changed since they were shown",
 ];
 
 fn is_expected(message: &str) -> bool {

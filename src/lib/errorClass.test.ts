@@ -249,7 +249,7 @@ describe('picking lines whose diff has already moved on', () => {
 
   it('tells the user what to do instead of repeating the backend wording', () => {
     const { message } = classifyError(new Error(RAW))
-    expect(message).toMatch(/already moved on/i)
+    expect(message).toMatch(/changed since you picked them/i)
     expect(message).not.toMatch(/mutation failed/i)
   })
 

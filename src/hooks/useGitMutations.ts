@@ -1912,19 +1912,26 @@ export function useGitMutations(repoId: string | null) {
   // with it -- moving lines between the index and the workdir rewrites both
   // sides of the same file.
   const afterPatch = () => invalidate(qc, id, ['status'])
+  // A failed pick usually means the file moved on after the diff was drawn, so
+  // the diff on screen is refreshed too - the next pick is made against the
+  // lines that are really there.
+  const patchFailed = (e: Error) => {
+    onError(e)
+    afterPatch()
+  }
 
   const stageLines = useMutation({
     mutationFn: async (args: { path: string; selection: SelectedLine[] }) =>
       unwrap(await commands.stageLines(id, args.path, args.selection)),
     onSuccess: afterPatch,
-    onError,
+    onError: patchFailed,
   })
 
   const unstageLines = useMutation({
     mutationFn: async (args: { path: string; selection: SelectedLine[] }) =>
       unwrap(await commands.unstageLines(id, args.path, args.selection)),
     onSuccess: afterPatch,
-    onError,
+    onError: patchFailed,
   })
 
   const discardLines = useMutation({
@@ -1934,7 +1941,7 @@ export function useGitMutations(repoId: string | null) {
       afterPatch()
       toast('Discarded selected lines')
     },
-    onError,
+    onError: patchFailed,
   })
 
   // One count per operation per repository, so a pull running in another tab

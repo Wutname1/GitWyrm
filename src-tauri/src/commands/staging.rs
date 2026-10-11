@@ -7,7 +7,11 @@ use crate::git::progress::LocalProgress;
 use crate::git::submodule::{is_submodule, sync_submodule_workdirs};
 use crate::state::RepoManager;
 
-fn stage_paths(repo: &git2::Repository, root: &Path, paths: &[String]) -> Result<(), git2::Error> {
+pub(crate) fn stage_paths(
+    repo: &git2::Repository,
+    root: &Path,
+    paths: &[String],
+) -> Result<(), git2::Error> {
     let mut index = repo.index()?;
     for path in rename_counterparts(repo, paths) {
         let rel = Path::new(&path);
@@ -75,7 +79,7 @@ fn rename_counterparts(repo: &git2::Repository, paths: &[String]) -> Vec<String>
     out
 }
 
-fn unstage_paths(repo: &git2::Repository, paths: &[String]) -> Result<(), git2::Error> {
+pub(crate) fn unstage_paths(repo: &git2::Repository, paths: &[String]) -> Result<(), git2::Error> {
     // Unstaging half a rename would strand the other half in the index.
     let paths = rename_counterparts(repo, paths);
     let head = repo
@@ -95,7 +99,7 @@ fn unstage_paths(repo: &git2::Repository, paths: &[String]) -> Result<(), git2::
     Ok(())
 }
 
-fn discard_paths(repo: &git2::Repository, paths: &[String]) -> Result<(), git2::Error> {
+pub(crate) fn discard_paths(repo: &git2::Repository, paths: &[String]) -> Result<(), git2::Error> {
     // Discarding a rename has to restore the old name as well as remove the new
     // one, or the file appears to vanish.
     let paths = rename_counterparts(repo, paths);

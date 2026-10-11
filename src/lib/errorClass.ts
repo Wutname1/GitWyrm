@@ -285,9 +285,10 @@ const RULES: Rule[] = [
     // between render and click. The selection simply no longer applies. The
     // backend has treated this as expected since the phrasing landed, but with
     // no rule here the frontend still filed it as a crash (GITWYRM-BACKEND-6).
-    match: (r) => r.includes('no changes found for this file'),
+    match: (r) =>
+      r.includes('no changes found for this file') || r.includes('changed since they were shown'),
     severity: 'info',
-    message: 'Those lines have already moved on. Re-open the file and try again.',
+    message: 'Those lines changed since you picked them. The file has been refreshed - pick them again.',
   },
   {
     // Committing with a merge still half-resolved. git will not build a tree

@@ -392,11 +392,48 @@ pub(crate) fn build_patch_from_raw(
     }
 
     if !any {
-        return Err(AppError::Other(
-            "selection produced no applicable changes".into(),
-        ));
+        // None of the picked lines is a change in the file as it is now. The
+        // selection was made against the diff on screen, so the file moved on
+        // after it was drawn - an editor saved, a formatter ran, the lines were
+        // staged from elsewhere. Say that, rather than a sentence about patches.
+        return Err(AppError::Other(STALE_SELECTION.into()));
     }
     Ok(patch)
+}
+
+/// The picked lines are no longer changes in the file. Matched by
+/// `error::EXPECTED` and by the frontend, which refreshes the diff.
+pub(crate) const STALE_SELECTION: &str =
+    "The lines you picked changed since they were shown. The file has been refreshed - pick them again.";
+
+/// Whether `path` is a linked folder (a gitlink) rather than a file.
+///
+/// Its "diff" is a pair of `Subproject commit <sha>` lines, and `git apply`
+/// cannot apply those to a folder: it fails with `error: failed to read
+/// <path>` - reported from `packages/core`, which is how this was found. Checked
+/// in the index, in HEAD and on disk, because a gitlink can exist without a
+/// `.gitmodules` entry (a nested repository added by accident), and
+/// `find_submodule` only knows the ones that are declared.
+fn is_gitlink(repo: &git2::Repository, path: &str) -> bool {
+    let rel = std::path::Path::new(path);
+    let gitlink = 0o160000;
+    if let Ok(index) = repo.index() {
+        if index.get_path(rel, 0).is_some_and(|e| e.mode == gitlink) {
+            return true;
+        }
+    }
+    let in_head = repo
+        .head()
+        .ok()
+        .and_then(|h| h.peel_to_tree().ok())
+        .and_then(|t| t.get_path(rel).ok())
+        .is_some_and(|e| e.filemode() == gitlink as i32);
+    if in_head {
+        return true;
+    }
+    repo.workdir()
+        .map(|w| w.join(rel).join(".git").exists())
+        .unwrap_or(false)
 }
 
 fn diff_args_for(target: PatchTarget, path: &str) -> Vec<String> {
@@ -419,6 +456,14 @@ fn diff_args_for(target: PatchTarget, path: &str) -> Vec<String> {
         "diff.mnemonicPrefix=false".into(),
         "diff".into(),
         "--no-color".into(),
+        // An external diff tool or a textconv driver in the user's config would
+        // replace git's own output with something that is not a patch at all,
+        // and a non-default inter-hunk context merges hunks the on-screen diff
+        // keeps apart, so the picked hunk numbers point at the wrong hunk. Pin
+        // all three to what libgit2 draws.
+        "--no-ext-diff".into(),
+        "--no-textconv".into(),
+        "--inter-hunk-context=0".into(),
         "--diff-algorithm=myers".into(),
         "-U3".into(),
     ];
@@ -444,6 +489,27 @@ async fn apply_selection(
     let open = manager.get(&repo_id)?;
     let repo_path = open.path.to_string_lossy().into_owned();
     tauri::async_runtime::spawn_blocking(move || {
+        // A linked folder has no lines, only "which commit". Picking any part of
+        // its change can only mean all of it, so do the whole-file operation
+        // instead of handing `git apply` a patch it cannot read.
+        {
+            let repo = open.repo.lock().unwrap();
+            if is_gitlink(&repo, &path) {
+                let paths = std::slice::from_ref(&path);
+                let done = match (target, reverse) {
+                    (PatchTarget::Unstaged, false) => {
+                        crate::commands::staging::stage_paths(&repo, &open.path, paths)
+                    }
+                    (PatchTarget::Staged, _) => {
+                        crate::commands::staging::unstage_paths(&repo, paths)
+                    }
+                    (PatchTarget::Unstaged, true) => {
+                        crate::commands::staging::discard_paths(&repo, paths)
+                    }
+                };
+                return done.map_err(AppError::Git);
+            }
+        }
         let dargs = diff_args_for(target, &path);
         let dargs_ref: Vec<&str> = dargs.iter().map(String::as_str).collect();
         let patch = build_patch(&repo_path, &path, &dargs_ref, &selection, reverse)?;
@@ -563,6 +629,27 @@ mod tests {
     fn no_selection_yields_none() {
         let d = parse_diff(SAMPLE).unwrap();
         assert!(rebuild_hunk(&d.hunks[0], 0, &[], false).is_none());
+    }
+
+    /// Lines picked from a diff that has since changed match nothing. That is a
+    /// stale view, and the user is told so in words they can act on.
+    #[test]
+    fn a_stale_selection_says_the_file_changed() {
+        let err = build_patch_from_raw(SAMPLE, &[sel(0, None, Some(40))], false)
+            .expect_err("nothing matches");
+        assert_eq!(err.to_string(), STALE_SELECTION);
+        assert!(crate::error::is_expected_for_tests(&err.to_string()));
+    }
+
+    /// A user's diff config must not change the patch git hands us: an
+    /// external tool would replace it outright, and a wider inter-hunk context
+    /// would merge hunks the screen shows apart.
+    #[test]
+    fn the_source_diff_ignores_user_diff_tools() {
+        let args = diff_args_for(PatchTarget::Unstaged, "f.txt");
+        for flag in ["--no-ext-diff", "--no-textconv", "--inter-hunk-context=0"] {
+            assert!(args.iter().any(|a| a == flag), "{flag} missing: {args:?}");
+        }
     }
 
     #[test]
@@ -944,6 +1031,33 @@ mod tests {
         // Workdir: L2 reverted to l2, L4 kept.
         let workdir = std::fs::read_to_string(dir.join("f.txt")).unwrap();
         assert_eq!(workdir, "l1\nl2\nMID\nl3\nL4\n", "workdir:\n{workdir}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A linked folder is recognised whether or not `.gitmodules` declares it:
+    /// `git apply` cannot read either kind, so both must take the whole-file path.
+    #[test]
+    fn a_nested_checkout_is_a_gitlink_and_a_file_is_not() {
+        let Some(dir) = scratch_repo(
+            "gitlink", "a
+",
+        ) else {
+            return;
+        };
+        let inner = dir.join("packages").join("core");
+        std::fs::create_dir_all(&inner).unwrap();
+        git(&inner, &["init", "-q"]);
+        git(&inner, &["config", "user.email", "t@t.t"]);
+        git(&inner, &["config", "user.name", "t"]);
+        std::fs::write(inner.join("x.txt"), "x").unwrap();
+        git(&inner, &["add", "x.txt"]);
+        git(&inner, &["commit", "-qm", "inner"]);
+        // Added without `git submodule add`, so there is no .gitmodules entry.
+        git(&dir, &["add", "packages/core"]);
+
+        let repo = git2::Repository::open(&dir).unwrap();
+        assert!(is_gitlink(&repo, "packages/core"));
+        assert!(!is_gitlink(&repo, "f.txt"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
