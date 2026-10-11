@@ -28,7 +28,7 @@ import { noteManualFetch } from '@/hooks/useAutoFetch'
 import { cachedPushNote, showPushNoteToast } from '@/hooks/useMehen'
 import { classifyError } from '@/lib/errorClass'
 import { failureLogLevel } from '@/lib/commandError'
-import { showErrorToast } from '@/lib/errorToast'
+import { showErrorToast, type ErrorActions } from '@/lib/errorToast'
 import { copyToClipboard } from '@/lib/clipboard'
 import { plural, shortSha } from '@/lib/gitDisplay'
 import { log } from '@/lib/log'
@@ -192,6 +192,20 @@ const onError = (e: Error) => {
   const { severity, raw } = classified
   log[failureLogLevel(severity, e)](`mutation failed [${severity}]: ${raw}`)
   showErrorToast(classified)
+}
+
+/**
+ * `onError` with follow-up buttons on the toast: "Try again" when the error says
+ * retrying can work (a file another program had open), "Put my changes back"
+ * when a branch switch left the user's changes in a stash.
+ */
+function failWith<V>(actions: (vars: V) => ErrorActions) {
+  return (e: Error, vars: V) => {
+    const classified = classifyError(e)
+    const { severity, raw } = classified
+    log[failureLogLevel(severity, e)](`mutation failed [${severity}]: ${raw}`)
+    showErrorToast(classified, actions(vars))
+  }
 }
 
 /**
@@ -433,7 +447,7 @@ export function useGitMutations(repoId: string | null) {
       invalidate(qc, id, ['status'])
       toast(`Discarded changes in ${path.split('/').pop()}`)
     },
-    onError,
+    onError: failWith((path: string) => ({ retry: () => discardFile.mutate(path) })),
   })
 
   // Goes to the Recycle Bin rather than off disk, so the toast says so -- the
@@ -486,7 +500,7 @@ export function useGitMutations(repoId: string | null) {
       invalidate(qc, id, ['status'])
       toast(`Discarded ${plural(paths.length, 'file')} in ${folder}`)
     },
-    onError,
+    onError: failWith((args: FolderFilesArgs) => ({ retry: () => discardFiles.mutate(args) })),
   })
 
   // Adding a line to .gitignore changes the working tree, so the status list
@@ -520,7 +534,9 @@ export function useGitMutations(repoId: string | null) {
           : 'Discarded all changes',
       )
     },
-    onError,
+    onError: failWith((resetSubmodules: boolean) => ({
+      retry: () => discardAll.mutate(resetSubmodules),
+    })),
   })
 
   // Snap a submodule back to the commit the parent repo records, or download it
@@ -1190,7 +1206,17 @@ export function useGitMutations(repoId: string | null) {
         toast(`Checked out ${name}`)
       }
     },
-    onError,
+    onError: failWith((name: string) => ({
+      retry: () => checkout.mutate(name),
+      // The switch stopped after setting the changes aside, so the stash it made
+      // is the newest one. Putting it back returns the user to where they were.
+      restoreStash: () => stashPop.mutate(0),
+    })),
+    // A failed switch can still have set changes aside, so the changes list and
+    // the stash list must not keep showing the moment before it.
+    onSettled: (_data, error) => {
+      if (error) invalidate(qc, id, ['status', 'stashes', 'log'])
+    },
   })
 
   // Stash rows render in the graph, so every stash mutation refreshes `log`

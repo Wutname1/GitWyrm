@@ -238,6 +238,13 @@ fn switch_to(repo: &git2::Repository, name: &str) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Whether a failed switch was stopped by another program holding a file open.
+/// Matched on the sentence `switch_to` builds through `windows_lock_hint`.
+fn is_file_lock(e: &AppError) -> bool {
+    e.to_string()
+        .contains("another program is holding files open")
+}
+
 /// Move nested checkouts to the commits the branch we just switched to records.
 ///
 /// Switching branches writes the new gitlink into the parent's index but leaves
@@ -304,7 +311,12 @@ pub async fn checkout_branch(
             // Plain `git checkout`: carry changes across. A safe checkout errors if a
             // change would be overwritten, so surface a clear message in that case.
             BranchSwitchMode::Carry => {
-                switch_to(&repo, &name).map_err(|_| {
+                switch_to(&repo, &name).map_err(|e| {
+                    // A locked file is not a conflict with the user's changes, and
+                    // telling them to commit or stash would send them the wrong way.
+                    if is_file_lock(&e) {
+                        return e;
+                    }
                     AppError::Other(
             "your local changes conflict with that branch; commit, stash, or discard them first"
               .into(),
@@ -325,12 +337,21 @@ pub async fn checkout_branch(
             // Only when git actually refuses do we fall back to stash -> switch ->
             // reapply.
             BranchSwitchMode::AutoStash => {
-                if switch_to(&repo, &name).is_ok() {
-                    let submodules = follow_switched_pins(&repo, &repo_path, &pins_before);
-                    return Ok(CheckoutReport {
-                        outcome: CheckoutOutcome::Clean,
-                        submodules,
-                    });
+                match switch_to(&repo, &name) {
+                    Ok(()) => {
+                        let submodules = follow_switched_pins(&repo, &repo_path, &pins_before);
+                        return Ok(CheckoutReport {
+                            outcome: CheckoutOutcome::Clean,
+                            submodules,
+                        });
+                    }
+                    // Another program holds files the switch has to replace. Setting
+                    // the user's work aside cannot help - the switch after it fails
+                    // on the same file - and it used to leave their changes stuck in
+                    // a stash behind a message full of libgit2 codes. Stop here with
+                    // nothing moved, and say which folder to close.
+                    Err(e) if is_file_lock(&e) => return Err(e),
+                    Err(_) => {}
                 }
 
                 // The plain checkout was refused (a real collision). Stash the changes,
@@ -371,9 +392,9 @@ pub async fn checkout_branch(
                         // original switch error alone would not explain the tree state.
                         _ => {
                             return Err(AppError::Other(format!(
-                "could not switch to {name}, and your changes could not be put back \
-                 automatically - they are safe in the most recent stash: {e}"
-              )));
+                                "could not switch to {name}, and your changes could not be put back automatically - they are safe in the most recent stash. {}",
+                                crate::error::plain_message(&e.to_string())
+                            )));
                         }
                     }
                     return Err(e);

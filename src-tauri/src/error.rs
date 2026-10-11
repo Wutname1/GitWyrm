@@ -91,8 +91,37 @@ pub fn windows_lock_hint(e: &git2::Error) -> Option<String> {
     if e.class() != git2::ErrorClass::Os {
         return None;
     }
-    let message = e.message();
-    if !message.contains("being used by another process") {
+    lock_hint_from_text(e.message())
+}
+
+/// The lock sentence for a failure message, or None when it is not a lock.
+///
+/// Two wordings mean "something else has this file open". The obvious one is
+/// `being used by another process`. The other is `Access is denied` on a
+/// delete - `could not rmdir '<dir>': Access is denied` - which is what Windows
+/// reports when a program opened the file without sharing delete, as Visual
+/// Studio does with a project's `bin`/`obj` folders. That second shape arrived
+/// as a raw libgit2 line after a branch switch had already set the user's work
+/// aside (GITWYRM-BACKEND, "could not switch to main ... class=Os (2)").
+///
+/// `Access is denied` alone is not taken as a lock: on a write or an open it can
+/// be a real permission problem, which must keep its own wording and keep
+/// reporting. Only the delete-shaped operations qualify.
+pub fn lock_hint_from_text(message: &str) -> Option<String> {
+    let lowered = message.to_lowercase();
+    let in_use = lowered.contains("being used by another process");
+    let delete_denied = lowered.contains("access is denied")
+        && [
+            "could not rmdir",
+            "could not remove",
+            "failed to unlink",
+            "could not unlink",
+            "failed to remove",
+            "failed to delete",
+        ]
+        .iter()
+        .any(|verb| lowered.contains(verb));
+    if !in_use && !delete_denied {
         return None;
     }
     // Keep the path: it is the one genuinely useful part, and it tells the user
@@ -100,13 +129,33 @@ pub fn windows_lock_hint(e: &git2::Error) -> Option<String> {
     let subject = message
         .split_once('\'')
         .and_then(|(_, rest)| rest.split_once('\''))
-        .map(|(path, _)| path);
+        .map(|(path, _)| path.trim_end_matches(['/', '\\']))
+        .filter(|path| !path.is_empty());
     Some(match subject {
         Some(path) => format!(
-            "another program is holding files open in {path}, so they could not be replaced. Close anything using that folder - a running build, debugger, editor or antivirus scan - then try again."
+            "another program is holding files open in {path}, so they could not be replaced. Close anything using that folder - Visual Studio or another editor, a running build or debugger, or an antivirus scan - then try again."
         ),
-        None => "another program is holding files open in this repository, so they could not be replaced. Close anything using the folder - a running build, debugger, editor or antivirus scan - then try again.".to_string(),
+        None => "another program is holding files open in this repository, so they could not be replaced. Close anything using the folder - Visual Studio or another editor, a running build or debugger, or an antivirus scan - then try again.".to_string(),
     })
+}
+
+/// The message without libgit2's diagnostic tail, for sentences the user reads.
+///
+/// libgit2 errors print as `git error: <what happened>; class=Os (2); code=...`.
+/// The class and code help a bug report and mean nothing to a person; a
+/// sentence that embeds the error (the branch switch that kept a stash) showed
+/// them verbatim. The full text still goes to the log.
+pub fn plain_message(message: &str) -> String {
+    let mut out = message.replace("git error: ", "");
+    for marker in ["; class=", "; code="] {
+        while let Some(at) = out.find(marker) {
+            // The tail runs to the next `;` or the end of the message.
+            let rest = &out[at + 2..];
+            let end = rest.find(';').map(|i| at + 2 + i).unwrap_or(out.len());
+            out.replace_range(at..end, "");
+        }
+    }
+    out.trim().trim_end_matches(';').trim().to_string()
 }
 
 /// Conditions the app is expected to hit in normal use.
@@ -266,6 +315,11 @@ const EXPECTED: &[&str] = &[
     // which happens while Git is being installed or updated
     // (GITWYRM-BACKEND-J). Our sentence (remote.rs humanize_git_install_failure).
     "while git is being installed or updated",
+    // A Windows file lock in wording that never passed through
+    // windows_lock_hint - git's own CLI ("unable to unlink ...") or a lock that
+    // surfaced outside a checkout. The cause is the same program holding the
+    // file, and none of it is ours to fix.
+    "being used by another process",
     // The network dropped mid-transfer. git and curl word a reset, a hang-up and
     // a gateway timeout several ways; all of them are the connection, not the
     // app. The HTTP codes keep their "returned error:" prefix so a bare number
@@ -320,7 +374,19 @@ impl Serialize for AppError {
         // A corrupt index is recoverable and the raw wording does not say so, but
         // it still REPORTS - unlike the file lock, this is a real fault. Only the
         // sentence the user reads changes.
-        let message = corrupt_index_hint_for(&self.to_string()).unwrap_or_else(|| self.to_string());
+        let raw = self.to_string();
+        // A file lock is reworded wherever it surfaced - a checkout, a discard, a
+        // reset - so every path that rewrites working files explains it the same
+        // way. Only Os-class (libgit2) or git's own wording is considered; see
+        // lock_hint_from_text for why a bare "access is denied" is not enough.
+        let lock = if raw.to_lowercase().contains("class=os")
+            || raw.contains("being used by another process")
+        {
+            lock_hint_from_text(&raw)
+        } else {
+            None
+        };
+        let message = lock.or_else(|| corrupt_index_hint_for(&raw)).unwrap_or(raw);
         // Tauri serializes command errors before returning them to the UI. Logging
         // at this boundary guarantees that an error shown to the user also has a
         // durable entry in the app log.
@@ -621,12 +687,70 @@ mod tests {
         assert!(is_expected(
             "another program is holding files open in C:/Code/EmailService/, so they could not be replaced. Close anything using that folder - a running build, debugger, editor or antivirus scan - then try again."
         ));
-        // The RAW libgit2 text must NOT match: it is class=Os, which also covers
-        // permission failures and full disks. Only the translated message is a
-        // refusal, and the translation happens at exactly one call site.
-        assert!(!is_expected(
+        // The raw sharing-violation wording names a lock and nothing else, so it
+        // is a refusal too - it reaches us from git's CLI, where no translation
+        // runs. Other Os-class text (permissions, a full disk) must still report.
+        assert!(is_expected(
             "git error: could not rmdir 'C:/Code/EmailService/': The process cannot access the file because it is being used by another process.; class=Os (2)"
         ));
+        assert!(!is_expected(
+            "git error: failed to write '.git/index': Access is denied; class=Os (2)"
+        ));
+        assert!(!is_expected(
+            "git error: no space left on device; class=Os (2)"
+        ));
+    }
+
+    /// Visual Studio holds `bin`/`obj` open without sharing delete, and Windows
+    /// reports that as "Access is denied" on the rmdir - verbatim from the report
+    /// where a branch switch failed after setting the user's work aside.
+    #[test]
+    fn access_denied_on_a_delete_is_a_lock() {
+        let hint =
+            lock_hint_from_text("could not rmdir 'C:/Code/Svc/bin/Debug/': Access is denied.")
+                .expect("a denied delete is a lock");
+        assert!(
+            hint.contains("C:/Code/Svc/bin/Debug"),
+            "names the folder: {hint}"
+        );
+        assert!(
+            hint.contains("Visual Studio"),
+            "names the usual culprit: {hint}"
+        );
+        assert!(is_expected(&hint));
+        // A denied write or open is a permission problem and keeps reporting.
+        assert!(lock_hint_from_text("failed to write '.git/index': Access is denied").is_none());
+        assert!(lock_hint_from_text("failed to open 'C:/x': Access is denied").is_none());
+    }
+
+    /// The translation happens at the one boundary every command error crosses,
+    /// so a discard or reset that hits a lock reads the same as a checkout.
+    #[test]
+    fn a_lock_is_reworded_at_the_boundary() {
+        let raw = AppError::Git(git2::Error::new(
+            git2::ErrorCode::GenericError,
+            git2::ErrorClass::Os,
+            "could not rmdir 'C:/Code/Svc/obj/': Access is denied.",
+        ));
+        let shown = serde_json::to_string(&raw).expect("serializes");
+        assert!(
+            shown.contains("another program is holding files open"),
+            "{shown}"
+        );
+        assert!(!shown.contains("class="), "{shown}");
+    }
+
+    #[test]
+    fn plain_message_drops_the_libgit2_tail() {
+        assert_eq!(
+            plain_message("git error: could not rmdir 'C:/x': Access is denied.; class=Os (2)"),
+            "could not rmdir 'C:/x': Access is denied."
+        );
+        assert_eq!(
+            plain_message("git error: cannot locate local branch 'x'; class=Reference (4); code=NotFound (-3)"),
+            "cannot locate local branch 'x'"
+        );
+        assert_eq!(plain_message("nothing to strip"), "nothing to strip");
     }
 
     /// The lock hint must name the folder to close, and must leave other
@@ -639,22 +763,34 @@ mod tests {
             "could not rmdir 'C:/Code/EmailService/': The process cannot access the file because it is being used by another process.",
         );
         let hint = super::windows_lock_hint(&locked).expect("lock should be translated");
-        assert!(hint.contains("C:/Code/EmailService/"), "keeps the folder: {hint}");
-        assert!(hint.contains("try again"), "tells the user what to do: {hint}");
+        assert!(
+            hint.contains("C:/Code/EmailService"),
+            "keeps the folder: {hint}"
+        );
+        assert!(
+            hint.contains("try again"),
+            "tells the user what to do: {hint}"
+        );
 
         let denied = git2::Error::new(
             git2::ErrorCode::GenericError,
             git2::ErrorClass::Os,
             "failed to write '.git/index': permission denied",
         );
-        assert!(super::windows_lock_hint(&denied).is_none(), "a real Os fault must pass through");
+        assert!(
+            super::windows_lock_hint(&denied).is_none(),
+            "a real Os fault must pass through"
+        );
 
         let not_os = git2::Error::new(
             git2::ErrorCode::NotFound,
             git2::ErrorClass::Reference,
             "cannot locate local branch 'x'; being used by another process",
         );
-        assert!(super::windows_lock_hint(&not_os).is_none(), "class must gate the match");
+        assert!(
+            super::windows_lock_hint(&not_os).is_none(),
+            "class must gate the match"
+        );
     }
 
     #[test]

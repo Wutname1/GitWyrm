@@ -447,3 +447,36 @@ describe('a server that could not be reached', () => {
     expect(classifyError(new Error('network fetch failed: request failed')).severity).toBe('error')
   })
 })
+
+describe('a file another program has open', () => {
+  const RAW =
+    'another program is holding files open in C:/Code/Svc/obj, so they could not be replaced. Close anything using that folder - Visual Studio or another editor, a running build or debugger, or an antivirus scan - then try again.'
+
+  it('names the folder, is a warning, and can be retried', () => {
+    const c = classifyError(new Error(RAW))
+    expect(c.severity).toBe('warning')
+    expect(c.message).toMatch(/^Another program is holding files open in C:\/Code\/Svc\/obj/)
+    expect(c.retryable).toBe(true)
+  })
+})
+
+describe('a branch switch that left changes in a stash', () => {
+  // The reported shape, after the backend dropped the libgit2 tail.
+  const RAW =
+    'could not switch to main, and your changes could not be put back automatically - they are safe in the most recent stash. another program is holding files open in C:/Code/Svc/bin, so they could not be replaced. Close anything using that folder - Visual Studio or another editor, a running build or debugger, or an antivirus scan - then try again.'
+
+  it('says the changes are safe and offers to put them back', () => {
+    const c = classifyError(new Error(RAW))
+    expect(c.stashKept).toBe(true)
+    expect(c.message).toMatch(/^Couldn't switch to main\. Your changes are safe/)
+    expect(c.message).toMatch(/Another program is holding files open/)
+    expect(c.message).not.toMatch(/class=|git error/i)
+  })
+
+  it('strips the libgit2 tail from an older backend message', () => {
+    const old =
+      "could not switch to main, and your changes could not be put back automatically - they are safe in the most recent stash: git error: could not rmdir 'C:/x': Access is denied.; class=Os (2)"
+    const c = classifyError(new Error(old))
+    expect(c.message).not.toMatch(/class=|git error/i)
+  })
+})

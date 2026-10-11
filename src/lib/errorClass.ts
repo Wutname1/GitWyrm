@@ -34,6 +34,13 @@ export interface ClassifiedError {
   /** The original backend string, always kept for the log. */
   raw: string
   fix?: ErrorFix
+  /** Trying the same thing again can work once the user has done something. */
+  retryable?: boolean
+  /**
+   * The user's changes were set aside in a stash and could not be put back.
+   * The toast offers to put them back, so they are never left hunting for it.
+   */
+  stashKept?: boolean
 }
 
 interface Rule {
@@ -43,6 +50,14 @@ interface Rule {
   /** Fixed text, or built from the original (not lowercased) raw message. */
   message: string | ((raw: string) => string)
   fix?: ErrorFix
+  retryable?: boolean
+  stashKept?: boolean
+}
+
+/** First letter up, for a backend sentence shown as the whole toast. */
+function sentence(text: string): string {
+  const trimmed = text.trim()
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1)
 }
 
 // No settingId: these rules cover every host, and flashing the GitHub row for
@@ -58,6 +73,35 @@ const SSH_SETTINGS: ErrorFix = { label: 'Open Security', section: 'security' }
  * may change between libgit2 versions.
  */
 const RULES: Rule[] = [
+  {
+    // A branch switch set the user's work aside and then could not finish or
+    // put it back. Ahead of the lock rule: the reason is often a lock, but what
+    // the user most needs to hear is where their changes are and how to get
+    // them back, which the toast's button does.
+    match: (r) => r.includes('they are safe in the most recent stash'),
+    severity: 'warning',
+    message: (raw) => {
+      const branch = /could not switch to (\S+?),/i.exec(raw)?.[1]
+      const reason = stripGitDiagnostics(raw.split(/most recent stash[.:]\s*/i)[1] ?? '')
+      const lead = branch
+        ? `Couldn't switch to ${branch}. Your changes are safe - they were set aside in a stash.`
+        : "Couldn't switch branches. Your changes are safe - they were set aside in a stash."
+      return reason ? `${lead} ${sentence(reason)}` : lead
+    },
+    stashKept: true,
+  },
+  {
+    // Another program has files open that a switch, discard or reset needed to
+    // replace. The backend sentence names the folder and the usual culprits, so
+    // it is shown as is; trying again works once that program lets go.
+    match: (r) => r.includes('another program is holding files open'),
+    severity: 'warning',
+    message: (raw) => {
+      const at = raw.toLowerCase().indexOf('another program is holding files open')
+      return sentence(raw.slice(at))
+    },
+    retryable: true,
+  },
   {
     // Another git process is holding the index -- most often a terminal open
     // beside the app, or a crashed process that left index.lock behind. The
@@ -354,9 +398,9 @@ const RULES: Rule[] = [
 /** Strip git2's "; class=... (N); code=... (N)" diagnostic tail for display. */
 function stripGitDiagnostics(raw: string): string {
   return raw
-    .replace(/;\s*class=[^;]*/gi, '')
-    .replace(/;\s*code=[^;]*/gi, '')
-    .replace(/^git error:\s*/i, '')
+    .replace(/;?\s*class=[^;]*/gi, '')
+    .replace(/;?\s*code=[^;]*/gi, '')
+    .replace(/git error:\s*/gi, '')
     .trim()
 }
 
@@ -387,7 +431,14 @@ export function classifyError(e: unknown): ClassifiedError {
   for (const rule of RULES) {
     if (rule.match(lower)) {
       const message = typeof rule.message === 'function' ? rule.message(raw) : rule.message
-      return { severity: rule.severity, message, raw, fix: rule.fix }
+      return {
+        severity: rule.severity,
+        message,
+        raw,
+        fix: rule.fix,
+        retryable: rule.retryable,
+        stashKept: rule.stashKept,
+      }
     }
   }
 
