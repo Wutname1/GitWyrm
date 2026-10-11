@@ -3,8 +3,8 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Arc, Condvar, Mutex, RwLock};
-use std::time::Duration;
+use std::sync::{Arc, Condvar, Mutex, OnceLock, RwLock};
+use std::time::{Duration, SystemTime};
 
 use std::path::PathBuf;
 
@@ -139,6 +139,161 @@ fn path_is_relevant(path: &Path, workdir: &Path, matcher: &Gitignore) -> bool {
     true
 }
 
+/// Where git keeps its state for a working tree, when that is outside it.
+///
+/// A linked worktree (`git worktree add`, and every agent run that works in its
+/// own folder) has a `.git` *file* naming a folder inside the main checkout's
+/// `.git/worktrees/`. Its HEAD, index and reflog live there, and its branches
+/// live in the main checkout's shared `refs/`. None of that is under the
+/// worktree's own folder, so a watch on the folder alone never saw a commit made
+/// in it - the graph and the push count stayed where they were until something
+/// else forced a refresh.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GitDirs {
+    /// This checkout's own git folder: HEAD, index, logs/HEAD.
+    git_dir: PathBuf,
+    /// The folder shared by every checkout of the repository: refs, packed-refs.
+    common_dir: PathBuf,
+}
+
+/// Removes `.` and `..` without touching the disk, so a `commondir` of `../..`
+/// compares equal to the paths `notify` reports. `canonicalize` would also do
+/// this, but on Windows it returns `\?\` paths that never match the event
+/// paths, which come back spelled the way the watch was armed.
+fn normalize_lexically(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for comp in path.components() {
+        match comp {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !out.pop() {
+                    out.push(comp.as_os_str());
+                }
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
+/// The git folders for `workdir`. A normal checkout keeps both in `.git`; a
+/// linked worktree points elsewhere through its `.git` file and that folder's
+/// `commondir`. None when `.git` is missing or unreadable.
+fn resolve_git_dirs(workdir: &Path) -> Option<GitDirs> {
+    let dot_git = workdir.join(".git");
+    if dot_git.is_dir() {
+        return Some(GitDirs {
+            git_dir: dot_git.clone(),
+            common_dir: dot_git,
+        });
+    }
+    let text = std::fs::read_to_string(&dot_git).ok()?;
+    let target = text
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("gitdir:"))
+        .map(str::trim)
+        .filter(|t| !t.is_empty())?;
+    let target = PathBuf::from(target);
+    let git_dir = normalize_lexically(&if target.is_relative() {
+        workdir.join(target)
+    } else {
+        target
+    });
+    let common_dir = match std::fs::read_to_string(git_dir.join("commondir")) {
+        Ok(raw) if !raw.trim().is_empty() => {
+            let common = PathBuf::from(raw.trim());
+            normalize_lexically(&if common.is_relative() {
+                git_dir.join(common)
+            } else {
+                common
+            })
+        }
+        _ => git_dir.clone(),
+    };
+    Some(GitDirs {
+        git_dir,
+        common_dir,
+    })
+}
+
+impl GitDirs {
+    /// Whether these folders sit outside the working tree, which is what needs
+    /// watching on its own.
+    fn is_external(&self, workdir: &Path) -> bool {
+        !self.git_dir.starts_with(workdir)
+    }
+
+    /// Spell a path inside the external git folders as if it were under
+    /// `<workdir>/.git`, so [`path_is_relevant`] judges it by the same rules as
+    /// an ordinary checkout. Paths elsewhere come back unchanged.
+    fn as_workdir_view(&self, path: &Path, workdir: &Path) -> PathBuf {
+        // The worktree's own folder is inside the shared one, so it is checked
+        // first: its HEAD must read as `.git/HEAD`, not `.git/worktrees/x/HEAD`.
+        for base in [&self.git_dir, &self.common_dir] {
+            if let Ok(rel) = path.strip_prefix(base) {
+                return workdir.join(".git").join(rel);
+            }
+        }
+        path.to_path_buf()
+    }
+
+    /// The files whose change means a commit, branch switch, reset or staging
+    /// happened: HEAD, the index, the reflog for HEAD, packed refs, and the ref
+    /// file of the branch HEAD names.
+    fn state_files(&self) -> Vec<PathBuf> {
+        let mut files = vec![
+            self.git_dir.join("HEAD"),
+            self.git_dir.join("index"),
+            self.git_dir.join("logs").join("HEAD"),
+            self.common_dir.join("packed-refs"),
+        ];
+        if let Ok(head) = std::fs::read_to_string(self.git_dir.join("HEAD")) {
+            if let Some(name) = head.trim().strip_prefix("ref:") {
+                let name = name.trim();
+                // Only a plain refs/... name; anything else is not a file we read.
+                if name.starts_with("refs/") && !name.contains("..") {
+                    files.push(self.common_dir.join(name));
+                }
+            }
+        }
+        files
+    }
+}
+
+/// Size and modification time of each git state file, in a fixed order. Two
+/// equal signatures mean nothing a user can see in git has moved.
+type StateSignature = Vec<Option<(SystemTime, u64)>>;
+
+fn state_signature(dirs: &GitDirs) -> StateSignature {
+    dirs.state_files()
+        .iter()
+        .map(|file| {
+            std::fs::metadata(file)
+                .ok()
+                .map(|m| (m.modified().unwrap_or(SystemTime::UNIX_EPOCH), m.len()))
+        })
+        .collect()
+}
+
+/// How often the state poll looks at each repository's git state files.
+///
+/// The event watch is the fast path; this is the safety net. Windows drops
+/// change notifications when its buffer overflows - an agent rewriting many
+/// files at once, or a build running beside a commit - and `notify` then reports
+/// nothing at all, so a commit made in that window never reached the screen.
+/// Reading five file sizes per repository every couple of seconds costs nothing
+/// and means a missed event delays the refresh by at most this long.
+const STATE_POLL_INTERVAL: Duration = Duration::from_secs(2);
+
+/// One repository the state poll keeps an eye on.
+struct PollEntry {
+    dirs: GitDirs,
+    /// Shared with the event handler, which records the state it just reported
+    /// so the poll does not report the same change a second time.
+    last: Arc<Mutex<StateSignature>>,
+}
+
 type RepoDebouncer = Debouncer<RecommendedWatcher, RecommendedCache>;
 
 /// Arms the watch over `workdir`, skipping the directories in [`IGNORED_DIRS`].
@@ -266,9 +421,83 @@ impl Drop for ArmPermit<'_> {
 
 static ARM_GATE: ArmGate = ArmGate::new(ARM_CONCURRENCY);
 
+/// Arms watches on a linked worktree's git folders, which live outside the
+/// working tree [`arm_paths`] covers. A normal checkout needs nothing here: its
+/// `.git` folder is one of the top-level entries `arm_paths` already recursed
+/// into.
+///
+/// The worktree's own folder is small (HEAD, index, a reflog) and is watched
+/// whole. The shared folder is not: its `objects/` is the bulk of the repository,
+/// so only its top level (for `packed-refs`) and `refs/` are watched.
+fn arm_git_dirs(debouncer: &mut RepoDebouncer, dirs: &GitDirs, workdir: &Path) {
+    if !dirs.is_external(workdir) {
+        return;
+    }
+    let targets = [
+        (dirs.git_dir.clone(), RecursiveMode::Recursive),
+        (dirs.common_dir.clone(), RecursiveMode::NonRecursive),
+        (dirs.common_dir.join("refs"), RecursiveMode::Recursive),
+    ];
+    for (path, mode) in targets {
+        if let Err(e) = debouncer.watch(&path, mode) {
+            log::warn!("watch: could not arm git folder {}: {e}", path.display());
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct WatcherRegistry {
     watchers: Mutex<HashMap<String, RepoDebouncer>>,
+    polls: Mutex<HashMap<String, PollEntry>>,
+}
+
+/// Started once, by the first repository to be watched.
+static STATE_POLL: OnceLock<()> = OnceLock::new();
+
+/// Runs for the life of the app: every [`STATE_POLL_INTERVAL`], compare each
+/// watched repository's git state files with what was last reported and emit
+/// `repo-changed` for any that moved without an event saying so.
+fn start_state_poll(app: AppHandle) {
+    STATE_POLL.get_or_init(|| {
+        let spawned = std::thread::Builder::new()
+            .name("repo-state-poll".into())
+            .spawn(move || loop {
+                std::thread::sleep(STATE_POLL_INTERVAL);
+                let registry = app.state::<WatcherRegistry>();
+                // Copied out so no disk access happens while the map is locked.
+                let entries: Vec<(String, GitDirs, Arc<Mutex<StateSignature>>)> = registry
+                    .polls
+                    .lock()
+                    .map(|polls| {
+                        polls
+                            .iter()
+                            .map(|(id, e)| (id.clone(), e.dirs.clone(), e.last.clone()))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                for (repo_id, dirs, last) in entries {
+                    let now = state_signature(&dirs);
+                    let changed = {
+                        let mut guard = last.lock().unwrap_or_else(|e| e.into_inner());
+                        if *guard == now {
+                            false
+                        } else {
+                            *guard = now;
+                            true
+                        }
+                    };
+                    if changed {
+                        log::debug!(
+                            "watch: state poll caught a change the events missed for {repo_id}"
+                        );
+                        let _ = app.emit("repo-changed", RepoChangedPayload { repo_id });
+                    }
+                }
+            });
+        if let Err(e) = spawned {
+            log::warn!("watch: could not start the state poll: {e}");
+        }
+    });
 }
 
 impl WatcherRegistry {
@@ -318,6 +547,13 @@ impl WatcherRegistry {
         let watch_root = workdir.to_path_buf();
         let matcher: SharedMatcher = Arc::new(RwLock::new(build_matcher(workdir)));
         let matcher_for_events = matcher.clone();
+        let git_dirs = resolve_git_dirs(workdir);
+        let git_dirs_for_events = git_dirs.clone();
+        let last_state: Arc<Mutex<StateSignature>> = Arc::new(Mutex::new(
+            git_dirs.as_ref().map(state_signature).unwrap_or_default(),
+        ));
+        let last_state_for_events = last_state.clone();
+        let poll_app = app.clone();
         let mut debouncer = new_debouncer(
             Duration::from_millis(150),
             None,
@@ -361,11 +597,25 @@ impl WatcherRegistry {
                     let guard = matcher_for_events.read();
                     let empty = Gitignore::empty();
                     let m = guard.as_deref().unwrap_or(&empty);
-                    let relevant = events
-                        .iter()
-                        .flat_map(|e| e.paths.iter())
-                        .any(|p| path_is_relevant(p, &watch_root, m));
+                    let relevant = events.iter().flat_map(|e| e.paths.iter()).any(|p| {
+                        match &git_dirs_for_events {
+                            Some(dirs) => path_is_relevant(
+                                &dirs.as_workdir_view(p, &watch_root),
+                                &watch_root,
+                                m,
+                            ),
+                            None => path_is_relevant(p, &watch_root, m),
+                        }
+                    });
                     if relevant {
+                        // Recorded so the state poll does not announce this same
+                        // change again a moment later.
+                        if let Some(dirs) = &git_dirs_for_events {
+                            let now = state_signature(dirs);
+                            *last_state_for_events
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner()) = now;
+                        }
                         let _ = app.emit(
                             "repo-changed",
                             RepoChangedPayload {
@@ -379,8 +629,24 @@ impl WatcherRegistry {
         .map_err(|e| e.to_string())?;
 
         arm_paths(&mut debouncer, workdir)?;
+        if let Some(dirs) = &git_dirs {
+            arm_git_dirs(&mut debouncer, dirs, workdir);
+        }
 
-        self.watchers.lock().unwrap().insert(repo_id, debouncer);
+        self.watchers
+            .lock()
+            .unwrap()
+            .insert(repo_id.clone(), debouncer);
+        if let Some(dirs) = git_dirs {
+            self.polls.lock().unwrap().insert(
+                repo_id,
+                PollEntry {
+                    dirs,
+                    last: last_state,
+                },
+            );
+        }
+        start_state_poll(poll_app);
         Ok(())
     }
 
@@ -404,6 +670,7 @@ impl WatcherRegistry {
 
     pub fn unwatch(&self, repo_id: &str) {
         self.watchers.lock().unwrap().remove(repo_id);
+        self.polls.lock().unwrap().remove(repo_id);
     }
 }
 
@@ -632,6 +899,99 @@ mod tests {
         assert!(
             !names.contains(&"target".to_string()),
             "target must not be walked, got {names:?}"
+        );
+    }
+
+    /// A linked worktree keeps HEAD and the index in the main checkout's
+    /// `.git/worktrees/<name>`, and its branches in the shared `refs/`. Both have
+    /// to be found, or a commit made in the worktree never reaches the screen.
+    #[test]
+    fn a_linked_worktree_resolves_to_its_external_git_folders() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let main = dir.path().join("main");
+        let admin = main.join(".git").join("worktrees").join("feature");
+        let wt = dir.path().join("feature");
+        std::fs::create_dir_all(&admin).expect("admin dir");
+        std::fs::create_dir_all(&wt).expect("worktree dir");
+        std::fs::write(
+            admin.join("commondir"),
+            "../..
+",
+        )
+        .expect("commondir");
+        std::fs::write(
+            wt.join(".git"),
+            format!(
+                "gitdir: {}
+",
+                admin.display()
+            ),
+        )
+        .expect(".git file");
+
+        let dirs = resolve_git_dirs(&wt).expect("resolves");
+        assert_eq!(dirs.git_dir, admin);
+        assert_eq!(dirs.common_dir, main.join(".git"));
+        assert!(dirs.is_external(&wt));
+
+        // Its own HEAD reads as the worktree's .git/HEAD, and a branch moving in
+        // the shared refs reads as a ref change - both relevant.
+        let head = dirs.as_workdir_view(&admin.join("HEAD"), &wt);
+        assert_eq!(head, wt.join(".git").join("HEAD"));
+        assert!(path_is_relevant(&head, &wt, &empty()));
+        let branch = dirs.as_workdir_view(&main.join(".git/refs/heads/feature"), &wt);
+        assert!(path_is_relevant(&branch, &wt, &empty()));
+        // Object writes in the shared folder are still noise.
+        let object = dirs.as_workdir_view(&main.join(".git/objects/ab/cdef"), &wt);
+        assert!(!path_is_relevant(&object, &wt, &empty()));
+    }
+
+    #[test]
+    fn an_ordinary_checkout_keeps_git_inside_the_working_tree() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::create_dir(dir.path().join(".git")).expect(".git");
+        let dirs = resolve_git_dirs(dir.path()).expect("resolves");
+        assert!(!dirs.is_external(dir.path()));
+        assert_eq!(dirs.git_dir, dirs.common_dir);
+    }
+
+    #[test]
+    fn a_folder_without_git_resolves_to_nothing() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        assert!(resolve_git_dirs(dir.path()).is_none());
+    }
+
+    /// The safety net only works if a commit changes the signature. A commit
+    /// moves the branch's ref file, which the signature follows through HEAD.
+    #[test]
+    fn a_branch_moving_changes_the_state_signature() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let git = dir.path().join(".git");
+        std::fs::create_dir_all(git.join("refs/heads")).expect("refs");
+        std::fs::write(
+            git.join("HEAD"),
+            "ref: refs/heads/main
+",
+        )
+        .expect("HEAD");
+        std::fs::write(git.join("refs/heads/main"), "a".repeat(40)).expect("ref");
+        let dirs = resolve_git_dirs(dir.path()).expect("resolves");
+
+        let before = state_signature(&dirs);
+        assert_eq!(before, state_signature(&dirs), "stable when nothing moved");
+        std::fs::write(git.join("refs/heads/main"), "b".repeat(41)).expect("move ref");
+        assert_ne!(
+            before,
+            state_signature(&dirs),
+            "a moved branch must be seen"
+        );
+    }
+
+    #[test]
+    fn lexical_normalization_resolves_parent_steps() {
+        assert_eq!(
+            normalize_lexically(Path::new("/a/b/.git/worktrees/x/../..")),
+            PathBuf::from("/a/b/.git")
         );
     }
 

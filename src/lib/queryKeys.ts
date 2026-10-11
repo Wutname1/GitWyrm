@@ -107,16 +107,63 @@ export const keys = {
  * anything. The mutation that adds an id is responsible for removing it and
  * invalidating afterwards, so the settled state is always read exactly once.
  */
-const operationsInFlight = new Set<string>()
+const operationsInFlight = new Map<string, number>()
 
-/** Marks an operation as running; returns the matching release function. */
+/**
+ * Repos whose watcher refresh was held back while an operation ran.
+ *
+ * Holding the refresh back is right for the operation's own writes, but the
+ * watcher cannot tell those apart from a commit made in a terminal or by an AI
+ * agent at the same moment. Push used to refresh only the remote refs when it
+ * finished, so an outside commit that landed mid-push never reached the graph or
+ * the push count: the changes list emptied while the graph and the "1 to push"
+ * badge stayed behind. Recording the skip and replaying it once the last
+ * operation settles makes sure every held-back refresh still happens.
+ */
+const refreshSkipped = new Set<string>()
+const settleListeners = new Set<(repoId: string) => void>()
+
+/**
+ * Marks an operation as running; returns the matching release function.
+ *
+ * Counted rather than a flag: two operations can overlap on one repo (a push
+ * while the update-all job fetches it), and the first to finish must not mark
+ * the repo idle while the other is still writing. Releasing twice is harmless.
+ */
 export function beginGitOperation(repoId: string): () => void {
-  operationsInFlight.add(repoId)
-  return () => operationsInFlight.delete(repoId)
+  operationsInFlight.set(repoId, (operationsInFlight.get(repoId) ?? 0) + 1)
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    const left = (operationsInFlight.get(repoId) ?? 1) - 1
+    if (left > 0) {
+      operationsInFlight.set(repoId, left)
+      return
+    }
+    operationsInFlight.delete(repoId)
+    if (refreshSkipped.delete(repoId)) {
+      for (const listener of settleListeners) listener(repoId)
+    }
+  }
 }
 
 export function isGitOperationInFlight(repoId: string): boolean {
-  return operationsInFlight.has(repoId)
+  return (operationsInFlight.get(repoId) ?? 0) > 0
+}
+
+/** Notes that the watcher held a refresh back for a busy repo. */
+export function noteRefreshSkipped(repoId: string) {
+  refreshSkipped.add(repoId)
+}
+
+/**
+ * Called with a repo id when its last operation settles after the watcher held
+ * a refresh back. Returns the unsubscribe function.
+ */
+export function onSkippedRefreshDue(listener: (repoId: string) => void): () => void {
+  settleListeners.add(listener)
+  return () => settleListeners.delete(listener)
 }
 
 /**

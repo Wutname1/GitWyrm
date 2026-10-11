@@ -266,6 +266,10 @@ const EXPECTED: &[&str] = &[
     // which happens while Git is being installed or updated
     // (GITWYRM-BACKEND-J). Our sentence (remote.rs humanize_git_install_failure).
     "while git is being installed or updated",
+    // A network git command the watchdog ended after a long silence
+    // (commands::remote stopped_responding_message): a hidden sign-in window or
+    // a server that stopped answering.
+    "stopped responding for",
 ];
 
 fn is_expected(message: &str) -> bool {

@@ -453,17 +453,31 @@ pub fn run_git_stoppable(
 /// (`git-remote-https`, ssh, a credential helper) as child processes, and
 /// ending only git would leave those holding the connection open.
 fn kill_tree(child: &mut std::process::Child) {
+    kill_process_tree(child.id());
+    let _ = child.kill();
+}
+
+/// [`kill_tree`] for a process known only by id, for a watchdog that does not
+/// own the `Child` (the thread waiting on it does).
+pub fn kill_process_tree(pid: u32) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         let _ = Command::new("taskkill")
-            .args(["/T", "/F", "/PID", &child.id().to_string()])
+            .args(["/T", "/F", "/PID", &pid.to_string()])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .creation_flags(CREATE_NO_WINDOW)
             .status();
     }
-    let _ = child.kill();
+    #[cfg(not(windows))]
+    {
+        let _ = Command::new("kill")
+            .args(["-9", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
 }
 
 pub fn git_available() -> bool {

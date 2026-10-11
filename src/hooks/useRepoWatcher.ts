@@ -6,6 +6,8 @@ import {
   invalidateOpenspec,
   isGitOperationInFlight,
   keys,
+  noteRefreshSkipped,
+  onSkippedRefreshDue,
   trimLogToFirstPage,
 } from '@/lib/queryKeys'
 
@@ -21,6 +23,21 @@ export function useRepoWatcher(onlyRepoId?: string | null) {
   const queryClient = useQueryClient()
 
   useEffect(() => {
+    const refreshRefs = (repoId: string) => {
+      trimLogToFirstPage(queryClient, repoId)
+      queryClient.invalidateQueries({ queryKey: keys.logAll(repoId) })
+      queryClient.invalidateQueries({ queryKey: keys.branches(repoId) })
+      queryClient.invalidateQueries({ queryKey: keys.stashes(repoId) })
+      queryClient.invalidateQueries({ queryKey: keys.tags(repoId) })
+      queryClient.invalidateQueries({ queryKey: keys.mergeState(repoId) })
+      queryClient.invalidateQueries({ queryKey: keys.repoCounts(repoId) })
+    }
+    // A refresh held back below runs once the operation that blocked it settles,
+    // so an outside commit made mid-push still reaches the graph and the counts.
+    const stopReplay = onSkippedRefreshDue((repoId) => {
+      if (onlyRepoId != null && repoId !== onlyRepoId) return
+      refreshRefs(repoId)
+    })
     const unlisten = listen<RepoChangedPayload>('repo-changed', (event) => {
       const repoId = event.payload.repo_id
       if (onlyRepoId != null && repoId !== onlyRepoId) return
@@ -44,13 +61,10 @@ export function useRepoWatcher(onlyRepoId?: string | null) {
       // reloading two or three times per operation, each reload re-walking
       // history from the start. Waiting for the mutation to settle makes that
       // one reload of the finished state.
-      if (!isGitOperationInFlight(repoId)) {
-        trimLogToFirstPage(queryClient, repoId)
-        queryClient.invalidateQueries({ queryKey: keys.logAll(repoId) })
-        queryClient.invalidateQueries({ queryKey: keys.branches(repoId) })
-        queryClient.invalidateQueries({ queryKey: keys.stashes(repoId) })
-        queryClient.invalidateQueries({ queryKey: keys.tags(repoId) })
-        queryClient.invalidateQueries({ queryKey: keys.mergeState(repoId) })
+      if (isGitOperationInFlight(repoId)) {
+        noteRefreshSkipped(repoId)
+      } else {
+        refreshRefs(repoId)
       }
       // A worktree added or removed in a terminal lands in `.git/worktrees`,
       // which the backend watcher now reports. Invalidating here is what makes
@@ -66,6 +80,7 @@ export function useRepoWatcher(onlyRepoId?: string | null) {
       invalidateOpenspec(queryClient, repoId)
     })
     return () => {
+      stopReplay()
       unlisten.then((fn) => fn())
     }
   }, [queryClient, onlyRepoId])

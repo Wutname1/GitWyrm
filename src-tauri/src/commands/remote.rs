@@ -411,6 +411,82 @@ fn humanize_git_install_failure(detail: &str) -> Option<String> {
     })
 }
 
+/// How long a network git command may print nothing before it is ended.
+///
+/// Long enough to finish a sign-in window, two-factor prompt included, or to
+/// wait out a slow server sending a large pack - progress lines reset the clock,
+/// so a big download that is moving is never cut off. Short enough that a
+/// command that is simply stuck gives its button back.
+const NETWORK_IDLE_LIMIT: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+
+/// The sentence for a network command the watchdog had to end.
+fn stopped_responding_message(operation: &str) -> String {
+    format!(
+        "it stopped responding for {} minutes, so it was ended. A sign-in window may have been waiting out of sight, or the server stopped answering. Try the {operation} again.",
+        NETWORK_IDLE_LIMIT.as_secs() / 60
+    )
+}
+
+/// Ends a child process that has been silent for too long.
+///
+/// Runs on its own thread because the caller is blocked reading the child's
+/// stderr, and that read only returns when the child writes or exits.
+struct IdleWatchdog {
+    last_activity: std::sync::Arc<std::sync::Mutex<std::time::Instant>>,
+    done: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    fired: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl IdleWatchdog {
+    fn start(pid: u32, limit: std::time::Duration) -> Self {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::{Arc, Mutex};
+        use std::time::Instant;
+
+        let last_activity = Arc::new(Mutex::new(Instant::now()));
+        let done = Arc::new(AtomicBool::new(false));
+        let fired = Arc::new(AtomicBool::new(false));
+        let (last, stop, flag) = (last_activity.clone(), done.clone(), fired.clone());
+        let tick = std::time::Duration::from_millis(250).min(limit);
+        let spawned = std::thread::Builder::new()
+            .name("git-idle-watchdog".into())
+            .spawn(move || loop {
+                std::thread::sleep(tick);
+                if stop.load(Ordering::SeqCst) {
+                    return;
+                }
+                let idle = last.lock().map(|t| t.elapsed()).unwrap_or_default();
+                if idle >= limit {
+                    flag.store(true, Ordering::SeqCst);
+                    crate::git::shell::kill_process_tree(pid);
+                    return;
+                }
+            });
+        if let Err(e) = spawned {
+            log::warn!("could not start the git watchdog: {e}");
+        }
+        Self {
+            last_activity,
+            done,
+            fired,
+        }
+    }
+
+    /// Git said something, so it is still alive.
+    fn touch(&self) {
+        if let Ok(mut t) = self.last_activity.lock() {
+            *t = std::time::Instant::now();
+        }
+    }
+
+    /// Stops watching. True when the watchdog had already ended the process.
+    fn finish(&self) -> bool {
+        use std::sync::atomic::Ordering;
+        self.done.store(true, Ordering::SeqCst);
+        self.fired.load(Ordering::SeqCst)
+    }
+}
+
 fn run_streaming(
     app: &AppHandle,
     repo_id: &str,
@@ -506,6 +582,13 @@ fn run_streaming_with(
         }
     })?;
 
+    // A git that goes quiet and never exits - a sign-in window nobody can see, a
+    // server that stops answering, a hook waiting on input - used to hold the
+    // command open forever, and with it the toolbar button that started it: Push
+    // stayed on "Pushing..." with no way out but restarting the app. The watchdog
+    // ends the process after a long silence so the command always returns.
+    let watchdog = IdleWatchdog::start(child.id(), NETWORK_IDLE_LIMIT);
+
     // git writes progress to stderr; stream each line to the frontend.
     let stderr = child.stderr.take();
     let mut stderr_lines: Vec<String> = Vec::new();
@@ -519,6 +602,7 @@ fn run_streaming_with(
                 if part.is_empty() {
                     continue;
                 }
+                watchdog.touch();
                 stderr_lines.push(part.to_string());
                 let _ = app.emit(
                     "git-progress",
@@ -536,6 +620,16 @@ fn run_streaming_with(
 
     let output = child.wait_with_output().map_err(AppError::Io)?;
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    if watchdog.finish() {
+        log::warn!(
+            "git {operation} was silent for {}s and was stopped",
+            NETWORK_IDLE_LIMIT.as_secs()
+        );
+        return Err(AppError::Other(format!(
+            "git {operation} failed: {}",
+            stopped_responding_message(operation)
+        )));
+    }
 
     if !output.status.success() {
         let detail = failure_detail(&stderr_lines, &stdout);
@@ -2688,3 +2782,50 @@ mod background_fetch_tests {
         assert!(matches!(corrupt, AppError::Other(_)));
     }
 }
+
+#[cfg(test)]
+mod watchdog_tests {
+    use super::IdleWatchdog;
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    /// A git that never says anything again is ended, and says so. This is what
+    /// gives a stuck Push button back.
+    #[test]
+    fn a_silent_git_is_ended() {
+        let mut child = Command::new(crate::git::shell::git_program_name())
+            .args(["-c", "alias.nap=!sleep 30", "nap"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn git");
+        let started = Instant::now();
+        let watchdog = IdleWatchdog::start(child.id(), Duration::from_millis(300));
+        let _ = child.wait();
+        assert!(watchdog.finish(), "the watchdog must report that it fired");
+        assert!(
+            started.elapsed() < Duration::from_secs(20),
+            "must not wait for git"
+        );
+    }
+
+    /// A git that finishes on its own is left alone.
+    #[test]
+    fn a_quick_git_is_not_touched() {
+        let mut child = Command::new(crate::git::shell::git_program_name())
+            .arg("--version")
+            .stdout(Stdio::null())
+            .spawn()
+            .expect("spawn git");
+        let watchdog = IdleWatchdog::start(child.id(), Duration::from_secs(60));
+        let _ = child.wait();
+        assert!(!watchdog.finish());
+    }
+
+    #[test]
+    fn the_message_says_what_to_do() {
+        let message = super::stopped_responding_message("push");
+        assert!(message.contains("Try the push again"), "{message}");
+    }
+}
+
