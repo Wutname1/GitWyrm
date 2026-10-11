@@ -41,6 +41,8 @@ export interface ClassifiedError {
    * The toast offers to put them back, so they are never left hunting for it.
    */
   stashKept?: boolean
+  /** Sending the branch fixes it: it publishes and links a branch in one step. */
+  offerPush?: boolean
 }
 
 interface Rule {
@@ -52,6 +54,7 @@ interface Rule {
   fix?: ErrorFix
   retryable?: boolean
   stashKept?: boolean
+  offerPush?: boolean
 }
 
 /** First letter up, for a backend sentence shown as the whole toast. */
@@ -204,10 +207,24 @@ const RULES: Rule[] = [
     // The pull-side twin of the rule above. The backend already treats both of
     // these as expected refusals, but with no rule here the frontend still
     // showed git's own sentence in a red toast and filed a crash report.
-    match: (r) => r.includes('there is no tracking information for the current branch'),
+    match: (r) =>
+      r.includes('there is no tracking information for the current branch') ||
+      r.includes("isn't linked to a branch on the cloud"),
     severity: 'warning',
     message:
       "This branch isn't linked to a cloud copy yet, so there's nothing to get. Send it first to link it up.",
+    offerPush: true,
+  },
+  {
+    // The cloud branch this one followed was deleted. The backend sentence names
+    // it; sending the branch publishes it again under the same name.
+    match: (r) => r.includes('no longer exists on the cloud'),
+    severity: 'warning',
+    message: (raw) => {
+      const at = raw.toLowerCase().indexOf('git pull failed: ')
+      return sentence(at === -1 ? raw : raw.slice(at + 'git pull failed: '.length))
+    },
+    offerPush: true,
   },
   {
     // Local and cloud both moved on, and git will not choose merge or rebase on
@@ -439,6 +456,7 @@ export function classifyError(e: unknown): ClassifiedError {
         fix: rule.fix,
         retryable: rule.retryable,
         stashKept: rule.stashKept,
+        offerPush: rule.offerPush,
       }
     }
   }

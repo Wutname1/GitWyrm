@@ -215,6 +215,7 @@ fn failure_detail(stderr_lines: &[String], stdout: &str) -> String {
 /// command instead.
 const UNTAGGED_CAUSES: &[&str] = &[
     "there is no tracking information for the current branch",
+    "your configuration specifies to merge with the ref",
     "you have divergent branches and need to specify how to reconcile them",
     "you have not concluded your merge",
     "not possible to fast-forward, aborting",
@@ -1005,6 +1006,22 @@ pub async fn git_pull(
         // entry rather than dropping it, so the changes are always recoverable. It
         // also applies to both the merge and rebase forms, so it holds regardless of
         // the user's `pull.rebase` setting.
+        // A branch that follows nothing on the cloud has nothing to pull. git
+        // refuses with an advisory whose last line is an example command, which
+        // is what users were shown ("git pull <remote> <branch>"). Say it plainly
+        // before running anything; the toast offers to send the branch, which
+        // publishes and links it in one step.
+        let followed = before.branch.as_deref().map(|branch| {
+            (
+                branch,
+                configured_upstream(&open.repo.lock().unwrap(), branch),
+            )
+        });
+        if let Some((branch, None)) = followed {
+            return Err(AppError::Other(no_upstream_message(branch)));
+        }
+        let followed = followed.and_then(|(_, up)| up);
+
         run_with_stale_ref_retry(
             &app,
             &repo_id,
@@ -1012,7 +1029,8 @@ pub async fn git_pull(
             "pull",
             &["pull", "--progress", "--autostash"],
             Attended::User,
-        )?;
+        )
+        .map_err(|e| upstream_gone_hint(e, followed.as_deref()))?;
 
         // A pulled commit can change which version of a submodule the project
         // pins, and git leaves the nested checkout on the old one -- surfacing it
@@ -1040,6 +1058,49 @@ pub async fn git_pull(
     })
     .await
     .map_err(|e| AppError::Other(e.to_string()))?
+}
+
+/// A branch that follows nothing on the cloud, in plain words.
+fn no_upstream_message(branch: &str) -> String {
+    format!(
+        "{branch} isn't linked to a branch on the cloud yet, so there is nothing to get. Send it first to publish it and link it up."
+    )
+}
+
+/// A pull whose cloud branch was deleted, in plain words.
+///
+/// The branch is still configured to follow it, so the pre-check above passes,
+/// and git then fails with "Your configuration specifies to merge with the ref
+/// ... but no such ref was fetched" - an untagged advisory the failure ranking
+/// never recognised, so the user got its last line.
+fn upstream_gone_hint(e: AppError, followed: Option<&str>) -> AppError {
+    let text = e.to_string().to_lowercase();
+    if !text.contains("no such ref was fetched")
+        && !text.contains("your configuration specifies to merge with the ref")
+    {
+        return e;
+    }
+    let followed = followed.unwrap_or("The cloud branch this one followed");
+    AppError::Other(format!(
+        "{followed} no longer exists on the cloud, so there is nothing to get. Send your branch to publish it again, or link it to a different cloud branch."
+    ))
+}
+
+/// The cloud branch `branch` is set to follow, as `remote/name`, read from
+/// config rather than from the remote-tracking ref - which is missing exactly
+/// when the cloud branch was deleted and pruned. None when it follows nothing.
+fn configured_upstream(repo: &git2::Repository, branch: &str) -> Option<String> {
+    let config = repo.config().ok()?;
+    let merge = config.get_string(&format!("branch.{branch}.merge")).ok()?;
+    let name = merge
+        .strip_prefix("refs/heads/")
+        .unwrap_or(&merge)
+        .to_string();
+    match config.get_string(&format!("branch.{branch}.remote")) {
+        // "." is git's spelling for "this repository": a local branch is followed.
+        Ok(remote) if remote != "." => Some(format!("{remote}/{name}")),
+        _ => Some(name),
+    }
 }
 
 /// Where a push should send a branch when the branch itself doesn't say.
@@ -2886,3 +2947,61 @@ mod watchdog_tests {
     }
 }
 
+#[cfg(test)]
+mod pull_upstream_tests {
+    use super::*;
+
+    fn repo() -> (tempfile::TempDir, git2::Repository) {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let repo = git2::Repository::init(dir.path()).expect("init");
+        (dir, repo)
+    }
+
+    #[test]
+    fn a_branch_with_no_upstream_is_named_plainly() {
+        let message = no_upstream_message("feature/login");
+        assert!(
+            message.starts_with("feature/login isn't linked"),
+            "{message}"
+        );
+        assert!(!message.contains('<'), "no example commands: {message}");
+        assert!(crate::error::is_expected_for_tests(&message));
+    }
+
+    #[test]
+    fn the_configured_upstream_is_read_from_config() {
+        let (_dir, repo) = repo();
+        assert_eq!(configured_upstream(&repo, "main"), None);
+        let mut config = repo.config().unwrap();
+        config.set_str("branch.main.remote", "origin").unwrap();
+        config
+            .set_str("branch.main.merge", "refs/heads/main")
+            .unwrap();
+        assert_eq!(
+            configured_upstream(&repo, "main").as_deref(),
+            Some("origin/main")
+        );
+    }
+
+    /// git's advisory for a deleted cloud branch is untagged and ends in an
+    /// example command; the user gets a sentence naming the branch instead.
+    #[test]
+    fn a_deleted_cloud_branch_is_explained() {
+        let raw = AppError::Other(
+            "git pull failed: Your configuration specifies to merge with the ref 'refs/heads/x'"
+                .into(),
+        );
+        let message = upstream_gone_hint(raw, Some("origin/x")).to_string();
+        assert!(
+            message.starts_with("origin/x no longer exists on the cloud"),
+            "{message}"
+        );
+        assert!(crate::error::is_expected_for_tests(&message));
+
+        let other = AppError::Other("git pull failed: fatal: unable to access".into());
+        assert_eq!(
+            upstream_gone_hint(other, Some("origin/x")).to_string(),
+            "git pull failed: fatal: unable to access"
+        );
+    }
+}

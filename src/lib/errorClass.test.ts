@@ -480,3 +480,16 @@ describe('a branch switch that left changes in a stash', () => {
     expect(c.message).not.toMatch(/class=|git error/i)
   })
 })
+
+describe('pulling a branch with nothing to pull from', () => {
+  it.each([
+    "git pull failed: There is no tracking information for the current branch.",
+    "feature isn't linked to a branch on the cloud yet, so there is nothing to get. Send it first to publish it and link it up.",
+    'git pull failed: origin/feature no longer exists on the cloud, so there is nothing to get. Send your branch to publish it again, or link it to a different cloud branch.',
+  ])('offers to send the branch: %s', (raw) => {
+    const c = classifyError(new Error(raw))
+    expect(c.severity).toBe('warning')
+    expect(c.offerPush).toBe(true)
+    expect(c.message).not.toMatch(/<remote>|<branch>/)
+  })
+})

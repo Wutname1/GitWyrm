@@ -351,6 +351,11 @@ const EXPECTED: &[&str] = &[
     "not a git repository",
     "could not find repository at",
     "this project's folder is gone",
+    // Pulling a branch that follows nothing on the cloud, or follows a cloud
+    // branch that was deleted (commands::remote no_upstream_message). Ordinary
+    // state the user fixes by sending the branch or linking it.
+    "isn't linked to a branch on the cloud",
+    "no longer exists on the cloud",
     // Staging picked lines from a file that changed after it was shown
     // (commands::patch STALE_SELECTION). The selection no longer applies; the
     // view refreshes.

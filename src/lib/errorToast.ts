@@ -8,6 +8,8 @@ export interface ErrorActions {
   retry?: () => void
   /** Put stashed changes back. Offered when the error says they were set aside. */
   restoreStash?: () => void
+  /** Send the branch, which publishes and links it. Offered when it has no cloud branch. */
+  push?: () => void
 }
 
 /**
@@ -17,15 +19,17 @@ export interface ErrorActions {
  * that instead.
  */
 export function showErrorToast(
-  { severity, message, fix, retryable, stashKept }: ClassifiedError,
+  { severity, message, fix, retryable, stashKept, offerPush }: ClassifiedError,
   actions?: ErrorActions,
 ) {
   const followUp =
     stashKept && actions?.restoreStash
       ? { label: 'Put my changes back', onClick: actions.restoreStash }
-      : retryable && actions?.retry
-        ? { label: 'Try again', onClick: actions.retry }
-        : null
+      : offerPush && actions?.push
+        ? { label: 'Send it', onClick: actions.push }
+        : retryable && actions?.retry
+          ? { label: 'Try again', onClick: actions.retry }
+          : null
   if (followUp) {
     const options = { action: followUp, duration: 15000 }
     if (severity === 'info') toast.info(message, options)

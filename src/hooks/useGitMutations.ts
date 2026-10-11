@@ -1379,7 +1379,8 @@ export function useGitMutations(repoId: string | null) {
         openRemoteSync(result.upstream, result.branch)
       }
     },
-    onError,
+    // A branch with no cloud branch has nothing to pull; sending it is the fix.
+    onError: failWith(() => ({ push: () => push.mutate() })),
     // A conflicting pull exits as an error but leaves a merge or rebase in
     // progress, so merge state must refresh on both outcomes for the banner
     // and conflict view to appear.
