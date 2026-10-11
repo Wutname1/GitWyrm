@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { create } from 'zustand'
 import { commands } from '@/lib/bindings'
 import { keys } from '@/lib/queryKeys'
@@ -9,6 +10,7 @@ import {
   BACKGROUND_FETCH_INTERVAL_MS,
   FOREGROUND_FETCH_INTERVAL_MS,
   isAuthFailure,
+  isMissingRepo,
   staggerFor,
 } from '@/lib/autoFetchPolicy'
 
@@ -18,6 +20,7 @@ export {
   BACKGROUND_FETCH_STAGGER_MS,
   staggerFor,
   isAuthFailure,
+  isMissingRepo,
 } from '@/lib/autoFetchPolicy'
 
 /**
@@ -32,6 +35,13 @@ export {
  * their access, and it means the pause can never become permanent.
  */
 const authBlocked = new Set<string>()
+
+/**
+ * Repos whose folder is gone, skipped by every automatic fetch. Cleared like
+ * `authBlocked` by a fetch the user starts, so putting the folder back and
+ * fetching by hand brings the project back into the sweep.
+ */
+const missing = new Set<string>()
 
 /**
  * Why each repo's last automatic fetch failed, shown on the Fetch button.
@@ -91,12 +101,14 @@ export function noteManualFetch(repoId: string) {
   // sorted out their access, so give the sweep another chance at this repo.
   // Without this the pause would outlive the problem for the whole session.
   authBlocked.delete(repoId)
+  missing.delete(repoId)
   setFailure(repoId, null)
 }
 
 /** Forgets a closed repo so its ids do not accumulate for the session. */
 function forget(repoId: string) {
   authBlocked.delete(repoId)
+  missing.delete(repoId)
   inFlight.delete(repoId)
   lastFetchedAt.delete(repoId)
   scheduled.delete(repoId)
@@ -115,6 +127,8 @@ async function fetchIfDue(qc: QueryClient, repoId: string, minAgeMs: number) {
   // Auth failed here last time and nothing has changed since. Retrying would
   // run the credential helper again for a credential that cannot work.
   if (authBlocked.has(repoId)) return
+  // The folder is gone; nothing changes until the user does something about it.
+  if (missing.has(repoId)) return
 
   const last = lastFetchedAt.get(repoId)
   if (last !== undefined && Date.now() - last < minAgeMs) return
@@ -128,7 +142,19 @@ async function fetchIfDue(qc: QueryClient, repoId: string, minAgeMs: number) {
       // Expected and common: no remote, offline, or credentials not set up.
       // A background fetch the user did not ask for must not interrupt: it is
       // logged and noted quietly on the Fetch button.
-      if (isAuthFailure(res.error)) {
+      if (isMissingRepo(res.error)) {
+        missing.add(repoId)
+        log.info(`auto-fetch stopped for ${repoId}: its folder is gone`)
+        // Said once, not every sweep: the tab is still open on something that is
+        // no longer there, and only the user can close it or bring it back.
+        const name =
+          useWorkspaceStore.getState().openRepos.find((r) => r.id === repoId)?.name ?? 'A project'
+        toast.warning(`${name}'s folder is gone`, {
+          description:
+            'GitWyrm stopped checking it for updates. Close its tab, or open the project again if you moved it.',
+          duration: 15000,
+        })
+      } else if (isAuthFailure(res.error)) {
         authBlocked.add(repoId)
         log.info(`auto-fetch paused for ${repoId} until you fetch by hand: ${res.error}`)
       } else {

@@ -884,19 +884,33 @@ pub fn remove(
         Ok(_) => {}
         Err(e) => {
             let text = e.to_string();
-            if looks_like_file_lock(&text) {
-                // Some files may already be gone. Saying which case it is beats
-                // reporting a bare failure over a folder that is now half there.
-                if target.exists() && !git2::Repository::open(&target).is_ok() {
+            // git deletes the folder file by file and stops at the first one it
+            // cannot remove. It words that several ways - a lock, "Access is
+            // denied", and on Windows also "failed to delete '<path>': Invalid
+            // argument" - and in every case part of the folder may already be
+            // gone, including the `.git` link that made it a checkout. Left like
+            // that, git still listed the worktree, the folder was no longer a
+            // repository, and an open tab on it failed every background fetch
+            // from then on.
+            match finish_partial_removal(repo, &target) {
+                PartialRemoval::Untouched => {
+                    if looks_like_file_lock(&text) {
+                        return Ok(RemoveOutcome::RefusedLocked {
+                            path: target_path.to_string(),
+                        });
+                    }
+                    return Err(e);
+                }
+                PartialRemoval::Finished => {
+                    log::info!("worktree remove: finished a partial removal of {target_path}");
+                }
+                PartialRemoval::LeftFiles => {
+                    log::warn!("worktree remove: {target_path} was only partly removed: {text}");
                     return Ok(RemoveOutcome::PartiallyRemoved {
                         path: target_path.to_string(),
                     });
                 }
-                return Ok(RemoveOutcome::RefusedLocked {
-                    path: target_path.to_string(),
-                });
             }
-            return Err(e);
         }
     }
 
@@ -915,6 +929,67 @@ pub fn remove(
         branch_merged,
         branch_remote: branch_upstream,
     })
+}
+
+/// What was left after `git worktree remove` failed part way.
+#[derive(Debug, PartialEq, Eq)]
+enum PartialRemoval {
+    /// Still a working checkout: nothing was deleted, so the failure stands.
+    Untouched,
+    /// The leftovers were cleared and git has forgotten the worktree.
+    Finished,
+    /// Files remain that could not be deleted. git has forgotten the worktree
+    /// either way, so it no longer shows as a checkout that cannot be opened.
+    LeftFiles,
+}
+
+/// Clean up after a removal git abandoned half way.
+///
+/// Once the folder has stopped being a checkout the user's work in it is gone
+/// already (the dirty-work question was asked before git ran), so what remains
+/// is debris: delete it, and drop git's record of the worktree so nothing keeps
+/// treating the path as a repository. A folder that is still a checkout is left
+/// exactly as it is.
+fn finish_partial_removal(repo: &git2::Repository, target: &Path) -> PartialRemoval {
+    if target.exists() && git2::Repository::open(target).is_ok() {
+        return PartialRemoval::Untouched;
+    }
+    let cleared = !target.exists() || std::fs::remove_dir_all(target).is_ok() || !target.exists();
+    forget_worktree_at(repo, target);
+    if cleared {
+        PartialRemoval::Finished
+    } else {
+        PartialRemoval::LeftFiles
+    }
+}
+
+/// Drop git's admin entry for the worktree at `target`, even though a folder
+/// may still sit there. `prune` only drops entries whose folder is gone; a half
+/// deleted folder still exists, so it needs the `valid` override.
+fn forget_worktree_at(repo: &git2::Repository, target: &Path) {
+    let _ = prune(repo);
+    let Ok(names) = repo.worktrees() else {
+        return;
+    };
+    for name in names.iter().flatten().flatten() {
+        let Ok(wt) = repo.find_worktree(name) else {
+            continue;
+        };
+        if !paths_equal(wt.path(), target) {
+            continue;
+        }
+        let mut opts = git2::WorktreePruneOptions::new();
+        // `valid`: prune even though the folder still exists. Not `working_tree`:
+        // deleting the folder already failed, and trying again here would only
+        // fail the same way.
+        opts.valid(true);
+        if let Err(e) = wt.prune(Some(&mut opts)) {
+            log::warn!(
+                "worktree remove: could not forget {}: {e}",
+                target.display()
+            );
+        }
+    }
 }
 
 /// Set a worktree's uncommitted work aside so removing the folder does not
@@ -1109,6 +1184,70 @@ mod tests {
             untracked: 1
         }
         .is_clean());
+    }
+
+    /// A main checkout with one linked worktree, made with the real git.
+    fn repo_with_worktree(dir: &Path) -> Option<(PathBuf, PathBuf)> {
+        let git = |cwd: &Path, args: &[&str]| {
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(cwd)
+                .args(args)
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+        };
+        let main = dir.join("main");
+        std::fs::create_dir_all(&main).ok()?;
+        git(&main, &["init", "-q"])?;
+        git(&main, &["config", "user.email", "t@t.t"])?;
+        git(&main, &["config", "user.name", "t"])?;
+        std::fs::write(main.join("a.txt"), "a").ok()?;
+        git(&main, &["add", "a.txt"])?;
+        git(&main, &["commit", "-qm", "init"])?;
+        let wt = dir.join("wt");
+        git(
+            &main,
+            &["worktree", "add", "-q", "-b", "side", wt.to_str()?],
+        )?;
+        Some((main, wt))
+    }
+
+    /// The reported case: git deleted part of the folder - including the `.git`
+    /// link - then stopped. The leftovers are cleared and git forgets the
+    /// worktree, so nothing keeps fetching a folder that is no longer a repository.
+    #[test]
+    fn a_half_deleted_worktree_is_finished_off() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let Some((main, wt)) = repo_with_worktree(dir.path()) else {
+            return; // git unavailable
+        };
+        std::fs::remove_file(wt.join(".git")).expect("drop the link");
+        let repo = git2::Repository::open(&main).unwrap();
+        assert_eq!(finish_partial_removal(&repo, &wt), PartialRemoval::Finished);
+        assert!(!wt.exists(), "the leftovers are gone");
+        assert!(
+            list(&repo, None)
+                .iter()
+                .all(|w| !paths_equal(Path::new(&w.path), &wt)),
+            "git no longer lists it"
+        );
+    }
+
+    /// A folder that is still a working checkout was not touched by the failed
+    /// removal, so the failure stands and nothing is deleted.
+    #[test]
+    fn an_intact_worktree_is_left_alone() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let Some((main, wt)) = repo_with_worktree(dir.path()) else {
+            return;
+        };
+        let repo = git2::Repository::open(&main).unwrap();
+        assert_eq!(
+            finish_partial_removal(&repo, &wt),
+            PartialRemoval::Untouched
+        );
+        assert!(wt.join("a.txt").exists());
     }
 
     #[test]

@@ -738,6 +738,17 @@ pub async fn git_fetch(
         // only measurement was the frontend's round-trip span -- which cannot tell
         // a slow remote apart from a backed-up IPC queue. See `perf`.
         let _timing = crate::perf::CommandTiming::start("git_fetch", "git.fetch");
+        // A tab whose folder was deleted - a removed worktree, a clone thrown
+        // away - kept being fetched every sweep, failing with "fatal: not a git
+        // repository" forever. Check first and fail with a sentence the sweep
+        // recognises, so it stops asking.
+        if !crate::state::repo_still_there(std::path::Path::new(&path)) {
+            log::info!("fetch: {path} is no longer a repository");
+            return Err(quiet_when_unattended(
+                AppError::Other(crate::state::REPO_GONE.into()),
+                attended,
+            ));
+        }
         run_with_stale_ref_retry(
             &app,
             &repo_id,

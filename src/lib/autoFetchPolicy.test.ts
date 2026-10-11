@@ -4,6 +4,7 @@ import {
   BACKGROUND_FETCH_STAGGER_MS,
   SWEEP_BUDGET,
   isAuthFailure,
+  isMissingRepo,
   staggerFor,
 } from './autoFetchPolicy'
 
@@ -86,5 +87,19 @@ describe('staggerFor', () => {
         BACKGROUND_FETCH_INTERVAL_MS * SWEEP_BUDGET
       )
     }
+  })
+})
+
+describe('isMissingRepo', () => {
+  it.each([
+    "This project's folder is gone or is no longer a git repository. Close its tab, or open the project again if it moved.",
+    'git fetch failed: fatal: not a git repository (or any of the parent directories): .git',
+    "git error: could not find repository at 'C:/Code/copilot-worktrees/EmailService/special-train'; class=Repository (6)",
+  ])('stops the sweep for %s', (message) => {
+    expect(isMissingRepo(message)).toBe(true)
+  })
+
+  it('keeps fetching through an ordinary network failure', () => {
+    expect(isMissingRepo('git fetch failed: Could not resolve host: github.com')).toBe(false)
   })
 })

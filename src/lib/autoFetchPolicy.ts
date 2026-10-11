@@ -89,3 +89,23 @@ export function isAuthFailure(message: string): boolean {
     m.includes('403 forbidden')
   )
 }
+
+/**
+ * Whether an error means the project itself is gone: its folder was deleted, or
+ * a worktree was removed and left part of its folder behind.
+ *
+ * Unlike a network blip this never fixes itself, so the sweep stops checking
+ * the project rather than failing on it every quarter hour for as long as the
+ * tab stays open - which is what one removed worktree did, thirty times and
+ * counting. The backend's own sentence (`state::REPO_GONE`) is matched first;
+ * git's and libgit2's wordings are kept for a build that predates it.
+ */
+export function isMissingRepo(message: string): boolean {
+  const m = message.toLowerCase()
+  return (
+    m.includes("this project's folder is gone") ||
+    m.includes('not a git repository') ||
+    m.includes('could not find repository at') ||
+    m.includes('that folder could not be found')
+  )
+}

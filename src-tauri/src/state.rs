@@ -15,6 +15,19 @@ use crate::error::AppError;
 pub const FOLDER_NOT_FOUND: &str =
     "That folder could not be found. It may have been moved, renamed or deleted.";
 
+/// What the user is told when a project that is open in a tab stops being a
+/// repository underneath the app: its folder was deleted, or a worktree was
+/// removed and left part of its folder behind. Matched by `error::EXPECTED` and
+/// by the auto-fetch sweep, which stops checking the project when it sees it.
+pub const REPO_GONE: &str =
+    "This project's folder is gone or is no longer a git repository. Close its tab, or open the project again if it moved.";
+
+/// Whether `path` still holds a repository git can open. Cheap: it reads `.git`
+/// and HEAD, nothing more.
+pub fn repo_still_there(path: &Path) -> bool {
+    path.exists() && Repository::open(path).is_ok()
+}
+
 /// Files changed, insertions, deletions for one commit.
 pub type ChangeStats = (u32, u32, u32);
 

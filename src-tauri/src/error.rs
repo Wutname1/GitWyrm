@@ -270,6 +270,13 @@ const EXPECTED: &[&str] = &[
     // (commands::remote stopped_responding_message): a hidden sign-in window or
     // a server that stopped answering.
     "stopped responding for",
+    // A project folder that was deleted or stopped being a repository while it
+    // was open - a removed worktree, a deleted clone. The user's to sort out by
+    // closing or re-opening the tab; repeated by every background fetch until
+    // they do.
+    "not a git repository",
+    "could not find repository at",
+    "this project's folder is gone",
 ];
 
 fn is_expected(message: &str) -> bool {
