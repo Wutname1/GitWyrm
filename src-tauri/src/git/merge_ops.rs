@@ -104,6 +104,45 @@ fn operation_kind(repo: &Repository) -> Option<OperationKind> {
     }
 }
 
+/// Put the repo back as it was before a cherry-pick or revert that applied
+/// cleanly but whose commit could not be written (signing, a hook, a locked
+/// ref). Without this the applied changes stay staged with CHERRY_PICK_HEAD or
+/// REVERT_HEAD behind them: no conflicts, so no banner, yet the app reads the
+/// repo as mid-operation and disables every history action (GITWYRM-FRONTEND-1G,
+/// -1H).
+///
+/// Only safe because both callers refuse to start with tracked changes present:
+/// everything in the index and working tree that differs from HEAD came from
+/// the apply. Best-effort -- the commit error is what the user needs to see.
+pub fn abandon_clean_apply(repo: &Repository) {
+    if let Ok(head) = repo.head().and_then(|h| h.peel_to_commit()) {
+        if let Err(e) = repo.reset(head.as_object(), git2::ResetType::Hard, None) {
+            log::warn!("could not undo an applied pick after its commit failed: {e}");
+        }
+    }
+    if let Err(e) = repo.cleanup_state() {
+        log::warn!("could not clear the pick state after its commit failed: {e}");
+    }
+}
+
+/// A plain commit made while a cherry-pick or revert is open finishes it: the
+/// result is the same single-parent commit the operation would have written.
+/// Clearing the state files is what tells the rest of the app the operation is
+/// over. A merge is left alone -- its commit needs the second parent, which
+/// only `commit_merge` adds.
+pub fn finish_single_parent_operation(repo: &Repository) -> Result<(), AppError> {
+    if matches!(
+        repo.state(),
+        git2::RepositoryState::CherryPick
+            | git2::RepositoryState::CherryPickSequence
+            | git2::RepositoryState::Revert
+            | git2::RepositoryState::RevertSequence
+    ) {
+        repo.cleanup_state()?;
+    }
+    Ok(())
+}
+
 /// What the repo is in the middle of, plus every path still conflicted.
 ///
 /// The conflicted paths are read from the index in every case, NOT only while an
@@ -323,4 +362,70 @@ pub fn apply_resolution(
 
     index.write()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod pick_state_tests {
+    use super::*;
+    use std::fs;
+
+    /// A repo with `base` on main and a `feature` branch adding `new.txt`,
+    /// checked out on main with the feature commit cherry-picked into the
+    /// index and working tree but not committed -- the state a failed commit
+    /// write used to leave behind.
+    fn half_picked() -> (tempfile::TempDir, Repository) {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        {
+            fs::write(dir.path().join("base.txt"), "base\n").unwrap();
+            let mut index = repo.index().unwrap();
+            index.add_path(Path::new("base.txt")).unwrap();
+            index.write().unwrap();
+            let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+            let base = repo.commit(Some("HEAD"), &sig, &sig, "base", &tree, &[]).unwrap();
+            let base = repo.find_commit(base).unwrap();
+
+            let mut builder = repo.treebuilder(Some(&tree)).unwrap();
+            let blob = repo.blob(b"new\n").unwrap();
+            builder.insert("new.txt", blob, 0o100644).unwrap();
+            let feature_tree = builder.write().unwrap();
+            let feature_tree = repo.find_tree(feature_tree).unwrap();
+            let feature = repo
+                .commit(None, &sig, &sig, "feature", &feature_tree, &[&base])
+                .unwrap();
+            let feature = repo.find_commit(feature).unwrap();
+            repo.cherrypick(&feature, None).unwrap();
+        }
+        (dir, repo)
+    }
+
+    #[test]
+    fn a_plain_commit_finishes_an_open_pick() {
+        let (_dir, repo) = half_picked();
+        assert_eq!(repo.state(), git2::RepositoryState::CherryPick);
+        finish_single_parent_operation(&repo).unwrap();
+        assert_eq!(repo.state(), git2::RepositoryState::Clean);
+    }
+
+    #[test]
+    fn abandoning_a_clean_apply_puts_everything_back() {
+        let (dir, repo) = half_picked();
+        assert!(dir.path().join("new.txt").exists());
+        abandon_clean_apply(&repo);
+        assert_eq!(repo.state(), git2::RepositoryState::Clean);
+        assert!(!dir.path().join("new.txt").exists());
+        let statuses = repo.statuses(None).unwrap();
+        assert_eq!(statuses.len(), 0);
+    }
+
+    #[test]
+    fn a_merge_is_left_for_commit_merge() {
+        let (_dir, repo) = half_picked();
+        repo.cleanup_state().unwrap();
+        fs::write(repo.path().join("MERGE_HEAD"), format!("{}\n", repo.head().unwrap().target().unwrap())).unwrap();
+        assert_eq!(repo.state(), git2::RepositoryState::Merge);
+        finish_single_parent_operation(&repo).unwrap();
+        assert_eq!(repo.state(), git2::RepositoryState::Merge);
+    }
 }

@@ -20,7 +20,7 @@ import { copyToClipboard } from '@/lib/clipboard'
 import { commitSourceInput } from '@/lib/agentDeskSources'
 import { formatRelativeTime } from '@/lib/gitDisplay'
 import { useStartAgentSession } from '@/hooks/useStartAgentSession'
-import { commands, type CommitEntry, type ResetMode } from '@/lib/bindings'
+import { commands, type CommitEntry, type OperationKind, type ResetMode } from '@/lib/bindings'
 import { useQueryClient } from '@tanstack/react-query'
 import { keys, unwrap } from '@/lib/queryKeys'
 import {
@@ -51,6 +51,14 @@ interface CommitContextMenuProps {
   children: ReactNode
 }
 
+/** What the repo is stuck in the middle of, in the words the top bar uses. */
+const OPERATION_NAME: Record<OperationKind, string> = {
+  Merge: 'merge',
+  CherryPick: 'cherry-pick',
+  Revert: 'revert',
+  Rebase: 'rebase',
+}
+
 type Pending =
   | { kind: 'move' }
   | { kind: 'checkout' }
@@ -76,20 +84,30 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
   const current = branches.data?.local.find((b) => b.is_head)
   const branchName = current?.name ?? 'current'
   const opInProgress = mergeState.data?.merging ?? false
+  const operation = mergeState.data?.operation ?? null
   const isHead = commit.refs.some((r) => r.type === 'head')
+  // A merge commit has more than one parent. Revert, drop and cherry-pick all
+  // need a single parent to work out what the commit changed, and the backend
+  // refuses them -- so they are not offered (GITWYRM-BACKEND-1P/1Q).
+  const isMerge = commit.parent_shas.length > 1
   const historyPending =
     m.cherryPick.isPending ||
     m.reset.isPending ||
     m.moveBranch.isPending ||
     m.revertCommit.isPending ||
     m.dropCommit.isPending
-  const canCherryPick = !opInProgress && !isHead && !historyPending
+  const canCherryPick = !opInProgress && !isHead && !isMerge && !historyPending
   // Moving/resetting to where the branch already is would be a no-op.
   const canRetarget = !opInProgress && !isHead && current != null && !historyPending
   // Revert applies on top of HEAD, so it works on any commit including HEAD.
-  const canRevert = !opInProgress && current != null && !historyPending
+  const canRevert = !opInProgress && current != null && !isMerge && !historyPending
   // Dropping rewrites history below the commit; needs a branch and a clean-ish state.
-  const canDrop = !opInProgress && current != null && !historyPending
+  const canDrop = !opInProgress && current != null && !isMerge && !historyPending
+  // "Go to this commit" and "Undo the commits after this one" are no-ops on the
+  // newest commit, which left no way to take back the commit just made
+  // (GITWYRM-FRONTEND-1H). This steps the branch back one, keeping the changes.
+  const canUndoHead =
+    isHead && commit.parent_shas.length === 1 && !opInProgress && current != null && !historyPending
 
   // A commit can be the tip of more than one branch. Offer remote actions for
   // each that has something to send or get, so the common case -- right-clicking
@@ -119,6 +137,20 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
             {commit.short_sha}
           </ContextMenuLabel>
           <ContextMenuSeparator />
+          {/* Every history action is off while an operation is open. Say why,
+              rather than leaving a menu of greyed items with no reason. */}
+          {opInProgress && operation && (
+            <>
+              <div className="flex gap-2 px-2 py-1.5 text-2xs text-sub">
+                <Info size={13} className="mt-px flex-none text-modified" />
+                <span>
+                  A {OPERATION_NAME[operation]} isn't finished yet. Finish or cancel it from the bar
+                  at the top, then these actions come back.
+                </span>
+              </div>
+              <ContextMenuSeparator />
+            </>
+          )}
           {tipBranches.map((branch) => (
             <BranchRemoteItems
               key={branch.name}
@@ -218,7 +250,7 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
           </ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem
-            disabled={m.rewordCommit.isPending || (!isHead && !canDrop)}
+            disabled={m.rewordCommit.isPending || isMerge || (!isHead && !canDrop)}
             onSelect={(e) => {
               e.preventDefault()
               setPending({ kind: 'reword' })
@@ -227,6 +259,31 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
             <Pencil />
             Edit commit message
           </ContextMenuItem>
+          {isHead && (
+            <ContextMenuItem
+              disabled={!canUndoHead}
+              onSelect={(e) => {
+                e.preventDefault()
+                m.reset.mutate({ sha: commit.parent_shas[0], mode: 'Mixed' })
+              }}
+            >
+              {m.reset.isPending && m.reset.variables?.sha === commit.parent_shas[0] ? (
+                <PendingIndicator />
+              ) : (
+                <RotateCcw />
+              )}
+              <div className="flex flex-col">
+                <span>
+                  {m.reset.isPending && m.reset.variables?.sha === commit.parent_shas[0]
+                    ? 'Taking it back…'
+                    : 'Take back this commit'}
+                </span>
+                <span className="text-2xs text-muted-foreground">
+                  Its changes go back into your files
+                </span>
+              </div>
+            </ContextMenuItem>
+          )}
           <PendingMenuItem
             icon={<Undo2 />}
             label="Undo this commit (revert)"

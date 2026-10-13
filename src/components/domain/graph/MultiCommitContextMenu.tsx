@@ -54,10 +54,13 @@ export function MultiCommitContextMenu({ commits, children }: MultiCommitContext
     m.squashCommits.isPending ||
     m.dropCommits.isPending ||
     m.prefixCommits.isPending
-  const canCherryPick = !opInProgress && !includesHead && !busy
-  const canRevert = !opInProgress && current != null && !busy
+  // Merge commits cannot be picked, reverted, squashed or dropped -- each needs
+  // a single parent to know what the commit changed (GITWYRM-BACKEND-1P/1Q).
+  const includesMerge = commits.some((c) => c.parent_shas.length > 1)
+  const canCherryPick = !opInProgress && !includesHead && !includesMerge && !busy
+  const canRevert = !opInProgress && current != null && !includesMerge && !busy
   // Squash/drop rewrite the branch below the selection; need a branch checked out.
-  const canRewrite = !opInProgress && current != null && !busy
+  const canRewrite = !opInProgress && current != null && !includesMerge && !busy
 
   // Prefill the combined message: the oldest commit's summary stays the
   // summary, the rest are listed in the body oldest-to-newest so nothing is

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { AlertTriangle, GitMerge, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { PendingIndicator } from '@/components/ui/pending-indicator'
@@ -16,6 +17,24 @@ const COPY: Record<OperationKind, { verb: string; finish: string; abort: string 
   Rebase: { verb: 'Rebasing', finish: 'Continue rebase', abort: 'Abort rebase' },
 }
 
+/**
+ * True once `active` has stayed true for `ms` without a break. Lets the banner
+ * tell a pick that is still mid-flight (state files present for a moment while
+ * the commit is written) from one that was left open.
+ */
+function useHeldFor(active: boolean, ms: number): boolean {
+  const [held, setHeld] = useState(false)
+  useEffect(() => {
+    if (!active) {
+      setHeld(false)
+      return
+    }
+    const timer = setTimeout(() => setHeld(true), ms)
+    return () => clearTimeout(timer)
+  }, [active, ms])
+  return held
+}
+
 export function MergeBanner() {
   const repo = useActiveRepo()
   const merge = useMergeState(repo?.id ?? null)
@@ -23,6 +42,24 @@ export function MergeBanner() {
   const openConflict = useUiStore((s) => s.openConflict)
 
   const state = merge.data
+  const gitBusy =
+    m.cherryPick.isPending ||
+    m.cherryPickMany.isPending ||
+    m.revertCommit.isPending ||
+    m.revertMany.isPending ||
+    m.merge.isPending
+  // A pick or revert whose own commit failed is left open with its changes
+  // staged and nothing to resolve. Without the bar there was no way to see
+  // that, or to finish or cancel it, and every history action stayed off
+  // (GITWYRM-FRONTEND-1G, -1H).
+  const leftOpen = useHeldFor(
+    !!state?.merging &&
+      !!state.operation &&
+      state.operation !== 'Rebase' &&
+      state.conflicts.length === 0 &&
+      !gitBusy,
+    1500
+  )
   if (!state?.merging || !state.operation) return null
 
   const isRebase = state.operation === 'Rebase'
@@ -36,7 +73,7 @@ export function MergeBanner() {
   // read the operation's own mid-flight state, sometimes describe a step that
   // already happened. A rebase is the exception: it stops between commits by
   // design and genuinely needs a "continue" control.
-  if (remaining === 0 && !isRebase) return null
+  if (remaining === 0 && !isRebase && !leftOpen) return null
 
   const copy = COPY[state.operation]
   const label = incomingName(state.incoming_label) || 'incoming changes'
@@ -75,6 +112,8 @@ export function MergeBanner() {
             </>
           ) : isRebase ? (
             'All conflicts resolved. Ready to continue.'
+          ) : leftOpen ? (
+            "This didn't finish. Commit the changes to complete it, or cancel to put things back."
           ) : (
             'All conflicts resolved. Ready to commit.'
           )}

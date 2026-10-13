@@ -916,7 +916,7 @@ pub(crate) fn fast_forward_branch_to(
 
         if branch_oid == target_oid {
             return Err(AppError::Other(format!(
-                "{} is already at {}. Nothing to do.",
+                "{} is already up to date with {}.",
                 branch.trim(),
                 target.trim()
             )));
@@ -1209,28 +1209,37 @@ pub async fn revert_commit(
             });
         }
 
-        // Clean revert: commit the inverse as a single-parent commit.
-        let mut index = repo.index()?;
-        let tree_oid = index.write_tree()?;
-        let tree = repo.find_tree(tree_oid)?;
-        let signature = repo.signature()?;
-        let head_commit = repo.head()?.peel_to_commit()?;
-        let summary = commit.summary().ok().flatten().unwrap_or("commit");
-        let message = format!("Revert \"{summary}\"\n\nThis reverts commit {oid}.");
-        // A revert is authored by whoever is reverting, not by the original author.
-        let identity = CommitIdentity {
-            author: signature.clone(),
-            committer: signature,
-        };
-        commit_write::create(
-            &repo,
-            &commit_write::workdir_of(&repo),
-            Some("HEAD"),
-            &identity,
-            &message,
-            &tree,
-            &[&head_commit],
-        )?;
+        // Clean revert: commit the inverse as a single-parent commit. If the
+        // commit cannot be written, undo the apply so the repo is not left
+        // half-reverted.
+        let committed = (|| -> Result<(), AppError> {
+            let mut index = repo.index()?;
+            let tree_oid = index.write_tree()?;
+            let tree = repo.find_tree(tree_oid)?;
+            let signature = repo.signature()?;
+            let head_commit = repo.head()?.peel_to_commit()?;
+            let summary = commit.summary().ok().flatten().unwrap_or("commit");
+            let message = format!("Revert \"{summary}\"\n\nThis reverts commit {oid}.");
+            // A revert is authored by whoever is reverting, not by the original author.
+            let identity = CommitIdentity {
+                author: signature.clone(),
+                committer: signature,
+            };
+            commit_write::create(
+                &repo,
+                &commit_write::workdir_of(&repo),
+                Some("HEAD"),
+                &identity,
+                &message,
+                &tree,
+                &[&head_commit],
+            )?;
+            Ok(())
+        })();
+        if let Err(e) = committed {
+            crate::git::merge_ops::abandon_clean_apply(&repo);
+            return Err(e);
+        }
         repo.cleanup_state()?;
 
         Ok(MergeResult {

@@ -2,6 +2,7 @@ use tauri::State;
 
 use crate::error::AppError;
 use crate::git::commit_write::{self, CommitIdentity};
+use crate::git::merge_ops;
 use crate::git::trailers;
 use crate::state::RepoManager;
 
@@ -84,6 +85,7 @@ pub async fn create_commit(
       };
       let new_oid =
         commit_write::amend_head(&repo, &repo_path, &head_commit, &identity, &message, &tree)?;
+      merge_ops::finish_single_parent_operation(&repo)?;
       return Ok(new_oid.to_string());
     }
 
@@ -109,6 +111,10 @@ pub async fn create_commit(
       &tree,
       &parents,
     )?;
+    // A pick or revert whose own commit failed leaves its state files behind.
+    // Committing the same changes by hand finishes it; without clearing them
+    // the app keeps reading the repo as mid-operation.
+    merge_ops::finish_single_parent_operation(&repo)?;
     Ok(oid.to_string())
   })
   .await
