@@ -167,6 +167,17 @@ pub async fn open_folder_in_file_manager(
     .map_err(|e| AppError::Other(e.to_string()))?
 }
 
+/// What the user reads when the Recycle Bin refuses a file. Matched by the
+/// "wasn't deleted - it couldn't be moved to the" needle in `error::EXPECTED`.
+fn trash_failed_message(path: &str) -> String {
+    let bin = if cfg!(windows) { "Recycle Bin" } else { "Trash" };
+    format!(
+        "{path} wasn't deleted - it couldn't be moved to the {bin}. Close any \
+         program that has it open and try again. If the drive has no {bin}, \
+         delete the file yourself."
+    )
+}
+
 /// Send a file to the OS Recycle Bin / Trash. Recoverable on purpose: the
 /// menu entry sits next to "Discard changes", and an unrecoverable delete a
 /// click away from a routine action is too sharp an edge.
@@ -184,7 +195,14 @@ pub async fn delete_file(
         }
         // Sending to the Recycle Bin goes through a shell API that can block on a
         // slow or network volume.
-        trash::delete(&full).map_err(|e| AppError::Other(e.to_string()))
+        // The shell's own wording ("Some operations were aborted") says nothing
+        // a user can act on. The usual causes are another program holding the
+        // file open, or a drive with no Recycle Bin (network shares, some USB
+        // drives); the file is left where it was either way.
+        trash::delete(&full).map_err(|e| {
+            log::warn!("moving {path} to the Recycle Bin failed: {e}");
+            AppError::Other(trash_failed_message(&path))
+        })
     })
     .await
     .map_err(|e| AppError::Other(e.to_string()))?

@@ -493,3 +493,23 @@ describe('pulling a branch with nothing to pull from', () => {
     expect(c.message).not.toMatch(/<remote>|<branch>/)
   })
 })
+
+describe('routine refusals that are not crashes', () => {
+  it('treats bringing a branch to where it already is as information', () => {
+    const { severity, message } = classifyError(
+      new Error('main is already up to date with origin/main.')
+    )
+    expect(severity).toBe('info')
+    expect(message).toBe('Main is already up to date with origin/main.')
+  })
+
+  it('explains a Recycle Bin refusal instead of the shell wording', () => {
+    const { severity, message } = classifyError(
+      new Error(
+        "notes.xlsx wasn't deleted - it couldn't be moved to the Recycle Bin. Close any program that has it open and try again."
+      )
+    )
+    expect(severity).toBe('warning')
+    expect(message).toMatch(/^Notes\.xlsx wasn't deleted/)
+  })
+})

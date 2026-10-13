@@ -126,6 +126,22 @@ const RULES: Rule[] = [
       'That branch is already open in another worktree. A branch can only be checked out in one folder at a time.',
   },
   {
+    // Bringing a branch up to where it already is -- usually pressed again
+    // before the screen caught up. The backend treats it as expected too
+    // (GITWYRM-BACKEND-1M/1N).
+    match: (r) => r.includes('is already up to date with'),
+    severity: 'info',
+    message: (raw) => sentence(raw),
+  },
+  {
+    // The Recycle Bin or Trash refused a file. Our sentence names the file and
+    // what to do; nothing was deleted (GITWYRM-BACKEND-1J/1K).
+    match: (r) => r.includes("wasn't deleted - it couldn't be moved to the"),
+    severity: 'warning',
+    message: (raw) => sentence(raw),
+    retryable: true,
+  },
+  {
     // "nothing to stash" -- clean working tree. Not a failure.
     match: (r) => r.includes('nothing to stash') || r.includes('class=stash') && r.includes('code=notfound'),
     severity: 'info',

@@ -360,6 +360,15 @@ const EXPECTED: &[&str] = &[
     // (commands::patch STALE_SELECTION). The selection no longer applies; the
     // view refreshes.
     "changed since they were shown",
+    // Bringing a branch up to a commit it already points at
+    // (branch::fast_forward_branch_to) - usually a button pressed again before
+    // the screen caught up. Nothing to fix (GITWYRM-BACKEND-1M/1N).
+    "is already up to date with",
+    // Sending a file to the Recycle Bin or Trash was refused - another program
+    // has it open, or the drive has no Recycle Bin. Our sentence
+    // (file::delete_file TRASH_FAILED); the file is untouched
+    // (GITWYRM-BACKEND-1J/1K).
+    "wasn't deleted - it couldn't be moved to the",
 ];
 
 fn is_expected(message: &str) -> bool {
@@ -425,6 +434,14 @@ impl specta::Type for AppError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn no_op_fast_forwards_and_recycle_bin_refusals_are_expected() {
+        assert!(is_expected("main is already up to date with origin/main."));
+        assert!(is_expected(
+            "notes.xlsx wasn't deleted - it couldn't be moved to the Recycle Bin. Close any program that has it open and try again."
+        ));
+    }
 
     #[test]
     fn remote_refusals_are_expected() {
