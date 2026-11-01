@@ -8348,7 +8348,13 @@ worktrees_setting_touched?: boolean;
  * on regardless of whether the repository has an `openspec/` folder yet, so a
  * repo can be onboarded to OpenSpec from inside the app.
  */
-enable_spec_desk?: boolean; 
+enable_spec_desk?: boolean;
+/**
+ * Opt-in to unfinished features. Off by default, so the Desk window renders
+ * Spec Desk and the Agent Desk (AI harness) UI only appears once someone
+ * asks for it in Settings > Experimental.
+ */
+experimental_features?: boolean;
 /**
  * Which installed AI tool a new Agent Desk chat uses when nothing else
  * says otherwise. Empty means "whatever GitWyrm resolves", which is what

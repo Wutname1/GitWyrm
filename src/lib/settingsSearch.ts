@@ -34,6 +34,7 @@ export const SECTION_LABELS: Record<SettingsSection, string> = {
   ai: 'AI',
   integrations: 'Integrations',
   openspec: 'OpenSpec',
+  experimental: 'Experimental',
   security: 'Security',
   appearance: 'Appearance',
   logs: 'Help & logs',

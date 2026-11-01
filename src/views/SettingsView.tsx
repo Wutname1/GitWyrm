@@ -5,6 +5,7 @@ import {
   Bot,
   CircleHelp,
   FileText,
+  FlaskConical,
   FolderGit2,
   Info,
   NotebookTabs,
@@ -31,6 +32,7 @@ const TITLES: Record<SettingsSection, string> = {
   ai: 'AI',
   integrations: 'Integrations',
   openspec: 'OpenSpec',
+  experimental: 'Experimental',
   security: 'Security',
   appearance: 'Appearance',
   logs: 'Help & logs',
@@ -47,6 +49,7 @@ const SUBTITLES: Partial<Record<SettingsSection, string>> = {
   ai: 'Choose the model that helps write commit messages and summaries.',
   integrations: 'Connect the sites where your code, reviews, and issues live.',
   openspec: 'Choose how GitWyrm works with the openspec folder in your projects.',
+  experimental: 'Turn on features that are still being built. They can change or break.',
   security: 'Manage secure connections, commit proof, and trusted programs.',
   appearance: 'Make GitWyrm comfortable to read and easy to recognize.',
   logs: 'Get useful details when something does not work as expected.',
@@ -63,6 +66,7 @@ const ICONS: Record<SettingsSection, LucideIcon> = {
   ai: Bot,
   integrations: Plug,
   openspec: NotebookTabs,
+  experimental: FlaskConical,
   security: ShieldCheck,
   appearance: Palette,
   logs: FileText,
@@ -107,6 +111,10 @@ const SECTION_BODIES: Record<SettingsSection, React.ComponentType> = {
   })),
   openspec: lazy(async () => ({
     default: (await import('@/components/domain/settings/OpenspecSettings')).OpenspecSettings,
+  })),
+  experimental: lazy(async () => ({
+    default: (await import('@/components/domain/settings/ExperimentalSettings'))
+      .ExperimentalSettings,
   })),
   security: lazy(async () => ({
     default: (await import('@/components/domain/settings/SecuritySettings')).SecuritySettings,

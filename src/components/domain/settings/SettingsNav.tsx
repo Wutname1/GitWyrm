@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   Bot,
   CircleHelp,
+  FlaskConical,
   FolderGit2,
   Info,
   NotebookTabs,
@@ -46,7 +47,10 @@ const NAV_GROUPS: NavGroup[] = [
   },
   {
     label: 'Automation',
-    items: [{ key: 'openspec', label: 'OpenSpec', icon: NotebookTabs }],
+    items: [
+      { key: 'openspec', label: 'OpenSpec', icon: NotebookTabs },
+      { key: 'experimental', label: 'Experimental', icon: FlaskConical },
+    ],
   },
   {
     label: 'Repository',

@@ -770,6 +770,15 @@ interface WorkspaceState {
    */
   enableSpecDesk: boolean;
   /**
+   * Opt-in to unfinished features.
+   *
+   * Off by default. The one thing it currently gates is the Agent Desk (AI
+   * harness) UI: with this off the Desk window renders Spec Desk, which is the
+   * finished surface. Unlike `enableSpecDesk`, absent reads as OFF -- nobody
+   * upgrading has asked for unfinished work.
+   */
+  experimentalFeatures: boolean;
+  /**
    * Which installed AI tool a new Agent Desk chat uses when it has no
    * preference of its own. Empty means "let GitWyrm choose", which is what
    * every chat did before this setting existed.
@@ -1020,6 +1029,7 @@ interface WorkspaceState {
   resolveTagSettings: (path: string | null | undefined) => ResolvedTagSettings;
   setEnableWorktrees: (enabled: boolean) => void;
   setEnableSpecDesk: (enabled: boolean) => void;
+  setExperimentalFeatures: (enabled: boolean) => void;
   setDefaultAgentTool: (tool: string) => void;
   setOpenspecArchiveWithoutAsking: (skip: boolean) => void;
   setOpenspecDeleteWithoutAsking: (skip: boolean) => void;
@@ -1239,6 +1249,7 @@ function toSettings(s: WorkspaceState): Settings {
     enable_worktrees: s.enableWorktrees,
     worktrees_setting_touched: s.worktreesSettingTouched,
     enable_spec_desk: s.enableSpecDesk,
+    experimental_features: s.experimentalFeatures,
     default_agent_tool: s.defaultAgentTool,
     openspec_archive_without_asking: s.openspecArchiveWithoutAsking,
     openspec_delete_without_asking: s.openspecDeleteWithoutAsking,
@@ -1587,6 +1598,7 @@ export const SETTINGS_DEFAULTS = {
   enableWorktrees: false,
   worktreesSettingTouched: false,
   enableSpecDesk: true,
+  experimentalFeatures: false,
   defaultAgentTool: '',
   openspecArchiveWithoutAsking: false,
   openspecDeleteWithoutAsking: false,
@@ -1679,6 +1691,7 @@ export const SETTINGS_GROUPS = {
   ],
   tags: ["tagPushDefault", "tagPushOnCreate", "tagDeleteOnRemote"],
   ai: ["aiInstruction"],
+  experimental: ["experimentalFeatures"],
   openspec: [
     "enableSpecDesk",
     "openspecArchiveCommitTemplate",
@@ -1759,6 +1772,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   enableWorktrees: false,
   worktreesSettingTouched: false,
   enableSpecDesk: true,
+  experimentalFeatures: false,
   defaultAgentTool: '',
   openspecArchiveWithoutAsking: false,
   openspecDeleteWithoutAsking: false,
@@ -2289,6 +2303,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   setEnableSpecDesk: (enabled) => {
     set({ enableSpecDesk: enabled });
+    schedulePersist();
+  },
+  setExperimentalFeatures: (enabled) => {
+    set({ experimentalFeatures: enabled });
     schedulePersist();
   },
   setDefaultAgentTool: (tool) => {
@@ -3234,6 +3252,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         // Absent means on: a settings file written before this flag existed
         // belongs to a user who could already see the Specs surfaces.
         enableSpecDesk: settings.enable_spec_desk !== false,
+        // Absent means OFF, the opposite of the line above: an upgrade must not
+        // hand someone an unfinished UI they never asked for.
+        experimentalFeatures: settings.experimental_features === true,
         // Loaded, not just saved. `toSettings` writes this unconditionally,
         // so without reading it back the state stayed at its empty default
         // and the next unrelated settings change wrote that empty value over
@@ -3375,6 +3396,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         ? (settings.default_editor as EditorKind)
         : DEFAULT_EDITOR,
       enableSpecDesk: settings.enable_spec_desk !== false,
+      experimentalFeatures: settings.experimental_features === true,
       defaultAgentTool: settings.default_agent_tool ?? '',
       openspecArchiveWithoutAsking:
         settings.openspec_archive_without_asking === true,

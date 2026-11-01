@@ -356,6 +356,18 @@ pub struct Settings {
     /// repo can be onboarded to OpenSpec from inside the app.
     #[serde(default = "default_enable_spec_desk")]
     pub enable_spec_desk: bool,
+    /// Opt-in to unfinished features. Off by default, so the Desk window renders
+    /// Spec Desk and the Agent Desk (AI harness) UI only appears once someone
+    /// asks for it in Settings > Experimental.
+    //
+    // Plain `#[serde(default)]` -- false -- rather than a named default
+    // function, because here "absent" and "off" genuinely mean the same thing:
+    // an existing settings file was written by someone who never opted in, and
+    // a fresh install has not either. Contrast `enable_spec_desk`, whose absence
+    // has to read as ON so an upgrade does not take an existing surface away.
+    // Kept as a non-doc comment so the exported TS binding stays short.
+    #[serde(default)]
+    pub experimental_features: bool,
     /// Which installed AI tool a new Agent Desk chat uses when nothing else
     /// says otherwise. Empty means "whatever GitWyrm resolves", which is what
     /// every chat did before this existed.
@@ -828,6 +840,7 @@ impl Default for Settings {
             enable_worktrees: false,
             worktrees_setting_touched: false,
             enable_spec_desk: default_enable_spec_desk(),
+            experimental_features: false,
             default_agent_tool: String::new(),
             openspec_archive_without_asking: false,
             worktree_branch_cleanup: default_worktree_branch_cleanup(),

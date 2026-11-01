@@ -19,9 +19,12 @@ import { useActiveRepo, useWorkspaceStore } from '@/stores/workspaceStore'
  * who don't plan this way turn the whole feature off in Settings > OpenSpec,
  * which takes the button away entirely.
  *
- * "Spec Desk" is renamed to "Agent Desk" in every user-facing string here,
- * but the persisted setting key (`enableSpecDesk`/`enable_spec_desk`) and the
- * `openSpecDesk` function name stay as-is -- see `src/lib/specDesk.ts`.
+ * The name follows what the window will actually render: "Agent Desk" only when
+ * experimental features are on, otherwise "Spec Desk". Labelling it Agent Desk
+ * unconditionally would promise the AI harness to everyone, and the harness is
+ * off by default. The persisted setting key (`enableSpecDesk`/
+ * `enable_spec_desk`) and the `openSpecDesk` function name stay as-is -- see
+ * `src/lib/specDesk.ts`.
  */
 export function OpenSpecDeskButton({
   disabled,
@@ -33,6 +36,8 @@ export function OpenSpecDeskButton({
 }) {
   const repo = useActiveRepo()
   const specDeskEnabled = useWorkspaceStore((s) => s.enableSpecDesk)
+  const experimentalFeatures = useWorkspaceStore((s) => s.experimentalFeatures)
+  const deskName = experimentalFeatures ? 'Agent Desk' : 'Spec Desk'
   // App-wide on purpose, not scoped to the open repo: the Desk is one window
   // for every project, so a run finishing in another project still has to be
   // able to reach the person. This button is the only thing permanently on
@@ -47,9 +52,15 @@ export function OpenSpecDeskButton({
       <TooltipButton
         onClick={() => repo && void openSpecDesk(repo.id)}
         tooltip={
-          disabled && disabledReason ? disabledReason : activity.tone ? `Agent Desk -- ${activity.label}` : 'Open Agent Desk'
+          disabled && disabledReason
+            ? disabledReason
+            : activity.tone
+              ? `${deskName} -- ${activity.label}`
+              : `Open ${deskName}`
         }
-        aria-label={activity.tone ? `Open Agent Desk, ${activity.label}` : 'Open Agent Desk'}
+        aria-label={
+          activity.tone ? `Open ${deskName}, ${activity.label}` : `Open ${deskName}`
+        }
         disabled={disabled}
         className={cn(
           'group relative flex h-[30px] w-8 items-center justify-center rounded-md border border-border bg-panel2 text-sub hover:border-muted-foreground hover:bg-panel3 disabled:pointer-events-none',

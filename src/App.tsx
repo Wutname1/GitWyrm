@@ -571,7 +571,14 @@ function SpecDeskRoot() {
   // run/session listeners) but renders the real Agent Desk shell instead of
   // the Spec Desk UI. `useAgentSessionListener` is mounted once above, in
   // `SpecDeskRoot`, so `AgentDeskView` itself never subscribes again.
-  const isAgentDesk = readWindowMode().kind === 'agent-desk'
+  // The Agent Desk is the AI harness, and it is not finished, so it sits behind
+  // the experimental switch in Settings. The backend opens this window with
+  // `?window=agent-desk` either way (see commands/spec_desk.rs); gating on the
+  // setting here rather than on the URL means the opener does not have to know
+  // which UI is current, and flipping the switch changes what the already-open
+  // window renders. Off is the default, so an ordinary user gets Spec Desk.
+  const experimentalFeatures = useWorkspaceStore((s) => s.experimentalFeatures)
+  const isAgentDesk = readWindowMode().kind === 'agent-desk' && experimentalFeatures
 
   return (
     <>
