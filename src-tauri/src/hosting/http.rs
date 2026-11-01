@@ -381,7 +381,15 @@ pub async fn send_via_gh(
         return match try_gh(&fallback).await {
             Some(Ok(res)) => Ok(res),
             Some(Err(e)) => Err(e),
-            None => Err(AppError::Other(remembered)),
+            // `Unattended`, not `Other`: this is a refusal we have ALREADY
+            // reported once. The cooldown saved the round trip but still
+            // returned an error-level failure, so every suppressed call filed
+            // its own Sentry event -- 22 of them in two days for one suspended
+            // account, and ~20 inside a single second on 0.13.3-beta.1
+            // (GITWYRM-BACKEND-26). The user still sees the same sentence; only
+            // the log level drops, which is what the variant is for. The first,
+            // genuine refusal is recorded by `send_raw` below and still reports.
+            None => Err(AppError::Unattended(remembered)),
         };
     }
 
@@ -506,7 +514,10 @@ pub async fn send(
     // Repo tabs, PR lists and issue counts all fan out to the same host, so
     // without this one refusal became dozens of identical failing requests.
     if let Some(remembered) = cooled_down(host) {
-        return Err(AppError::Other(remembered));
+        // Already reported once when it was first refused; see the matching note
+        // in `send_via_gh`. Suppressing the request but not the event left the
+        // cooldown saving a round trip and nothing else.
+        return Err(AppError::Unattended(remembered));
     }
     let checked = send_raw(builder, host, message_keys).await;
     if let Err(AppError::Other(message)) = &checked {

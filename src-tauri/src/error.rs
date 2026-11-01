@@ -369,6 +369,32 @@ const EXPECTED: &[&str] = &[
     // (file::delete_file TRASH_FAILED); the file is untouched
     // (GITWYRM-BACKEND-1J/1K).
     "wasn't deleted - it couldn't be moved to the",
+    // Git refusing to start one operation while another is open. The user
+    // finishes or cancels the first; the merge banner says how
+    // (GITWYRM-BACKEND-1X/1Y, -21/-22).
+    "you have not concluded your merge",
+    "exiting because of unfinished merge",
+    "resolve all conflicts before continuing the rebase",
+    "resolve all conflicts before committing",
+    // A conflicted merge or pull, in git's own words. Note the SINGULAR
+    // "conflict": the existing "merge conflicts" needle never matched git's
+    // output, only our own phrasing, so a routine conflicted pull still filed a
+    // report (GITWYRM-BACKEND-25).
+    "merge conflict in",
+    "automatic merge failed",
+    // `push.default = simple` refusing to guess a remote branch name. The user
+    // picks one; nothing is broken (GITWYRM-BACKEND-1S/1T).
+    "the upstream branch of your current branch does not match",
+    // Dropping a merge commit. Git cannot know which parent to keep, so it
+    // declines - a limit of the operation, not a fault (GITWYRM-BACKEND-1P/1Q).
+    "only commits with a single parent can be dropped",
+    // The git CLI's wording for "your credentials do not grant access to this
+    // repository" on a push or pull. Deliberately matched on git's own sentence
+    // rather than on "403" alone: our hosting layer phrases a refused API call
+    // as "<host> refused: ...", which must keep reporting, and a suspended
+    // account is the highest-volume genuine issue in this project
+    // (GITWYRM-BACKEND-1V/1W, -27; contrast -26, which stays reportable).
+    "requested url returned error: 403",
 ];
 
 fn is_expected(message: &str) -> bool {

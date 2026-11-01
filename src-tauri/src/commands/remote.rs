@@ -142,6 +142,10 @@ fn failure_detail(stderr_lines: &[String], stdout: &str) -> String {
             || low.starts_with("enumerating objects")
             || low.starts_with("everything up-to-date")
             || low.starts_with("already up to date")
+            // A merge narrating which files it is combining. Progress, not a
+            // cause -- and it is the FIRST thing a conflicted pull prints, which
+            // is how it ended up as an issue title (GITWYRM-BACKEND-25).
+            || low.starts_with("auto-merging")
     };
 
     // Lines git or the server explicitly tag are the real cause when present. The
@@ -202,11 +206,40 @@ fn failure_detail(stderr_lines: &[String], stdout: &str) -> String {
         return strip_remote(line).to_string();
     }
 
-    stderr_lines
-        .iter()
+    if let Some(line) = stderr_lines.iter().rev().find(|l| !is_noise(l)) {
+        return strip_remote(line).to_string();
+    }
+
+    // Nothing usable on stderr at all. A conflicted pull whose refs the
+    // background fetch sweep had already brought down prints nothing there and
+    // says everything on stdout, so returning `stdout.trim()` handed back the
+    // WHOLE stream and the issue title became its first line: "git pull failed:
+    // Auto-merging <path>" (GITWYRM-BACKEND-25). That is progress narration, not
+    // a cause, and it carries none of the words the classifier matches -- so an
+    // ordinary conflicted pull was filed as a crash.
+    //
+    // Same ranking idea as stderr: the per-file `CONFLICT (...)` line names what
+    // actually clashed, and git's closing "Automatic merge failed" summary is the
+    // weaker fallback.
+    let stdout_cause = stdout
+        .lines()
+        .find(|l| l.to_lowercase().contains("conflict ("))
+        .or_else(|| {
+            stdout
+                .lines()
+                .find(|l| l.to_lowercase().contains("automatic merge failed"))
+        });
+    if let Some(line) = stdout_cause {
+        return line.trim().to_string();
+    }
+
+    // One line, not the whole stream. Last non-noise, matching git's habit of
+    // putting the summary last, and matching the stderr branch above.
+    stdout
+        .lines()
         .rev()
         .find(|l| !is_noise(l))
-        .map(|l| strip_remote(l).to_string())
+        .map(|l| l.trim().to_string())
         .unwrap_or_else(|| stdout.trim().to_string())
 }
 
