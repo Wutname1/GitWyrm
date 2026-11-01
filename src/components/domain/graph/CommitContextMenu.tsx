@@ -151,6 +151,23 @@ export function CommitContextMenu({ commit, onViewDetails, children }: CommitCon
               <ContextMenuSeparator />
             </>
           )}
+          {/* The other way every history action goes grey: `current` is the
+              checked-out BRANCH, and on a detached HEAD there isn't one, so
+              revert, drop, retarget and undo all fall false at once. The block
+              above only covers an in-progress operation, so this case was a menu
+              of dead items with no explanation -- and "Check out this commit" is
+              offered freely right below, which is how people land here. */}
+          {!opInProgress && !current && (
+            <>
+              <div className="flex gap-2 px-2 py-1.5 text-2xs text-sub">
+                <Info size={13} className="mt-px flex-none text-modified" />
+                <span>
+                  You aren't on a branch right now. Check out a branch to use the history actions.
+                </span>
+              </div>
+              <ContextMenuSeparator />
+            </>
+          )}
           {tipBranches.map((branch) => (
             <BranchRemoteItems
               key={branch.name}

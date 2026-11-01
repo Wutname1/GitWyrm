@@ -33,7 +33,14 @@ export function SpecChip({ repoId, changeId, progress }: SpecChipProps) {
           }}
           className={cn(
             'flex max-w-[220px] shrink-0 items-center gap-1 rounded border px-1.5 py-px text-2xs',
-            'border-primary/40 bg-soft text-accent-text hover:bg-primary/20',
+            // An opaque surface, not `bg-soft`. That token is the accent at 13%
+            // alpha (16% in light), and this chip renders inside the commit
+            // MESSAGE cell, on top of the row's own alternating tint -- so the
+            // fill was nearly invisible and the id competed with whatever text
+            // it overlapped. Reported as "the tag bubble is not readable when it
+            // extends over the commit message". The accent stays as the border
+            // and the text, which is what identified it as a spec chip anyway.
+            'border-primary/40 bg-panel2 text-accent-text hover:bg-primary/20',
           )}
         >
           <Tag size={9} className="shrink-0" />
