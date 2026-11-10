@@ -109,37 +109,25 @@ async fn fetch_raw(app: &tauri::AppHandle) -> Result<String, AppError> {
 
     // A fresh device has no cache to fall back on, so a single blip would leave
     // the user with no providers at all. Retry briefly before giving up.
+    //
+    // The body is read inside the retry: the catalog is several megabytes, and a
+    // download cut off partway ("error decoding response body") is the common
+    // failure on a slow link (GITWYRM-BACKEND-28). The timeout covers the whole
+    // transfer, so it is sized for the download, not just the handshake.
     let http = reqwest::Client::new();
-    // Each attempt is already bounded by its own timeout, which paces the retries.
-    let mut fetched = Err(None);
+    let mut fetched: Result<String, String> = Err("model catalog request never ran".to_string());
     for _ in 0..3u32 {
-        match http
-            .get(CATALOG_URL)
-            .timeout(Duration::from_secs(15))
-            .send()
-            .await
-            .and_then(reqwest::Response::error_for_status)
-        {
-            Ok(res) => {
-                fetched = Ok(res);
+        match download(&http).await {
+            Ok(body) => {
+                fetched = Ok(body);
                 break;
             }
-            Err(e) => fetched = Err(Some(e)),
+            Err(e) => fetched = Err(e.to_string()),
         }
     }
-    let fetched = fetched.map_err(|e| {
-        e.map_or_else(
-            || "model catalog request never ran".to_string(),
-            |e| e.to_string(),
-        )
-    });
 
     match fetched {
-        Ok(res) => {
-            let body = res
-                .text()
-                .await
-                .map_err(|e| AppError::Other(format!("failed to read model catalog: {e}")))?;
+        Ok(body) => {
             // A failed cache write means every AI action pays a live round-trip;
             // log it so that slowdown is diagnosable instead of invisible.
             if let Err(e) = fs::write(&path, &body) {
@@ -151,6 +139,16 @@ async fn fetch_raw(app: &tauri::AppHandle) -> Result<String, AppError> {
         Err(e) => fs::read_to_string(&path)
             .map_err(|_| AppError::Other(format!("failed to fetch model catalog: {e}"))),
     }
+}
+
+async fn download(http: &reqwest::Client) -> reqwest::Result<String> {
+    http.get(CATALOG_URL)
+        .timeout(Duration::from_secs(60))
+        .send()
+        .await?
+        .error_for_status()?
+        .text()
+        .await
 }
 
 fn parse(raw: &str) -> Result<Vec<CatalogProvider>, AppError> {
