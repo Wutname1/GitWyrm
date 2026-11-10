@@ -823,11 +823,26 @@ fn quiet_when_unattended(e: AppError, attended: Attended) -> AppError {
 /// always safe (the next fetch recreates it), which is not true of any other
 /// ref, so anything else stays a real error.
 fn stale_remote_ref(message: &str) -> Option<String> {
+    locked_ref_name(message)
+        .or_else(|| batched_ref_name(message))
+        .filter(|name| name.starts_with("refs/remotes/"))
+}
+
+/// Older git: `cannot lock ref 'refs/remotes/origin/main': is at X but expected Y`.
+fn locked_ref_name(message: &str) -> Option<String> {
     let rest = message.split("cannot lock ref '").nth(1)?;
     // Require the closing quote: without it the message was truncated, and
     // `split` would otherwise hand back the remainder as if it were a ref name.
-    let name = rest.split_once('\'')?.0;
-    name.starts_with("refs/remotes/").then(|| name.to_string())
+    Some(rest.split_once('\'')?.0.to_string())
+}
+
+/// Newer git, which updates fetched refs as one batch, reports the same
+/// disagreement as `fetching ref refs/remotes/origin/main failed: incorrect old
+/// value provided`, with no quotes around the name (GITWYRM-BACKEND-29).
+fn batched_ref_name(message: &str) -> Option<String> {
+    let (head, _) = message.split_once(" failed: incorrect old value provided")?;
+    let name = head.rsplit("fetching ref ").next()?;
+    (!name.is_empty() && !name.contains(char::is_whitespace)).then(|| name.to_string())
 }
 
 /// Run a network operation, and if it is blocked by a stale remote-tracking
@@ -2302,6 +2317,26 @@ mod tests {
         // A malformed message must not yield a half-parsed ref name.
         assert_eq!(
             stale_remote_ref("cannot lock ref 'refs/remotes/origin/main"),
+            None
+        );
+    }
+
+    /// Git's batched ref updates word the same stale ref without quotes. This is
+    /// the message a pull reported verbatim (GITWYRM-BACKEND-29).
+    #[test]
+    fn a_stale_ref_is_recognized_in_gits_batched_wording() {
+        assert_eq!(
+            stale_remote_ref(
+                "git pull failed: error: fetching ref refs/remotes/origin/main failed: incorrect old value provided"
+            ),
+            Some("refs/remotes/origin/main".to_string())
+        );
+        assert_eq!(
+            stale_remote_ref("error: fetching ref refs/tags/v1 failed: incorrect old value provided"),
+            None
+        );
+        assert_eq!(
+            stale_remote_ref("error: fetching ref  failed: incorrect old value provided"),
             None
         );
     }
