@@ -626,7 +626,18 @@ pub async fn delete_branch(
         let repo = open.repo.lock().unwrap();
         let name = name.trim();
         reject_remote_qualified(&repo, name, "delete")?;
-        let mut branch = repo.find_branch(name, BranchType::Local)?;
+        // Already gone - removed with its worktree, or from another window while
+        // the menu was open. What the user asked for is true, so say it worked
+        // rather than surface libgit2's "cannot locate local branch"
+        // (GITWYRM-BACKEND-1G).
+        let mut branch = match repo.find_branch(name, BranchType::Local) {
+            Ok(branch) => branch,
+            Err(e) if e.code() == git2::ErrorCode::NotFound => {
+                log::info!("delete_branch: '{name}' was already gone");
+                return Ok(BranchDeleteOutcome::Deleted);
+            }
+            Err(e) => return Err(e.into()),
+        };
         if branch.is_head() {
             return Err(AppError::Other(
                 "that is the branch you're on; switch to another branch first".into(),
