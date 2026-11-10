@@ -64,7 +64,7 @@ notify-debouncer-full = "0.7"
 # (`opencode.db`), not flat files -- read-only, opened with SQLITE_OPEN_READ_ONLY
 # (see agentdesk/adapters/opencode.rs). `bundled` avoids depending on a
 # system SQLite install/version.
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 # Parses .gitignore chains into a fast, lock-free matcher so the file watcher can
 # skip ignored paths without contending with the repo lock that git status holds.
 ignore = "0.4"
@@ -73,7 +73,7 @@ specta-typescript = "0.0.9"
 tauri-specta = { version = "=2.0.0-rc.21", features = ["derive", "typescript"] }
 # Minor-pinned: commands/updates.rs configures the plugin's reqwest client, and
 # the plugin may move to a new reqwest in a minor release.
-tauri-plugin-updater = "~2.13.1"
+tauri-plugin-updater = "~2.14.1"
 tauri-plugin-process = "2.4.0"
 # 0.13 moved `form` (and `query`) behind opt-in features, and renamed the TLS
 # feature `rustls-tls` -> `rustls`. The device-flow calls in ai/copilot.rs post
@@ -87,7 +87,7 @@ http = "1"
 # providers can live behind one `&dyn` list.
 async-trait = "0.1"
 image = { version = "0.25", default-features = false, features = ["gif", "ico", "jpeg", "png", "webp"] }
-sentry = { version = "0.49.3", default-features = false, features = [
+sentry = { version = "0.49.5", default-features = false, features = [
   "backtrace",
   "contexts",
   "panic",
@@ -100,7 +100,7 @@ sentry = { version = "0.49.3", default-features = false, features = [
 ] }
 # Bridges `log::error!`/`warn!` into Sentry events. Without this the backend
 # only ever reports panics, so command failures stayed local to gitwyrm.log.
-sentry-log = { version = "0.49.3", features = ["logs"] }
+sentry-log = { version = "0.49.5", features = ["logs"] }
 # Reopens the folder in the running app when Explorer's "Open with GitWyrm"
 # launches a second process, instead of starting a duplicate window.
 tauri-plugin-single-instance = "2"
@@ -114,10 +114,10 @@ tauri-plugin-single-instance = "2"
 # copy it fails with BinaryNotFound unless COPILOT_CLI_PATH is set. The cost is
 # real -- it takes the release binary from 20.3 MB to 114.5 MB -- but turning it
 # off produces a build that cannot run.
-github-copilot-sdk = "1.0.16"
-liblzma = { version = "0.4.8", features = ["static"] }
+github-copilot-sdk = "1.0.31"
+liblzma = { version = "0.4.9", features = ["static"] }
 tar = "0.4.46"
-sha2 = "0.11.0"
+sha2 = "0.11.1"
 
 # Explorer's right-click entry is a set of HKCU registry verbs, so the app can
 # add and remove it without elevation.

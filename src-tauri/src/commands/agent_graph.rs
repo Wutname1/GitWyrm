@@ -1662,7 +1662,7 @@ fn executable_of(mode: git2::FileMode) -> FileExecutable {
 /// been written there, and from the WORKING DIRECTORY when it has not.
 ///
 /// This second case is the whole shipped path: `diff_tree_to_workdir_with_index`
-/// reports an unstaged edit with `id() == Oid::zero()`, because the new bytes
+/// reports an unstaged edit with `id() == Oid::ZERO_SHA1`, because the new bytes
 /// only exist on disk -- nothing has hashed them into the ODB yet. Helpers
 /// never stage or commit, so EVERY change they make arrives this way. Reading
 /// only blobs (and skipping zero OIDs) silently dropped all of it.
@@ -1671,7 +1671,7 @@ fn content_for_delta_side(
     file: &git2::DiffFile,
 ) -> Option<FileContent> {
     let executable = executable_of(file.mode());
-    if file.id() != git2::Oid::zero() {
+    if file.id() != git2::Oid::ZERO_SHA1 {
         return if file.mode() == git2::FileMode::Link {
             read_symlink_target(repo, file.id())
         } else {

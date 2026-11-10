@@ -48,12 +48,24 @@ export function initSentry(level: TelemetryLevel) {
     dsn: 'https://a2cb101567f5cec264a9a0b43e6f8c24@o4511760230907904.ingest.us.sentry.io/4511769575948288',
     release: __APP_VERSION__,
     environment: 'alpha',
-    sendDefaultPii: false,
+    // Collect no personal data. SDK 11 replaced `sendDefaultPii: false` with
+    // per-category switches whose defaults are ON, so each one is turned off.
+    dataCollection: {
+      userInfo: false,
+      cookies: false,
+      httpHeaders: false,
+      httpBodies: [],
+      urlQueryParams: false,
+      genAI: { inputs: false, outputs: false },
+      mcp: { inputs: false, outputs: false },
+    },
 
     // ALPHA: forward console logs and `log.*` calls to Sentry's Logs product.
     // Usage telemetry, not crash reporting: these are the running commentary of
     // a working session, not a failure, so they follow the telemetry opt-out.
-    enableLogs: diagnostics,
+    // SDK 11 dropped `enableLogs` (logs are always on), so the opt-out drops
+    // them here instead.
+    beforeSendLog: (entry) => (diagnostics ? entry : null),
 
     integrations: diagnostics
       ? [
@@ -71,13 +83,15 @@ export function initSentry(level: TelemetryLevel) {
     // 0.1-0.2 before any real launch, or the free-plan performance quota burns
     // out fast. 0.0 leaves every transaction unsampled, so none is sent.
     tracesSampleRate: diagnostics ? 1.0 : 0.0,
-    // ALPHA: profile 100% of the traces we sample (multiplies tracesSampleRate).
-    profilesSampleRate: diagnostics ? 1.0 : 0.0,
+    // ALPHA: profile every session, while a sampled trace is running. SDK 11
+    // replaced the per-transaction `profilesSampleRate` with this pair.
+    profileSessionSampleRate: diagnostics ? 1.0 : 0.0,
+    profileLifecycle: 'trace',
 
     // Keep a rolling window of the user's recent actions on every event.
     maxBreadcrumbs: 100,
 
-    // `sendDefaultPii: false` does NOT touch event payloads: an exception
+    // `dataCollection` does NOT touch event payloads: an exception
     // message, a breadcrumb, or a request URL still
     // carries whatever text it was built from. Scrub both on the way out, since
     // error strings here routinely embed repo paths, author emails, and - when a

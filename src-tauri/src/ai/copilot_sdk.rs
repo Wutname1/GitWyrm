@@ -60,6 +60,7 @@ pub async fn list_models(github_token: &str) -> Result<Vec<CatalogModel>, AppErr
         .list_with_params(ModelsListRequest {
             git_hub_token: Some(github_token.to_string()),
             selection_id: None,
+            streamer_mode: None,
         })
         .await;
     client.stop().await.ok();
@@ -138,6 +139,7 @@ pub async fn list_models_detailed(github_token: &str) -> Result<Vec<CopilotModel
         .list_with_params(ModelsListRequest {
             git_hub_token: Some(github_token.to_string()),
             selection_id: None,
+            streamer_mode: None,
         })
         .await;
     client.stop().await.ok();
