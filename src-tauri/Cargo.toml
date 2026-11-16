@@ -64,7 +64,7 @@ notify-debouncer-full = "0.7"
 # (`opencode.db`), not flat files -- read-only, opened with SQLITE_OPEN_READ_ONLY
 # (see agentdesk/adapters/opencode.rs). `bundled` avoids depending on a
 # system SQLite install/version.
-rusqlite = { version = "0.41", features = ["bundled"] }
+rusqlite = { version = "0.42", features = ["bundled"] }
 # Parses .gitignore chains into a fast, lock-free matcher so the file watcher can
 # skip ignored paths without contending with the repo lock that git status holds.
 ignore = "0.4"
